@@ -1,24 +1,32 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      3.8
-// @description  Per-game scoring with DLC/package handling, wishlist + bundle-cost valuation, split review metrics, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
+// @version      4.0.1
+// @description  Per-game scoring with DLC/package handling, side evaluation panel, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
-// @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/bundle-barter-scorer/barter-bundle-scorer.meta.js
-// @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/bundle-barter-scorer/barter-bundle-scorer.user.js
+// @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/barter-bundle-scorer/barter-bundle-scorer.meta.js
+// @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/barter-bundle-scorer/barter-bundle-scorer.user.js
 // @grant        GM_addStyle
 // @run-at       document-idle
 // ==/UserScript==
 (function () {
   'use strict';
-  console.log('[BVG Scorer] v3.8 loaded on', location.href);
+  console.log('[BVG Scorer] v4.0.1 loaded on', location.href);
   // ═══════════════════════════════════════
   // STYLES (GM_addStyle bypasses CSP)
   // ═══════════════════════════════════════
   GM_addStyle(`
+    /* ── Layout: use full width + room for side panel ── */
+    html, body { max-width: none !important; }
+    body { padding-right: 360px !important; }
+    .container, .container-fluid, .wrap, main {
+      width: 100% !important;
+      max-width: none !important;
+    }
+
     /* ── Table layout: widen title column ── */
     table.collection { table-layout: auto !important; width: 100% !important; }
     table.collection th.cTitles,
@@ -28,18 +36,27 @@
     }
     /* ── Banner ── */
     #bvg-scorer-banner {
-      position: sticky; top: 0; z-index: 9999;
+      position: fixed;
+      top: 14px;
+      right: 14px;
+      width: 332px;
+      z-index: 9999;
       background: linear-gradient(180deg, #0d1117 0%, #111820 100%);
-      border-bottom: 1px solid #1f2937;
-      padding: 10px 20px 8px;
+      border: 1px solid #1f2937;
+      border-radius: 12px;
+      padding: 12px 14px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
       font-size: 13px; line-height: 1.5;
       color: #c9d1d9;
       box-shadow: 0 2px 12px rgba(0,0,0,.4);
+      max-height: calc(100vh - 28px);
+      overflow: auto;
     }
     #bvg-scorer-banner strong { color: #e6edf3; }
     #bvg-scorer-banner .bvg-row {
-      display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
     }
     /* ── Stat badges ── */
     #bvg-scorer-banner .bvg-stat {
@@ -71,7 +88,7 @@
       letter-spacing: .5px; opacity: .55; font-weight: 600;
     }
     #bvg-scorer-banner .bvg-picks {
-      margin-top: 5px; font-size: 12px; line-height: 1.6;
+      margin-top: 8px; font-size: 12px; line-height: 1.55;
     }
     #bvg-scorer-banner .bvg-picks strong { margin-right: 4px; }
     #bvg-scorer-banner .bvg-pick-name {
@@ -81,8 +98,15 @@
       opacity: .45; font-size: 11px; font-weight: 400;
     }
     #bvg-scorer-banner .bvg-meta {
-      opacity: .4; margin-top: 4px; font-size: 10px;
+      opacity: .55; margin-top: 8px; font-size: 10px;
       letter-spacing: .2px;
+    }
+    #bvg-scorer-banner .bvg-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .7px;
+      color: #8b949e;
+      margin-bottom: 8px;
     }
     /* ── Score cells ── */
     td.bvg-score-cell {
@@ -119,18 +143,6 @@
       font-weight: 400 !important;
       text-shadow: none;
       opacity: .6;
-    }
-    /* ── Review split cells ── */
-    td.bvg-review-cell,
-    th.bvg-review-header {
-      text-align: center;
-      font-variant-numeric: tabular-nums;
-      min-width: 62px;
-      white-space: nowrap;
-    }
-    td.bvg-review-cell {
-      color: #8b949e;
-      font-size: 12px;
     }
     /* ── Score header ── */
     th.bvg-score-header {
@@ -189,6 +201,23 @@
       border-color: #58a6ff;
       background: #1a2332;
     }
+
+    @media (max-width: 1300px) {
+      body { padding-right: 0 !important; }
+      #bvg-scorer-banner {
+        position: sticky;
+        top: 0;
+        right: auto;
+        width: auto;
+        max-height: none;
+        border-radius: 0;
+        border-left: 0;
+        border-right: 0;
+      }
+      #bvg-scorer-banner .bvg-row {
+        grid-template-columns: repeat(2, minmax(120px, 1fr));
+      }
+    }
   `);
   // ═══════════════════════════════════════
   // SETTINGS
@@ -214,7 +243,7 @@
   function saveSettings(s) { localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(s)); }
   let SETTINGS = loadSettings();
   let CURRENT_BUNDLE_COST = null;
-  const INJECTED_COLUMNS = 3; // score + reviews + steam rating
+  const INJECTED_COLUMNS = 1; // score only (reviews + rating already exist in table)
   // ═══════════════════════════════════════
   // MATH
   // ═══════════════════════════════════════
@@ -615,6 +644,7 @@
       .map(p => `<span class="bvg-pick-name" style="color:${scoreColor(p.score)}">${p.title}</span> <span class="bvg-pick-score">${p.score.toFixed(1)}</span>`)
       .join(' &middot; ');
     banner.innerHTML = `
+      <div class="bvg-title">Bundle Evaluation v4.0.1</div>
       <div class="bvg-row">
         ${statBadge('Bundle', bundleRating, `top ${SETTINGS.topNMain}`)}
         ${statBadge('Depth', depthRating, `top ${SETTINGS.topNDepth}`)}
@@ -646,16 +676,6 @@
   function ensureScoreHeader(table) {
     const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
     if (!headerRow || headerRow.querySelector('.bvg-score-header')) return;
-
-    const ratingTh = document.createElement('th');
-    ratingTh.textContent = 'Steam %';
-    ratingTh.className = 'bvg-review-header';
-    headerRow.prepend(ratingTh);
-
-    const reviewsTh = document.createElement('th');
-    reviewsTh.textContent = 'Reviews';
-    reviewsTh.className = 'bvg-review-header';
-    headerRow.prepend(reviewsTh);
 
     const th = document.createElement('th');
     th.textContent = 'Score';
@@ -723,18 +743,7 @@
         clearScoreCells();
         run();
       });
-      const reviewsTd = document.createElement('td');
-      reviewsTd.className = 'bvg-review-cell';
-      reviewsTd.textContent = g.reviews != null ? String(g.reviews) : '-';
-
-      const ratingTd = document.createElement('td');
-      ratingTd.className = 'bvg-review-cell';
-      ratingTd.textContent = g.ratingPct != null ? `${g.ratingPct}%` : '-';
-
       if (g.wishlistedDOM) td.title += '\nWishlisted: yes';
-
-      tr.prepend(ratingTd);
-      tr.prepend(reviewsTd);
       tr.prepend(td);
     }
   }
