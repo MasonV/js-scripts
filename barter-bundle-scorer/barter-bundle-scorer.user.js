@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      4.3.0
+// @version      4.4.0
 // @description  Per-game scoring with DLC/package handling, side evaluation panel, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -14,7 +14,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  console.log('[BVG Scorer] v4.3.0 loaded on', location.href);
+  console.log('[BVG Scorer] v4.4.0 loaded on', location.href);
   // ═══════════════════════════════════════
   // STYLES (GM_addStyle bypasses CSP)
   // ═══════════════════════════════════════
@@ -264,10 +264,15 @@
   const STORAGE_KEY_OWNED    = 'bvg_scorer_owned_v2';
   const STORAGE_KEY_SETTINGS = 'bvg_scorer_settings_v2';
   const DEFAULT_SETTINGS = {
-    useWilsonAdjustedRating: false,
+    useWilsonAdjustedRating: true,
     topNMain: 5, topNDepth: 10,
     msrpCap: 39.99, bundledPenaltyCap: 10, confidenceAnchor: 800,
-    weights: { rating: 0.55, confidence: 0.20, value: 0.20, bundleValue: 0.15, wishlist: 0.08, rebundlePenalty: 0.20 },
+    weights: { rating: 0.55, confidence: 0.20, value: 0.20, bundleValue: 0.15, wishlist: 0.15, rebundlePenalty: 0.20 },
+  };
+  const PRESETS = {
+    quality:  { weights: { rating: 0.70, confidence: 0.30, value: 0.10, bundleValue: 0.05, wishlist: 0.10, rebundlePenalty: 0.15 } },
+    value:    { weights: { rating: 0.30, confidence: 0.15, value: 0.45, bundleValue: 0.30, wishlist: 0.10, rebundlePenalty: 0.25 } },
+    personal: { weights: { rating: 0.35, confidence: 0.15, value: 0.10, bundleValue: 0.10, wishlist: 0.30, rebundlePenalty: 0.10 } },
   };
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function loadSettings() {
@@ -571,12 +576,16 @@
     const rating = SETTINGS.useWilsonAdjustedRating
       ? wilsonLowerBound(ratingRaw, g.reviews || 0)
       : ratingRaw;
-    const val = clamp01((g.msrp || 0) / SETTINGS.msrpCap);
+    // Log-scale MSRP: diminishing returns so $40 and $60 games aren't capped equally
+    const msrp = g.msrp || 0;
+    const val = msrp > 0 ? clamp01(Math.log(msrp + 1) / Math.log(SETTINGS.msrpCap + 1)) : 0;
     const bundleValue = CURRENT_BUNDLE_COST
-      ? clamp01((g.msrp || 0) / Math.max(CURRENT_BUNDLE_COST, 0.01))
+      ? clamp01(msrp / Math.max(CURRENT_BUNDLE_COST, 0.01))
       : val;
     const wishlistBonus = g.wishlistedDOM ? 1 : 0;
-    const pen = g.bundledTimes != null ? clamp01(g.bundledTimes / SETTINGS.bundledPenaltyCap) : 0;
+    // Log-scale rebundle penalty: first few rebundles forgiven, then drops fast
+    const bundled = g.bundledTimes || 0;
+    const pen = bundled > 0 ? clamp01(Math.log(bundled + 1) / Math.log(SETTINGS.bundledPenaltyCap + 1)) : 0;
     const w = SETTINGS.weights;
     // Normalize positive weights to sum to 1.0 so scores map cleanly to 0-100
     const posSum = w.rating + w.confidence + w.value + w.bundleValue + w.wishlist;
@@ -693,9 +702,13 @@
           Wilson-adjusted rating (SteamDB-like)
         </label>
       </div>
-      <div style="margin-top:8px;display:flex;gap:8px;">
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
         <button class="bvg-settings-btn" id="bvg-settings-apply">Apply &amp; re-score</button>
         <button class="bvg-settings-btn" id="bvg-settings-reset">Reset defaults</button>
+        <span style="color:#8b949e;font-size:11px;line-height:28px;">Presets:</span>
+        <button class="bvg-settings-btn bvg-preset-btn" data-preset="quality">Quality First</button>
+        <button class="bvg-settings-btn bvg-preset-btn" data-preset="value">Value Hunter</button>
+        <button class="bvg-settings-btn bvg-preset-btn" data-preset="personal">Personal</button>
       </div>
     `;
   }
@@ -770,7 +783,7 @@
         }).join('')}
       </div>` : '';
     banner.innerHTML = `
-      <div class="bvg-title">Bundle Evaluation v4.3</div>
+      <div class="bvg-title">Bundle Evaluation v4.4</div>
       <div class="bvg-row">
         ${statBadge('Bundle', bundleRating, `top ${SETTINGS.topNMain}`)}
         ${statBadge('Depth', depthRating, `top ${SETTINGS.topNDepth}`)}
@@ -798,6 +811,14 @@
     });
     document.getElementById('bvg-settings-reset')?.addEventListener('click', () => {
       SETTINGS = clone(DEFAULT_SETTINGS); saveSettings(SETTINGS); clearScoreCells(); run();
+    });
+    document.querySelectorAll('.bvg-preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const preset = PRESETS[btn.dataset.preset];
+        if (!preset) return;
+        SETTINGS.weights = { ...SETTINGS.weights, ...clone(preset.weights) };
+        saveSettings(SETTINGS); clearScoreCells(); run();
+      });
     });
     document.getElementById('bvg-export-btn')?.addEventListener('click', () => {
       const games = (scored || []).filter(g => g.itemType === 'game');
