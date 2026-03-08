@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      4.2.0
+// @version      4.3.0
 // @description  Per-game scoring with DLC/package handling, side evaluation panel, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -14,7 +14,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  console.log('[BVG Scorer] v4.2.0 loaded on', location.href);
+  console.log('[BVG Scorer] v4.3.0 loaded on', location.href);
   // ═══════════════════════════════════════
   // STYLES (GM_addStyle bypasses CSP)
   // ═══════════════════════════════════════
@@ -266,7 +266,7 @@
   const DEFAULT_SETTINGS = {
     useWilsonAdjustedRating: false,
     topNMain: 5, topNDepth: 10,
-    msrpCap: 39.99, bundledPenaltyCap: 10,
+    msrpCap: 39.99, bundledPenaltyCap: 10, confidenceAnchor: 800,
     weights: { rating: 0.55, confidence: 0.20, value: 0.20, bundleValue: 0.15, wishlist: 0.08, rebundlePenalty: 0.20 },
   };
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
@@ -293,7 +293,7 @@
   const clamp01 = x => Math.max(0, Math.min(1, x));
   function confidenceFromReviews(n) {
     if (!n || n <= 0) return 0;
-    return clamp01(n / (n + 800));
+    return clamp01(n / (n + SETTINGS.confidenceAnchor));
   }
   function wilsonLowerBound(p, n) {
     if (!n || n <= 0) return 0;
@@ -578,7 +578,10 @@
     const wishlistBonus = g.wishlistedDOM ? 1 : 0;
     const pen = g.bundledTimes != null ? clamp01(g.bundledTimes / SETTINGS.bundledPenaltyCap) : 0;
     const w = SETTINGS.weights;
-    const raw = w.rating * rating + w.confidence * conf + w.value * val + w.bundleValue * bundleValue + w.wishlist * wishlistBonus - w.rebundlePenalty * pen;
+    // Normalize positive weights to sum to 1.0 so scores map cleanly to 0-100
+    const posSum = w.rating + w.confidence + w.value + w.bundleValue + w.wishlist;
+    const n = posSum > 0 ? posSum : 1;
+    const raw = (w.rating / n) * rating + (w.confidence / n) * conf + (w.value / n) * val + (w.bundleValue / n) * bundleValue + (w.wishlist / n) * wishlistBonus - w.rebundlePenalty * pen;
     return {
       score: Math.max(0, raw * 100),
       breakdown: { rating, ratingRaw, conf, val, bundleValue, wishlistBonus, pen },
@@ -654,11 +657,17 @@
     const personal = sorted.filter(g => !ownedSet.has(g.title));
     const personalTop = personal.slice(0, SETTINGS.topNMain);
     const avg = (arr) => arr.length > 0 ? arr.reduce((s, g) => s + g.score, 0) / arr.length : 0;
+    // Deal quality: total MSRP of unowned games / bundle cost
+    const unownedMsrpSum = personal.reduce((s, g) => s + (g.msrp || 0), 0);
+    const dealQuality = CURRENT_BUNDLE_COST && CURRENT_BUNDLE_COST > 0
+      ? unownedMsrpSum / CURRENT_BUNDLE_COST : null;
     return {
       bundleRating:  avg(topMain),
       depthRating:   avg(topDepth),
       personalRating: avg(personalTop),
       topMain,
+      dealQuality,
+      unownedMsrpSum,
     };
   }
   // ═══════════════════════════════════════
@@ -672,6 +681,7 @@
         <label>Top N (depth) <input type="number" data-key="topNDepth" value="${s.topNDepth}" min="1" max="50"></label>
         <label>MSRP cap ($) <input type="number" data-key="msrpCap" value="${s.msrpCap}" min="1" max="200" step="0.01"></label>
         <label>Bundled-penalty cap <input type="number" data-key="bundledPenaltyCap" value="${s.bundledPenaltyCap}" min="1" max="100"></label>
+        <label>Confidence anchor <input type="number" data-key="confidenceAnchor" value="${s.confidenceAnchor}" min="50" max="5000" step="50" title="Review count where confidence reaches 50%. Lower = trust fewer reviews."></label>
         <label>W: Rating <input type="number" data-key="w.rating" value="${w.rating}" min="0" max="2" step="0.05"></label>
         <label>W: Confidence <input type="number" data-key="w.confidence" value="${w.confidence}" min="0" max="2" step="0.05"></label>
         <label>W: Value <input type="number" data-key="w.value" value="${w.value}" min="0" max="2" step="0.05"></label>
@@ -700,7 +710,30 @@
     });
     saveSettings(SETTINGS);
   }
-  function renderBanner(bundleRating, depthRating, personalRating, picks, ownedCount, gameCount, dlcCount, wishCount, tiers) {
+  function buildHistogramHTML(scored) {
+    if (!scored || !scored.length) return '';
+    const games = scored.filter(g => g.itemType === 'game');
+    const buckets = [
+      { label: '85+', min: 85, max: 101, color: '#1a7f37' },
+      { label: '70-84', min: 70, max: 85, color: '#6e6411' },
+      { label: '50-69', min: 50, max: 70, color: '#7c4518' },
+      { label: '<50', min: 0, max: 50, color: '#7a1d1d' },
+    ];
+    const counts = buckets.map(b => games.filter(g => g.score >= b.min && g.score < b.max).length);
+    const maxCount = Math.max(1, ...counts);
+    const bars = buckets.map((b, i) => {
+      const pct = (counts[i] / maxCount) * 100;
+      return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;">
+        <span style="width:38px;text-align:right;color:#8b949e;">${b.label}</span>
+        <div style="flex:1;height:14px;background:#21262d;border-radius:3px;overflow:hidden;">
+          <div style="width:${pct}%;height:100%;background:${b.color};border-radius:3px;"></div>
+        </div>
+        <span style="width:20px;color:#8b949e;">${counts[i]}</span>
+      </div>`;
+    }).join('');
+    return `<div style="margin:8px 0;max-width:260px;">${bars}</div>`;
+  }
+  function renderBanner(bundleRating, depthRating, personalRating, picks, ownedCount, gameCount, dlcCount, wishCount, tiers, scored, dealQuality, unownedMsrpSum) {
     let banner = document.getElementById('bvg-scorer-banner');
     if (!banner) {
       banner = document.createElement('div');
@@ -721,26 +754,36 @@
     const picksText = picks
       .map(p => `<span class="bvg-pick-name" style="color:${scoreColor(p.score)}">${p.title}</span> <span class="bvg-pick-score">${p.score.toFixed(1)}</span>`)
       .join(' &middot; ');
+    // Per-tier scoring: compute average score for games in each tier
     const tierHTML = (tiers && tiers.length > 0) ? `
-      <div class="bvg-title" style="margin-top:10px">Tier Pricing</div>
+      <div class="bvg-title" style="margin-top:10px">Tier Scoring</div>
       <div class="bvg-tiers">
-        ${tiers.map(t => `<div class="bvg-tier-row">
-          <span>${t.name}</span>
-          <span>${t.price != null ? '<span class="bvg-tier-price">$' + t.price.toFixed(2) + '</span>' : ''} (${t.games.length} games)</span>
-        </div>`).join('')}
+        ${tiers.map(t => {
+          const tierGames = (scored || []).filter(g => g.itemType === 'game' && g.tr && g.tr.dataset.bvgTier === t.name);
+          const tierAvg = tierGames.length > 0 ? tierGames.reduce((s, g) => s + g.score, 0) / tierGames.length : 0;
+          const tierTop = tierGames.length > 0 ? Math.max(...tierGames.map(g => g.score)) : 0;
+          const color = ratingColor(tierAvg);
+          return `<div class="bvg-tier-row">
+            <span>${t.name}</span>
+            <span>${t.price != null ? '<span class="bvg-tier-price">$' + t.price.toFixed(2) + '</span>' : ''} (${tierGames.length} games) &middot; Avg: <strong style="color:${color}">${tierAvg.toFixed(0)}</strong> &middot; Best: ${tierTop.toFixed(0)}</span>
+          </div>`;
+        }).join('')}
       </div>` : '';
     banner.innerHTML = `
-      <div class="bvg-title">Bundle Evaluation v4.2</div>
+      <div class="bvg-title">Bundle Evaluation v4.3</div>
       <div class="bvg-row">
         ${statBadge('Bundle', bundleRating, `top ${SETTINGS.topNMain}`)}
         ${statBadge('Depth', depthRating, `top ${SETTINGS.topNDepth}`)}
         ${statBadge('Personal', personalRating, `excl. owned`)}
+        <button class="bvg-settings-btn" id="bvg-export-btn">&#128203; Copy Summary</button>
         <button class="bvg-settings-btn" id="bvg-settings-toggle">&#9881; Settings</button>
       </div>
       <div class="bvg-picks"><strong>Top picks:</strong> ${picksText || 'n/a'}</div>
+      ${buildHistogramHTML(scored)}
       <div class="bvg-meta">
         ${ownedCount} of ${gameCount} games owned${dlcCount > 0 ? ` &middot; ${dlcCount} DLC/extras excluded` : ''} &middot; Click any score to toggle owned &middot;
-        ${wishCount} wishlisted${CURRENT_BUNDLE_COST ? ` &middot; Bundle cost detected: $${CURRENT_BUNDLE_COST.toFixed(2)}` : ''} &middot;
+        ${wishCount} wishlisted${CURRENT_BUNDLE_COST ? ` &middot; Bundle cost detected: $${CURRENT_BUNDLE_COST.toFixed(2)}` : ''}
+        ${dealQuality != null ? ` &middot; <strong>Deal: ${dealQuality.toFixed(1)}x</strong> ($${unownedMsrpSum.toFixed(0)} unowned MSRP)` : ''} &middot;
         Rating: ${SETTINGS.useWilsonAdjustedRating ? 'Wilson-adjusted' : 'Raw % (confidence-weighted)'}
       </div>
       ${tierHTML}
@@ -755,6 +798,21 @@
     });
     document.getElementById('bvg-settings-reset')?.addEventListener('click', () => {
       SETTINGS = clone(DEFAULT_SETTINGS); saveSettings(SETTINGS); clearScoreCells(); run();
+    });
+    document.getElementById('bvg-export-btn')?.addEventListener('click', () => {
+      const games = (scored || []).filter(g => g.itemType === 'game');
+      const topList = picks.map((p, i) => `${i + 1}. ${p.title} (${p.score.toFixed(1)})`).join('\n');
+      const lines = [
+        `Bundle Evaluation — ${document.title || location.href}`,
+        `Bundle: ${bundleRating.toFixed(0)}/100 | Depth: ${depthRating.toFixed(0)}/100 | Personal: ${personalRating.toFixed(0)}/100`,
+        `${ownedCount}/${gameCount} owned | ${wishCount} wishlisted${dlcCount > 0 ? ` | ${dlcCount} DLC excluded` : ''}`,
+        dealQuality != null ? `Deal quality: ${dealQuality.toFixed(1)}x ($${unownedMsrpSum.toFixed(0)} unowned MSRP / $${CURRENT_BUNDLE_COST.toFixed(2)})` : '',
+        '', 'Top Picks:', topList,
+      ].filter(Boolean).join('\n');
+      navigator.clipboard.writeText(lines).then(() => {
+        const btn = document.getElementById('bvg-export-btn');
+        if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.innerHTML = '&#128203; Copy Summary', 1500); }
+      });
     });
   }
   // ═══════════════════════════════════════
@@ -1061,13 +1119,13 @@
     addTierLabels(scored);
     fixNonGameRows(table);
     makeAllColumnsSortable(table);
-    const { bundleRating, depthRating, personalRating, topMain } =
-      computeBundleScores(scored, ownedSet);
+    const bundleScores = computeBundleScores(scored, ownedSet);
+    const { bundleRating, depthRating, personalRating, topMain, dealQuality, unownedMsrpSum } = bundleScores;
     const ownedCount = scored.filter(g => g.itemType === 'game' && ownedSet.has(g.title)).length;
     const gameCount = scored.filter(g => g.itemType === 'game').length;
     const dlcCount = scored.filter(g => g.itemType !== 'game').length;
     const wishCount = scored.filter(g => g.itemType === 'game' && g.wishlistedDOM).length;
-    renderBanner(bundleRating, depthRating, personalRating, topMain, ownedCount, gameCount, dlcCount, wishCount, tiers);
+    renderBanner(bundleRating, depthRating, personalRating, topMain, ownedCount, gameCount, dlcCount, wishCount, tiers, scored, dealQuality, unownedMsrpSum);
   }
   // ═══════════════════════════════════════
   // BOOTSTRAP
