@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      4.1.0
+// @version      4.2.0
 // @description  Per-game scoring with DLC/package handling, side evaluation panel, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -14,7 +14,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  console.log('[BVG Scorer] v4.1.0 loaded on', location.href);
+  console.log('[BVG Scorer] v4.2.0 loaded on', location.href);
   // ═══════════════════════════════════════
   // STYLES (GM_addStyle bypasses CSP)
   // ═══════════════════════════════════════
@@ -159,6 +159,45 @@
       vertical-align: middle;
       opacity: .8;
     }
+    /* ── Tier labels (inline beside game title) ── */
+    .bvg-tier-label {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 600;
+      color: #8b949e;
+      background: #21262d;
+      border-radius: 4px;
+      padding: 1px 6px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    /* ── Split review cells ── */
+    .bvg-review-cell {
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      text-align: center;
+      padding: 4px 8px !important;
+    }
+    .bvg-review-header {
+      text-align: center;
+      min-width: 50px;
+    }
+    /* ── Tier section in banner ── */
+    #bvg-scorer-banner .bvg-tiers {
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    #bvg-scorer-banner .bvg-tier-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 2px 0;
+      border-bottom: 1px solid #21262d;
+    }
+    #bvg-scorer-banner .bvg-tier-price {
+      font-weight: 700;
+      color: #58a6ff;
+    }
     /* ── Settings panel ── */
     #bvg-settings-panel {
       display: none;
@@ -243,7 +282,11 @@
   function saveSettings(s) { localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(s)); }
   let SETTINGS = loadSettings();
   let CURRENT_BUNDLE_COST = null;
-  const INJECTED_COLUMNS = 1; // score only (reviews + rating already exist in table)
+  // Column injection counts per row type:
+  // Score column (+1) uses rowspan=2 so bargraph rows don't need adjustment for it.
+  // Review split: original hidden + 2 new = net +1.
+  const EXTRA_COLS_BARGRAPH = 1; // review split only (Score handled by rowspan)
+  const EXTRA_COLS_OTHER    = 2; // Score + review split
   // ═══════════════════════════════════════
   // MATH
   // ═══════════════════════════════════════
@@ -378,6 +421,39 @@
     return groups;
   }
   // ═══════════════════════════════════════
+  // TIER DETECTION
+  //
+  // Barter.vg tiered bundles use "tier" rows
+  // to separate groups of games. We walk the
+  // table in order and tag each game row with
+  // its tier name and price.
+  // ═══════════════════════════════════════
+  function detectTiers(table) {
+    const tbody = table.querySelector('tbody') || table;
+    const allTrs = [...tbody.querySelectorAll('tr')];
+    const tiers = [];
+    let currentTier = null;
+    for (const tr of allTrs) {
+      const type = classifyRow(tr);
+      if (type === ROW_TIER) {
+        const text = tr.textContent.trim().replace(/\s+/g, ' ');
+        const priceMatch = text.match(/\$\s*(\d+(?:\.\d{1,2})?)/);
+        currentTier = {
+          name: text.substring(0, 80),
+          price: priceMatch ? parseFloat(priceMatch[1]) : null,
+          tr: tr,
+          games: [],
+        };
+        tiers.push(currentTier);
+      } else if (type === ROW_GAME && currentTier) {
+        currentTier.games.push(tr);
+        tr.dataset.bvgTier = currentTier.name;
+        if (currentTier.price != null) tr.dataset.bvgTierPrice = String(currentTier.price);
+      }
+    }
+    return tiers;
+  }
+  // ═══════════════════════════════════════
   // OWNED DETECTION FROM DOM
   //
   // Barter.vg shows a 📚 (library) icon
@@ -442,6 +518,7 @@
     const title = titleA ? titleA.textContent.trim() : 'Unknown';
     const cells = [...tr.querySelectorAll('td')];
     let msrp = null, bundledTimes = null, reviews = null, ratingPct = null;
+    let reviewCell = null; // DOM reference for review/rating split
     const numsIn = (cell) => {
       if (!cell) return [];
       return (cell.textContent.replace(/,/g, '').match(/\d+(?:\.\d+)?/g) || []).map(Number);
@@ -467,6 +544,7 @@
         continue;
       }
       if (phase === 2) {
+        reviewCell = cells[i]; // track the combined cell for splitting
         if (nums.length >= 2) {
           const sorted = [...nums].sort((a, b) => b - a);
           reviews = sorted[0];
@@ -482,7 +560,7 @@
     const wishlistedDOM = isWishlistedInDOM(tr);
     const itemType = classifyItem(title, tr, ratingPct, reviews);
     console.log(`[BVG] ${title}: type=${itemType} wish=${wishlistedDOM} rating=${ratingPct}% reviews=${reviews} msrp=${msrp} bundled=${bundledTimes}`);
-    return { title, ratingPct, reviews, msrp, bundledTimes, ownedDOM, wishlistedDOM, itemType, tr };
+    return { title, ratingPct, reviews, msrp, bundledTimes, ownedDOM, wishlistedDOM, itemType, tr, reviewCell };
   }
   // ═══════════════════════════════════════
   // SCORING
@@ -622,7 +700,7 @@
     });
     saveSettings(SETTINGS);
   }
-  function renderBanner(bundleRating, depthRating, personalRating, picks, ownedCount, gameCount, dlcCount, wishCount) {
+  function renderBanner(bundleRating, depthRating, personalRating, picks, ownedCount, gameCount, dlcCount, wishCount, tiers) {
     let banner = document.getElementById('bvg-scorer-banner');
     if (!banner) {
       banner = document.createElement('div');
@@ -643,8 +721,16 @@
     const picksText = picks
       .map(p => `<span class="bvg-pick-name" style="color:${scoreColor(p.score)}">${p.title}</span> <span class="bvg-pick-score">${p.score.toFixed(1)}</span>`)
       .join(' &middot; ');
+    const tierHTML = (tiers && tiers.length > 0) ? `
+      <div class="bvg-title" style="margin-top:10px">Tier Pricing</div>
+      <div class="bvg-tiers">
+        ${tiers.map(t => `<div class="bvg-tier-row">
+          <span>${t.name}</span>
+          <span>${t.price != null ? '<span class="bvg-tier-price">$' + t.price.toFixed(2) + '</span>' : ''} (${t.games.length} games)</span>
+        </div>`).join('')}
+      </div>` : '';
     banner.innerHTML = `
-      <div class="bvg-title">Bundle Evaluation v4.0</div>
+      <div class="bvg-title">Bundle Evaluation v4.2</div>
       <div class="bvg-row">
         ${statBadge('Bundle', bundleRating, `top ${SETTINGS.topNMain}`)}
         ${statBadge('Depth', depthRating, `top ${SETTINGS.topNDepth}`)}
@@ -657,6 +743,7 @@
         ${wishCount} wishlisted${CURRENT_BUNDLE_COST ? ` &middot; Bundle cost detected: $${CURRENT_BUNDLE_COST.toFixed(2)}` : ''} &middot;
         Rating: ${SETTINGS.useWilsonAdjustedRating ? 'Wilson-adjusted' : 'Raw % (confidence-weighted)'}
       </div>
+      ${tierHTML}
       <div id="bvg-settings-panel">${buildSettingsHTML()}</div>
     `;
     document.getElementById('bvg-settings-toggle')
@@ -683,39 +770,54 @@
     const ind = document.createElement('span');
     ind.className = 'bvg-sort-ind';
     th.appendChild(ind);
-    headerRow.prepend(th);
+    // Insert after the first cell (checkbox column) to keep it pinned left
+    const firstCell = headerRow.querySelector('th, td');
+    if (firstCell) firstCell.insertAdjacentElement('afterend', th);
+    else headerRow.prepend(th);
     th.addEventListener('click', () => sortByScore(table, ind));
   }
-  // Fix tier headers and summary rows: bump their colspan by injected column count
-  // and prepend an empty cell so columns align
+  // Fix tier headers and summary rows: bump their colspan or add spacer cells.
+  // Bargraph rows are paired with game rows via rowspan on Score, so they only
+  // need adjustment for the review column split (+1). All other non-game rows
+  // need +2 (Score column + review split).
   function fixNonGameRows(table) {
     const allRows = [...table.querySelectorAll('tr')];
     for (const tr of allRows) {
       const type = classifyRow(tr);
       if (type === ROW_HEADER || type === ROW_GAME) continue;
       if (tr.querySelector('.bvg-spacer')) continue; // already fixed
-      // For tier/summary/other rows, prepend an empty cell
+      const extraCols = (type === ROW_BARGRAPH) ? EXTRA_COLS_BARGRAPH : EXTRA_COLS_OTHER;
       const firstCell = tr.querySelector('td');
       if (firstCell && firstCell.colSpan > 1) {
-        // Has colspan — bump it by injected count
-        firstCell.colSpan += INJECTED_COLUMNS;
-        // Mark as fixed
+        firstCell.colSpan += extraCols;
         firstCell.classList.add('bvg-spacer');
       } else {
-        // No colspan — prepend an empty td
-        const spacer = document.createElement('td');
-        spacer.className = 'bvg-spacer';
-        tr.prepend(spacer);
-        for (let i = 1; i < INJECTED_COLUMNS; i++) {
-          const extra = document.createElement('td');
-          extra.className = 'bvg-spacer';
-          tr.prepend(extra);
+        for (let i = 0; i < extraCols; i++) {
+          const spacer = document.createElement('td');
+          spacer.className = 'bvg-spacer';
+          tr.prepend(spacer);
         }
       }
     }
   }
   function clearScoreCells() {
-    document.querySelectorAll('.bvg-score-cell, .bvg-score-header, .bvg-review-cell, .bvg-review-header, .bvg-spacer').forEach(el => el.remove());
+    // Restore original review cells that were hidden during split
+    document.querySelectorAll('.bvg-review-original').forEach(el => {
+      el.style.display = '';
+      el.classList.remove('bvg-review-original');
+    });
+    // Restore original review header
+    document.querySelectorAll('.bvg-review-header-original').forEach(el => {
+      el.style.display = '';
+      el.classList.remove('bvg-review-header-original');
+    });
+    // Remove all injected elements
+    document.querySelectorAll('.bvg-score-cell, .bvg-score-header, .bvg-review-cell, .bvg-review-header, .bvg-spacer, .bvg-tier-label').forEach(el => el.remove());
+    // Clear tier data attributes
+    document.querySelectorAll('[data-bvg-tier]').forEach(el => {
+      delete el.dataset.bvgTier;
+      delete el.dataset.bvgTierPrice;
+    });
   }
   function ensureScoreCells(scoredGames, ownedSet) {
     for (const g of scoredGames) {
@@ -726,6 +828,9 @@
       td.dataset.score = String(g.score);
       td.textContent = g.score.toFixed(1);
       td.title = formatBreakdown(g.breakdown);
+      // Span both game row and its paired bargraph row to prevent double-row cell
+      const group = getRowGroup(tr);
+      if (group.length > 1) td.rowSpan = 2;
       const owned = ownedSet.has(g.title);
       const isDLC = g.itemType === 'dlc' || g.itemType === 'package';
       if (owned) {
@@ -744,7 +849,93 @@
         run();
       });
       if (g.wishlistedDOM) td.title += '\nWishlisted: yes';
-      tr.prepend(td);
+      // Insert after the first cell (checkbox) to keep it pinned left
+      const firstCell = tr.querySelector('td');
+      if (firstCell) firstCell.insertAdjacentElement('afterend', td);
+      else tr.prepend(td);
+    }
+  }
+  // ═══════════════════════════════════════
+  // REVIEW COLUMN SPLIT
+  //
+  // Barter.vg combines review count and
+  // rating % in a single cell. We hide the
+  // original and insert two distinct columns.
+  // ═══════════════════════════════════════
+  function splitReviewColumn(table, scoredGames) {
+    const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
+    // Split the header: find the review/rating th
+    if (headerRow && !headerRow.querySelector('.bvg-review-header')) {
+      const ths = [...headerRow.querySelectorAll('th, td')];
+      let reviewTh = null;
+      for (const th of ths) {
+        const text = th.textContent.toLowerCase();
+        if ((text.includes('review') || text.includes('rating') || text.includes('score')) &&
+            !th.classList.contains('bvg-score-header')) {
+          reviewTh = th;
+          break;
+        }
+      }
+      if (reviewTh) {
+        reviewTh.style.display = 'none';
+        reviewTh.classList.add('bvg-review-header-original');
+        const countTh = document.createElement('th');
+        countTh.textContent = 'Reviews';
+        countTh.className = 'bvg-review-header bvg-sortable';
+        const countInd = document.createElement('span');
+        countInd.className = 'bvg-sort-ind';
+        countTh.appendChild(countInd);
+        const ratingTh = document.createElement('th');
+        ratingTh.textContent = 'Rating';
+        ratingTh.className = 'bvg-review-header bvg-sortable';
+        const ratingInd = document.createElement('span');
+        ratingInd.className = 'bvg-sort-ind';
+        ratingTh.appendChild(ratingInd);
+        reviewTh.insertAdjacentElement('afterend', ratingTh);
+        reviewTh.insertAdjacentElement('afterend', countTh);
+      }
+    }
+    // Split each game row's review cell
+    for (const g of scoredGames) {
+      const tr = g.tr;
+      if (tr.querySelector('.bvg-review-cell')) continue;
+      if (!g.reviewCell) continue;
+      // Hide original combined cell
+      g.reviewCell.style.display = 'none';
+      g.reviewCell.classList.add('bvg-review-original');
+      const countTd = document.createElement('td');
+      countTd.className = 'bvg-review-cell';
+      countTd.textContent = g.reviews != null ? g.reviews.toLocaleString() : '\u2014';
+      const ratingTd = document.createElement('td');
+      ratingTd.className = 'bvg-review-cell';
+      if (g.ratingPct != null) {
+        ratingTd.textContent = g.ratingPct + '%';
+        ratingTd.style.color = ratingColor(g.ratingPct);
+        ratingTd.style.fontWeight = '700';
+      } else {
+        ratingTd.textContent = '\u2014';
+      }
+      // Insert after the hidden original (count first, then rating)
+      g.reviewCell.insertAdjacentElement('afterend', ratingTd);
+      g.reviewCell.insertAdjacentElement('afterend', countTd);
+    }
+  }
+  // ═══════════════════════════════════════
+  // TIER LABELS (inline next to game title)
+  // ═══════════════════════════════════════
+  function addTierLabels(scoredGames) {
+    for (const g of scoredGames) {
+      const tr = g.tr;
+      if (tr.querySelector('.bvg-tier-label')) continue;
+      const tierName = tr.dataset.bvgTier;
+      if (!tierName) continue;
+      const titleA = tr.querySelector('a[href*="/i/"], a[href*="/game/"]');
+      if (!titleA) continue;
+      const label = document.createElement('span');
+      label.className = 'bvg-tier-label';
+      const tierPrice = tr.dataset.bvgTierPrice;
+      label.textContent = tierPrice ? '$' + parseFloat(tierPrice).toFixed(2) + ' tier' : tierName;
+      titleA.insertAdjacentElement('afterend', label);
     }
   }
   // ═══════════════════════════════════════
@@ -847,6 +1038,9 @@
     const rows = findGameRows(table);
     if (!rows.length) { console.warn('[BVG Scorer] No game rows.'); return; }
     console.log(`[BVG Scorer] Found ${rows.length} games.`);
+    // Detect tiers BEFORE any DOM modifications
+    const tiers = detectTiers(table);
+    if (tiers.length) console.log(`[BVG Scorer] Detected ${tiers.length} tier(s):`, tiers.map(t => t.name));
     CURRENT_BUNDLE_COST = detectBundleCost(table);
     console.log('[BVG Scorer] Bundle cost detected:', CURRENT_BUNDLE_COST);
     // Build owned set: merge DOM-detected + manually toggled
@@ -860,8 +1054,11 @@
       const { score, breakdown } = scoreGame(g);
       return { ...g, score, breakdown };
     });
+    // DOM modifications
     ensureScoreHeader(table);
     ensureScoreCells(scored, ownedSet);
+    splitReviewColumn(table, scored);
+    addTierLabels(scored);
     fixNonGameRows(table);
     makeAllColumnsSortable(table);
     const { bundleRating, depthRating, personalRating, topMain } =
@@ -870,7 +1067,7 @@
     const gameCount = scored.filter(g => g.itemType === 'game').length;
     const dlcCount = scored.filter(g => g.itemType !== 'game').length;
     const wishCount = scored.filter(g => g.itemType === 'game' && g.wishlistedDOM).length;
-    renderBanner(bundleRating, depthRating, personalRating, topMain, ownedCount, gameCount, dlcCount, wishCount);
+    renderBanner(bundleRating, depthRating, personalRating, topMain, ownedCount, gameCount, dlcCount, wishCount, tiers);
   }
   // ═══════════════════════════════════════
   // BOOTSTRAP
