@@ -1,16 +1,20 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      3.5
-// @description  Per-game scoring with DLC/package handling, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
+// @version      3.8
+// @description  Per-game scoring with DLC/package handling, wishlist + bundle-cost valuation, split review metrics, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
+// @homepageURL  https://github.com/MasonV/js-scripts
+// @supportURL   https://github.com/MasonV/js-scripts/issues
+// @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/bundle-barter-scorer/barter-bundle-scorer.meta.js
+// @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/bundle-barter-scorer/barter-bundle-scorer.user.js
 // @grant        GM_addStyle
 // @run-at       document-idle
 // ==/UserScript==
 (function () {
   'use strict';
-  console.log('[BVG Scorer] v3.5 loaded on', location.href);
+  console.log('[BVG Scorer] v3.8 loaded on', location.href);
   // ═══════════════════════════════════════
   // STYLES (GM_addStyle bypasses CSP)
   // ═══════════════════════════════════════
@@ -116,6 +120,18 @@
       text-shadow: none;
       opacity: .6;
     }
+    /* ── Review split cells ── */
+    td.bvg-review-cell,
+    th.bvg-review-header {
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+      min-width: 62px;
+      white-space: nowrap;
+    }
+    td.bvg-review-cell {
+      color: #8b949e;
+      font-size: 12px;
+    }
     /* ── Score header ── */
     th.bvg-score-header {
       min-width: 60px;
@@ -183,7 +199,7 @@
     useWilsonAdjustedRating: false,
     topNMain: 5, topNDepth: 10,
     msrpCap: 39.99, bundledPenaltyCap: 10,
-    weights: { rating: 0.60, confidence: 0.20, value: 0.25, rebundlePenalty: 0.20 },
+    weights: { rating: 0.55, confidence: 0.20, value: 0.20, bundleValue: 0.15, wishlist: 0.08, rebundlePenalty: 0.20 },
   };
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function loadSettings() {
@@ -197,6 +213,8 @@
   }
   function saveSettings(s) { localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(s)); }
   let SETTINGS = loadSettings();
+  let CURRENT_BUNDLE_COST = null;
+  const INJECTED_COLUMNS = 3; // score + reviews + steam rating
   // ═══════════════════════════════════════
   // MATH
   // ═══════════════════════════════════════
@@ -345,6 +363,12 @@
     if (tr.textContent.includes('📚')) return true;
     return false;
   }
+  function isWishlistedInDOM(tr) {
+    if (tr.querySelector('[title*="wish" i], [aria-label*="wish" i], .wish, .wishlist')) return true;
+    const text = tr.textContent.toLowerCase();
+    if (text.includes('wishlisted')) return true;
+    return /(^|\s)[★☆](\s|$)/.test(tr.textContent);
+  }
   // ═══════════════════════════════════════
   // DATA EXTRACTION (right-to-left)
   // ═══════════════════════════════════════
@@ -426,9 +450,10 @@
       }
     }
     const ownedDOM = isOwnedInDOM(tr);
+    const wishlistedDOM = isWishlistedInDOM(tr);
     const itemType = classifyItem(title, tr, ratingPct, reviews);
-    console.log(`[BVG] ${title}: type=${itemType} rating=${ratingPct}% reviews=${reviews} msrp=${msrp} bundled=${bundledTimes}`);
-    return { title, ratingPct, reviews, msrp, bundledTimes, ownedDOM, itemType, tr };
+    console.log(`[BVG] ${title}: type=${itemType} wish=${wishlistedDOM} rating=${ratingPct}% reviews=${reviews} msrp=${msrp} bundled=${bundledTimes}`);
+    return { title, ratingPct, reviews, msrp, bundledTimes, ownedDOM, wishlistedDOM, itemType, tr };
   }
   // ═══════════════════════════════════════
   // SCORING
@@ -440,12 +465,16 @@
       ? wilsonLowerBound(ratingRaw, g.reviews || 0)
       : ratingRaw;
     const val = clamp01((g.msrp || 0) / SETTINGS.msrpCap);
+    const bundleValue = CURRENT_BUNDLE_COST
+      ? clamp01((g.msrp || 0) / Math.max(CURRENT_BUNDLE_COST, 0.01))
+      : val;
+    const wishlistBonus = g.wishlistedDOM ? 1 : 0;
     const pen = g.bundledTimes != null ? clamp01(g.bundledTimes / SETTINGS.bundledPenaltyCap) : 0;
     const w = SETTINGS.weights;
-    const raw = w.rating * rating + w.confidence * conf + w.value * val - w.rebundlePenalty * pen;
+    const raw = w.rating * rating + w.confidence * conf + w.value * val + w.bundleValue * bundleValue + w.wishlist * wishlistBonus - w.rebundlePenalty * pen;
     return {
       score: Math.max(0, raw * 100),
-      breakdown: { rating, ratingRaw, conf, val, pen },
+      breakdown: { rating, ratingRaw, conf, val, bundleValue, wishlistBonus, pen },
     };
   }
   function scoreColor(s) {
@@ -472,8 +501,29 @@
         (b.rating !== b.ratingRaw ? ` (Wilson: ${(b.rating * 100).toFixed(1)}%)` : ''),
       `Confidence: ${(b.conf * 100).toFixed(1)}%`,
       `Value:      ${(b.val * 100).toFixed(1)}%`,
+      `Bundle $:   ${(b.bundleValue * 100).toFixed(1)}%`,
+      `Wishlist:  +${(b.wishlistBonus * 100).toFixed(0)}%`,
       `Rebundle:  -${(b.pen * 100).toFixed(1)}%`,
     ].join('\n');
+  }
+
+  function detectBundleCost(table) {
+    const scope = (table?.parentElement || document.body);
+    const probe = scope.textContent || '';
+    const regexes = [
+      /(?:cost|price|pay|from|tier)\D{0,18}\$\s*(\d+(?:\.\d{1,2})?)/ig,
+      /\$\s*(\d+(?:\.\d{1,2})?)\s*(?:for|bundle|tier)/ig,
+    ];
+    const matches = [];
+    for (const re of regexes) {
+      let m;
+      while ((m = re.exec(probe)) !== null) {
+        const n = parseFloat(m[1]);
+        if (Number.isFinite(n) && n > 0 && n < 500) matches.push(n);
+      }
+    }
+    if (!matches.length) return null;
+    return Math.min(...matches);
   }
   // ═══════════════════════════════════════
   // BUNDLE-LEVEL SCORES (normalized 0-100)
@@ -518,6 +568,8 @@
         <label>W: Rating <input type="number" data-key="w.rating" value="${w.rating}" min="0" max="2" step="0.05"></label>
         <label>W: Confidence <input type="number" data-key="w.confidence" value="${w.confidence}" min="0" max="2" step="0.05"></label>
         <label>W: Value <input type="number" data-key="w.value" value="${w.value}" min="0" max="2" step="0.05"></label>
+        <label>W: Bundle cost value <input type="number" data-key="w.bundleValue" value="${w.bundleValue}" min="0" max="2" step="0.05"></label>
+        <label>W: Wishlist boost <input type="number" data-key="w.wishlist" value="${w.wishlist}" min="0" max="1" step="0.01"></label>
         <label>W: Rebundle <input type="number" data-key="w.rebundlePenalty" value="${w.rebundlePenalty}" min="0" max="2" step="0.05"></label>
         <label style="grid-column:span 2">
           <input type="checkbox" data-key="useWilsonAdjustedRating" ${s.useWilsonAdjustedRating ? 'checked' : ''}>
@@ -541,7 +593,7 @@
     });
     saveSettings(SETTINGS);
   }
-  function renderBanner(bundleRating, depthRating, personalRating, picks, ownedCount, gameCount, dlcCount) {
+  function renderBanner(bundleRating, depthRating, personalRating, picks, ownedCount, gameCount, dlcCount, wishCount) {
     let banner = document.getElementById('bvg-scorer-banner');
     if (!banner) {
       banner = document.createElement('div');
@@ -572,6 +624,7 @@
       <div class="bvg-picks"><strong>Top picks:</strong> ${picksText || 'n/a'}</div>
       <div class="bvg-meta">
         ${ownedCount} of ${gameCount} games owned${dlcCount > 0 ? ` &middot; ${dlcCount} DLC/extras excluded` : ''} &middot; Click any score to toggle owned &middot;
+        ${wishCount} wishlisted${CURRENT_BUNDLE_COST ? ` &middot; Bundle cost detected: $${CURRENT_BUNDLE_COST.toFixed(2)}` : ''} &middot;
         Rating: ${SETTINGS.useWilsonAdjustedRating ? 'Wilson-adjusted' : 'Raw % (confidence-weighted)'}
       </div>
       <div id="bvg-settings-panel">${buildSettingsHTML()}</div>
@@ -593,6 +646,17 @@
   function ensureScoreHeader(table) {
     const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
     if (!headerRow || headerRow.querySelector('.bvg-score-header')) return;
+
+    const ratingTh = document.createElement('th');
+    ratingTh.textContent = 'Steam %';
+    ratingTh.className = 'bvg-review-header';
+    headerRow.prepend(ratingTh);
+
+    const reviewsTh = document.createElement('th');
+    reviewsTh.textContent = 'Reviews';
+    reviewsTh.className = 'bvg-review-header';
+    headerRow.prepend(reviewsTh);
+
     const th = document.createElement('th');
     th.textContent = 'Score';
     th.className = 'bvg-score-header bvg-sortable';
@@ -602,7 +666,7 @@
     headerRow.prepend(th);
     th.addEventListener('click', () => sortByScore(table, ind));
   }
-  // Fix tier headers and summary rows: bump their colspan by 1
+  // Fix tier headers and summary rows: bump their colspan by injected column count
   // and prepend an empty cell so columns align
   function fixNonGameRows(table) {
     const allRows = [...table.querySelectorAll('tr')];
@@ -613,8 +677,8 @@
       // For tier/summary/other rows, prepend an empty cell
       const firstCell = tr.querySelector('td');
       if (firstCell && firstCell.colSpan > 1) {
-        // Has colspan — bump it by 1
-        firstCell.colSpan += 1;
+        // Has colspan — bump it by injected count
+        firstCell.colSpan += INJECTED_COLUMNS;
         // Mark as fixed
         firstCell.classList.add('bvg-spacer');
       } else {
@@ -622,11 +686,16 @@
         const spacer = document.createElement('td');
         spacer.className = 'bvg-spacer';
         tr.prepend(spacer);
+        for (let i = 1; i < INJECTED_COLUMNS; i++) {
+          const extra = document.createElement('td');
+          extra.className = 'bvg-spacer';
+          tr.prepend(extra);
+        }
       }
     }
   }
   function clearScoreCells() {
-    document.querySelectorAll('.bvg-score-cell, .bvg-score-header, .bvg-spacer').forEach(el => el.remove());
+    document.querySelectorAll('.bvg-score-cell, .bvg-score-header, .bvg-review-cell, .bvg-review-header, .bvg-spacer').forEach(el => el.remove());
   }
   function ensureScoreCells(scoredGames, ownedSet) {
     for (const g of scoredGames) {
@@ -654,6 +723,18 @@
         clearScoreCells();
         run();
       });
+      const reviewsTd = document.createElement('td');
+      reviewsTd.className = 'bvg-review-cell';
+      reviewsTd.textContent = g.reviews != null ? String(g.reviews) : '-';
+
+      const ratingTd = document.createElement('td');
+      ratingTd.className = 'bvg-review-cell';
+      ratingTd.textContent = g.ratingPct != null ? `${g.ratingPct}%` : '-';
+
+      if (g.wishlistedDOM) td.title += '\nWishlisted: yes';
+
+      tr.prepend(ratingTd);
+      tr.prepend(reviewsTd);
       tr.prepend(td);
     }
   }
@@ -757,6 +838,8 @@
     const rows = findGameRows(table);
     if (!rows.length) { console.warn('[BVG Scorer] No game rows.'); return; }
     console.log(`[BVG Scorer] Found ${rows.length} games.`);
+    CURRENT_BUNDLE_COST = detectBundleCost(table);
+    console.log('[BVG Scorer] Bundle cost detected:', CURRENT_BUNDLE_COST);
     // Build owned set: merge DOM-detected + manually toggled
     const manualOwned = loadOwnedSet();
     const games = rows.map(tr => extractGame(tr));
@@ -777,7 +860,8 @@
     const ownedCount = scored.filter(g => g.itemType === 'game' && ownedSet.has(g.title)).length;
     const gameCount = scored.filter(g => g.itemType === 'game').length;
     const dlcCount = scored.filter(g => g.itemType !== 'game').length;
-    renderBanner(bundleRating, depthRating, personalRating, topMain, ownedCount, gameCount, dlcCount);
+    const wishCount = scored.filter(g => g.itemType === 'game' && g.wishlistedDOM).length;
+    renderBanner(bundleRating, depthRating, personalRating, topMain, ownedCount, gameCount, dlcCount, wishCount);
   }
   // ═══════════════════════════════════════
   // BOOTSTRAP
