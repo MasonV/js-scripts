@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      4.3.0
+// @version      4.3.1
 // @description  Per-game scoring with DLC/package handling, side evaluation panel, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -14,7 +14,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  console.log('[BVG Scorer] v4.3.0 loaded on', location.href);
+  console.log('[BVG Scorer] v4.3.1 loaded on', location.href);
   // ═══════════════════════════════════════
   // STYLES (GM_addStyle bypasses CSP)
   // ═══════════════════════════════════════
@@ -122,7 +122,7 @@
       color: #fff;
       font-size: 14px;
       letter-spacing: -0.3px;
-      min-width: 52px;
+      min-width: 38px;
       text-shadow: 0 1px 2px rgba(0,0,0,.4);
       vertical-align: middle;
     }
@@ -146,7 +146,7 @@
     }
     /* ── Score header ── */
     th.bvg-score-header {
-      min-width: 60px;
+      min-width: 42px;
       text-align: center;
     }
     /* ── Sortable headers ── */
@@ -850,10 +850,21 @@
         firstCell.colSpan += extraCols;
         firstCell.classList.add('bvg-spacer');
       } else {
-        for (let i = 0; i < extraCols; i++) {
+        if (type === ROW_BARGRAPH) {
+          // Bargraph: only needs review-split spacer (Score handled by rowspan)
           const spacer = document.createElement('td');
           spacer.className = 'bvg-spacer';
-          tr.prepend(spacer);
+          tr.appendChild(spacer);
+        } else {
+          // Score spacer — insert after first cell to match Score column position
+          const scoreSpace = document.createElement('td');
+          scoreSpace.className = 'bvg-spacer';
+          if (firstCell) firstCell.insertAdjacentElement('afterend', scoreSpace);
+          else tr.prepend(scoreSpace);
+          // Review-split spacer — append at end
+          const reviewSpace = document.createElement('td');
+          reviewSpace.className = 'bvg-spacer';
+          tr.appendChild(reviewSpace);
         }
       }
     }
@@ -871,6 +882,10 @@
     });
     // Remove all injected elements
     document.querySelectorAll('.bvg-score-cell, .bvg-score-header, .bvg-review-cell, .bvg-review-header, .bvg-spacer, .bvg-tier-label').forEach(el => el.remove());
+    // Clear labeled headers
+    document.querySelectorAll('[data-bvg-labeled]').forEach(el => {
+      delete el.dataset.bvgLabeled;
+    });
     // Clear tier data attributes
     document.querySelectorAll('[data-bvg-tier]').forEach(el => {
       delete el.dataset.bvgTier;
@@ -934,11 +949,25 @@
           break;
         }
       }
+      // Fallback: find header by column index of first game's review cell
+      if (!reviewTh) {
+        const firstGame = scoredGames.find(g => g.reviewCell);
+        if (firstGame) {
+          const dataCells = [...firstGame.tr.querySelectorAll('td')];
+          const colIdx = dataCells.indexOf(firstGame.reviewCell);
+          if (colIdx >= 0 && colIdx < ths.length) {
+            const candidate = ths[colIdx];
+            if (candidate && !candidate.classList.contains('bvg-score-header')) {
+              reviewTh = candidate;
+            }
+          }
+        }
+      }
       if (reviewTh) {
         reviewTh.style.display = 'none';
         reviewTh.classList.add('bvg-review-header-original');
         const countTh = document.createElement('th');
-        countTh.textContent = 'Reviews';
+        countTh.textContent = '#';
         countTh.className = 'bvg-review-header bvg-sortable';
         const countInd = document.createElement('span');
         countInd.className = 'bvg-sort-ind';
@@ -1087,6 +1116,54 @@
     });
   }
   // ═══════════════════════════════════════
+  // HEADER LABELS
+  //
+  // Barter.vg headers may be empty or use
+  // emojis without text. We detect column
+  // purpose from data cells and add labels.
+  // ═══════════════════════════════════════
+  function isEmojiOrSymbolOnly(text) {
+    const stripped = text.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}\u200d\ufe0f\u2600-\u27bf\s]/gu, '').trim();
+    return stripped.length === 0;
+  }
+  function inferColumnLabel(cells) {
+    for (const cell of cells) {
+      if (!cell) continue;
+      if (cell.querySelector('input[type="checkbox"]')) return null;
+      if (cell.querySelector('img') && !cell.textContent.trim()) return null;
+      if (cell.querySelector('a[href*="/i/"], a[href*="/game/"]')) return 'Title';
+      const text = cell.textContent.trim();
+      if (/\$\d+(\.\d{2})?/.test(text)) return 'MSRP';
+    }
+    const texts = cells.filter(Boolean).map(c => c.textContent.trim());
+    if (texts.length && texts.every(t => /^\d{1,4}$/.test(t))) return 'Bundled';
+    return null;
+  }
+  function labelEmptyHeaders(table) {
+    const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
+    if (!headerRow) return;
+    const headers = [...headerRow.querySelectorAll('th, td')];
+    const dataRows = findGameRows(table).slice(0, 3);
+    for (let idx = 0; idx < headers.length; idx++) {
+      const h = headers[idx];
+      if (h.classList.contains('bvg-score-header') ||
+          h.classList.contains('bvg-review-header') ||
+          h.classList.contains('bvg-review-header-original') ||
+          h.dataset.bvgLabeled === '1') continue;
+      const text = h.textContent.trim();
+      if (text && !isEmojiOrSymbolOnly(text)) continue;
+      const samples = dataRows.map(r => {
+        const cells = [...r.querySelectorAll('td')];
+        return cells[idx] || null;
+      });
+      const label = inferColumnLabel(samples);
+      if (label) {
+        h.textContent = label;
+        h.dataset.bvgLabeled = '1';
+      }
+    }
+  }
+  // ═══════════════════════════════════════
   // MAIN
   // ═══════════════════════════════════════
   function run() {
@@ -1119,6 +1196,7 @@
     addTierLabels(scored);
     fixNonGameRows(table);
     makeAllColumnsSortable(table);
+    labelEmptyHeaders(table);
     const bundleScores = computeBundleScores(scored, ownedSet);
     const { bundleRating, depthRating, personalRating, topMain, dealQuality, unownedMsrpSum } = bundleScores;
     const ownedCount = scored.filter(g => g.itemType === 'game' && ownedSet.has(g.title)).length;
