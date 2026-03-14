@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      4.5.1
+// @version      5.0.0
 // @description  Per-game scoring with DLC/package handling, side evaluation panel, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -14,7 +14,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const SCRIPT_VERSION = '4.5.1';
+  const SCRIPT_VERSION = '5.0.0';
   console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
   // ═══════════════════════════════════════
   // STYLES (GM_addStyle bypasses CSP)
@@ -242,6 +242,230 @@
       background: #1a2332;
     }
 
+    /* ── Modern Panel ── */
+    #bvg-modern-panel {
+      max-width: calc(100% - 380px);
+      margin: 16px auto;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      color: #c9d1d9;
+    }
+    .bvg-view-toggle {
+      display: inline-flex;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 14px;
+    }
+    .bvg-view-toggle button {
+      background: transparent;
+      border: none;
+      color: #8b949e;
+      padding: 7px 16px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .bvg-view-toggle button.active {
+      background: #21262d;
+      color: #e6edf3;
+    }
+    .bvg-view-toggle button:hover:not(.active) {
+      color: #c9d1d9;
+    }
+    /* ── Filter bar ── */
+    .bvg-filter-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .bvg-filter-bar input[type="text"] {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #c9d1d9;
+      padding: 6px 12px;
+      font-size: 13px;
+      width: 220px;
+    }
+    .bvg-filter-bar input[type="text"]:focus { outline: none; border-color: #58a6ff; }
+    .bvg-filter-bar select {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #c9d1d9;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .bvg-filter-chip {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #8b949e;
+      padding: 5px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .bvg-filter-chip:hover, .bvg-filter-chip.active {
+      color: #e6edf3;
+      border-color: #58a6ff;
+      background: #1a2332;
+    }
+    /* ── Game cards ── */
+    .bvg-cards {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .bvg-card {
+      display: grid;
+      grid-template-columns: 56px 1fr auto;
+      gap: 14px;
+      align-items: center;
+      background: #0d1117;
+      border: 1px solid #1f2937;
+      border-radius: 10px;
+      padding: 12px 16px;
+      transition: border-color .15s, background .15s;
+    }
+    .bvg-card:hover {
+      border-color: #30363d;
+      background: #111820;
+    }
+    .bvg-card.bvg-card-owned {
+      opacity: .5;
+    }
+    .bvg-card.bvg-card-dlc {
+      opacity: .45;
+      border-style: dashed;
+    }
+    .bvg-card-score {
+      width: 52px;
+      height: 52px;
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 20px;
+      color: #fff;
+      text-shadow: 0 1px 3px rgba(0,0,0,.5);
+      cursor: pointer;
+      user-select: none;
+      transition: transform .1s;
+      flex-shrink: 0;
+      letter-spacing: -0.5px;
+    }
+    .bvg-card-score:hover { transform: scale(1.08); }
+    .bvg-card-score .bvg-card-rank {
+      font-size: 9px;
+      font-weight: 600;
+      opacity: .7;
+      letter-spacing: .5px;
+      text-shadow: none;
+    }
+    .bvg-card-body {
+      min-width: 0;
+    }
+    .bvg-card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #e6edf3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .bvg-card-title a { color: inherit; text-decoration: none; }
+    .bvg-card-title a:hover { text-decoration: underline; }
+    .bvg-card-meta {
+      font-size: 11px;
+      color: #8b949e;
+      margin-top: 3px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .bvg-card-meta .bvg-cm-val {
+      color: #c9d1d9;
+      font-weight: 600;
+    }
+    .bvg-card-tags {
+      display: flex;
+      gap: 5px;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+    .bvg-card-tag {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 7px;
+      border-radius: 4px;
+      background: #21262d;
+      color: #8b949e;
+    }
+    .bvg-card-tag.tag-wish { background: #1a2332; color: #58a6ff; }
+    .bvg-card-tag.tag-owned { background: #1d2b1d; color: #3fb950; }
+    .bvg-card-tag.tag-dlc { background: #2b221d; color: #d29922; }
+    .bvg-card-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .bvg-card-msrp {
+      font-weight: 700;
+      font-size: 14px;
+      color: #e6edf3;
+    }
+    .bvg-card-rating {
+      font-weight: 700;
+    }
+    .bvg-card-reviews {
+      color: #8b949e;
+      font-size: 11px;
+    }
+    /* ── Tier divider in card view ── */
+    .bvg-tier-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0 4px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #e6edf3;
+    }
+    .bvg-tier-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #21262d;
+    }
+    .bvg-tier-divider .bvg-td-price {
+      color: #58a6ff;
+      font-weight: 700;
+    }
+    .bvg-tier-divider .bvg-td-stats {
+      font-size: 11px;
+      font-weight: 400;
+      color: #8b949e;
+    }
+    /* ── Card count footer ── */
+    .bvg-cards-footer {
+      text-align: center;
+      color: #8b949e;
+      font-size: 11px;
+      padding: 10px 0;
+    }
+
     @media (max-width: 1300px) {
       body { padding-right: 0 !important; }
       #bvg-scorer-banner {
@@ -257,6 +481,7 @@
       #bvg-scorer-banner .bvg-row {
         grid-template-columns: repeat(2, minmax(120px, 1fr));
       }
+      #bvg-modern-panel { max-width: 100%; padding: 0 8px; }
     }
   `);
   // ═══════════════════════════════════════
@@ -1201,6 +1426,254 @@
     }
   }
   // ═══════════════════════════════════════
+  // MODERN PANEL
+  //
+  // Card-based game list that replaces the
+  // original Barter table. Supports search,
+  // sort, ownership toggle, and tier groups.
+  // ═══════════════════════════════════════
+  const STORAGE_KEY_VIEW = 'bvg_scorer_view_v1';
+  let _modernPanelState = {
+    sortKey: 'score',
+    sortDir: 'desc',
+    search: '',
+    hideOwned: false,
+    hideDLC: false,
+  };
+
+  function loadViewPreference() {
+    try { return localStorage.getItem(STORAGE_KEY_VIEW) || 'modern'; }
+    catch { return 'modern'; }
+  }
+  function saveViewPreference(v) {
+    try { localStorage.setItem(STORAGE_KEY_VIEW, v); } catch {}
+  }
+
+  function renderModernPanel(scored, ownedSet, tiers) {
+    let panel = document.getElementById('bvg-modern-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'bvg-modern-panel';
+      const table = findItemTable();
+      if (table) table.parentElement.insertBefore(panel, table);
+      else document.body.appendChild(panel);
+    }
+
+    const st = _modernPanelState;
+
+    // Filter
+    let filtered = [...scored];
+    if (st.search) {
+      const q = st.search.toLowerCase();
+      filtered = filtered.filter(g => g.title.toLowerCase().includes(q));
+    }
+    if (st.hideOwned) filtered = filtered.filter(g => !ownedSet.has(g.title));
+    if (st.hideDLC) filtered = filtered.filter(g => g.itemType === 'game');
+
+    // Sort
+    const sortFns = {
+      score: (a, b) => b.score - a.score,
+      title: (a, b) => a.title.localeCompare(b.title),
+      rating: (a, b) => (b.ratingPct || 0) - (a.ratingPct || 0),
+      reviews: (a, b) => (b.reviews || 0) - (a.reviews || 0),
+      msrp: (a, b) => (b.msrp || 0) - (a.msrp || 0),
+    };
+    const sortFn = sortFns[st.sortKey] || sortFns.score;
+    filtered.sort((a, b) => {
+      const result = sortFn(a, b);
+      return st.sortDir === 'asc' ? -result : result;
+    });
+
+    // Build tier lookup for dividers
+    const tierMap = new Map();
+    for (const t of tiers) {
+      for (const gameRow of t.games) {
+        tierMap.set(gameRow, t);
+      }
+    }
+
+    // Render cards grouped by tier when sorted by score (default)
+    let cardsHTML = '';
+    const showTierDividers = tiers.length > 0 && st.sortKey === 'score' && !st.search;
+    let currentTierName = null;
+    let rank = 0;
+
+    // Precompute tier stats for dividers
+    const tierStats = new Map();
+    if (showTierDividers) {
+      for (const t of tiers) {
+        const tierGames = scored.filter(g => g.itemType === 'game' && g.tr && tierMap.get(g.tr) === t);
+        const avg = tierGames.length ? tierGames.reduce((s, g) => s + g.score, 0) / tierGames.length : 0;
+        tierStats.set(t.name, { avg, count: tierGames.length });
+      }
+    }
+
+    for (const g of filtered) {
+      rank++;
+      const isOwned = ownedSet.has(g.title);
+      const isDLC = g.itemType === 'dlc' || g.itemType === 'package';
+
+      // Tier divider
+      if (showTierDividers) {
+        const tier = tierMap.get(g.tr);
+        const tName = tier ? tier.name : null;
+        if (tName && tName !== currentTierName) {
+          currentTierName = tName;
+          const ts = tierStats.get(tName);
+          const priceStr = tier.price != null ? `<span class="bvg-td-price">$${tier.price.toFixed(2)}</span>` : '';
+          const statsStr = ts ? `<span class="bvg-td-stats">${ts.count} games &middot; avg ${ts.avg.toFixed(0)}</span>` : '';
+          cardsHTML += `<div class="bvg-tier-divider">${escHtml(tName)} ${priceStr} ${statsStr}</div>`;
+        }
+      }
+
+      // Extract link from original row
+      const titleA = g.tr.querySelector('a[href*="/i/"], a[href*="/game/"]');
+      const href = titleA ? titleA.getAttribute('href') : '#';
+
+      // Tags
+      let tags = '';
+      if (isOwned) tags += '<span class="bvg-card-tag tag-owned">Owned</span>';
+      if (g.wishlistedDOM) tags += '<span class="bvg-card-tag tag-wish">Wishlisted</span>';
+      if (isDLC) tags += `<span class="bvg-card-tag tag-dlc">${g.itemType === 'package' ? 'Package' : 'DLC'}</span>`;
+      const tierForTag = tierMap.get(g.tr);
+      if (tierForTag && tierForTag.price != null && !showTierDividers) {
+        tags += `<span class="bvg-card-tag">$${tierForTag.price.toFixed(2)} tier</span>`;
+      }
+
+      const cardClass = `bvg-card${isOwned ? ' bvg-card-owned' : ''}${isDLC ? ' bvg-card-dlc' : ''}`;
+
+      cardsHTML += `
+        <div class="${cardClass}" data-bvg-title="${escHtml(g.title)}">
+          <div class="bvg-card-score" style="background:${scoreBg(g.score)}" title="${escHtml(formatBreakdown(g.breakdown))}">
+            <span class="bvg-card-rank">#${rank}</span>
+            ${g.score.toFixed(0)}
+          </div>
+          <div class="bvg-card-body">
+            <div class="bvg-card-title"><a href="${escHtml(href)}">${escHtml(g.title)}</a></div>
+            <div class="bvg-card-meta">
+              ${g.ratingPct != null ? `<span>Rating <span class="bvg-cm-val" style="color:${ratingColor(g.ratingPct)}">${g.ratingPct}%</span></span>` : ''}
+              ${g.reviews != null ? `<span>Reviews <span class="bvg-cm-val">${g.reviews.toLocaleString()}</span></span>` : ''}
+              ${g.bundledTimes != null ? `<span>Bundled <span class="bvg-cm-val">${g.bundledTimes}x</span></span>` : ''}
+            </div>
+            ${tags ? `<div class="bvg-card-tags">${tags}</div>` : ''}
+          </div>
+          <div class="bvg-card-right">
+            ${g.msrp != null ? `<span class="bvg-card-msrp">$${g.msrp.toFixed(2)}</span>` : '<span class="bvg-card-msrp" style="opacity:.3">&mdash;</span>'}
+          </div>
+        </div>`;
+    }
+
+    const totalShown = filtered.length;
+    const totalGames = scored.filter(g => g.itemType === 'game').length;
+    const dirArrow = st.sortDir === 'desc' ? '&#9660;' : '&#9650;';
+
+    panel.innerHTML = `
+      <div class="bvg-filter-bar">
+        <input type="text" id="bvg-search" placeholder="Search games..." value="${escHtml(st.search)}">
+        <select id="bvg-sort-select">
+          <option value="score"${st.sortKey === 'score' ? ' selected' : ''}>Score ${st.sortKey === 'score' ? dirArrow : ''}</option>
+          <option value="title"${st.sortKey === 'title' ? ' selected' : ''}>Title ${st.sortKey === 'title' ? dirArrow : ''}</option>
+          <option value="rating"${st.sortKey === 'rating' ? ' selected' : ''}>Rating ${st.sortKey === 'rating' ? dirArrow : ''}</option>
+          <option value="reviews"${st.sortKey === 'reviews' ? ' selected' : ''}>Reviews ${st.sortKey === 'reviews' ? dirArrow : ''}</option>
+          <option value="msrp"${st.sortKey === 'msrp' ? ' selected' : ''}>MSRP ${st.sortKey === 'msrp' ? dirArrow : ''}</option>
+        </select>
+        <button class="bvg-filter-chip${st.hideOwned ? ' active' : ''}" id="bvg-toggle-owned">Hide owned</button>
+        <button class="bvg-filter-chip${st.hideDLC ? ' active' : ''}" id="bvg-toggle-dlc">Hide DLC</button>
+      </div>
+      <div class="bvg-cards">${cardsHTML}</div>
+      <div class="bvg-cards-footer">Showing ${totalShown} of ${scored.length} items (${totalGames} games)</div>
+    `;
+
+    // Bind events
+    const searchInput = panel.querySelector('#bvg-search');
+    let searchDebounce = null;
+    searchInput?.addEventListener('input', () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        st.search = searchInput.value;
+        renderModernPanel(scored, ownedSet, tiers);
+      }, 200);
+    });
+
+    panel.querySelector('#bvg-sort-select')?.addEventListener('change', (e) => {
+      if (st.sortKey === e.target.value) {
+        st.sortDir = st.sortDir === 'desc' ? 'asc' : 'desc';
+      } else {
+        st.sortKey = e.target.value;
+        st.sortDir = 'desc';
+      }
+      renderModernPanel(scored, ownedSet, tiers);
+    });
+
+    panel.querySelector('#bvg-toggle-owned')?.addEventListener('click', () => {
+      st.hideOwned = !st.hideOwned;
+      renderModernPanel(scored, ownedSet, tiers);
+    });
+
+    panel.querySelector('#bvg-toggle-dlc')?.addEventListener('click', () => {
+      st.hideDLC = !st.hideDLC;
+      renderModernPanel(scored, ownedSet, tiers);
+    });
+
+    // Ownership toggle on card score click
+    panel.querySelectorAll('.bvg-card-score').forEach(el => {
+      el.addEventListener('click', () => {
+        const card = el.closest('.bvg-card');
+        const title = card?.dataset.bvgTitle;
+        if (!title) return;
+        const set = loadOwnedSet();
+        if (set.has(title)) set.delete(title);
+        else set.add(title);
+        saveOwnedSet(set);
+        clearScoreCells();
+        run();
+      });
+    });
+
+    // Focus search after re-render if it was focused
+    if (document.activeElement?.id === 'bvg-search' || st.search) {
+      const newInput = panel.querySelector('#bvg-search');
+      if (newInput && st.search) {
+        newInput.focus();
+        newInput.setSelectionRange(newInput.value.length, newInput.value.length);
+      }
+    }
+  }
+
+  function setView(mode, table) {
+    saveViewPreference(mode);
+    const panel = document.getElementById('bvg-modern-panel');
+    if (mode === 'modern') {
+      if (table) table.style.display = 'none';
+      if (panel) panel.style.display = '';
+    } else {
+      if (table) table.style.display = '';
+      if (panel) panel.style.display = 'none';
+    }
+    // Update toggle button states
+    document.querySelectorAll('.bvg-view-toggle button').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.view === mode);
+    });
+  }
+
+  function ensureViewToggle(table) {
+    if (document.getElementById('bvg-view-toggle')) return;
+    const toggle = document.createElement('div');
+    toggle.id = 'bvg-view-toggle';
+    toggle.className = 'bvg-view-toggle';
+    toggle.innerHTML = `
+      <button data-view="modern">Modern</button>
+      <button data-view="classic">Classic</button>
+    `;
+    if (table) table.parentElement.insertBefore(toggle, table);
+    else document.body.prepend(toggle);
+
+    toggle.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => setView(btn.dataset.view, table));
+    });
+  }
+
+  // ═══════════════════════════════════════
   // MAIN
   // ═══════════════════════════════════════
   function run() {
@@ -1241,6 +1714,10 @@
     const dlcCount = scored.filter(g => g.itemType !== 'game').length;
     const wishCount = scored.filter(g => g.itemType === 'game' && g.wishlistedDOM).length;
     renderBanner({ bundleRating, depthRating, personalRating, picks: topMain, ownedCount, gameCount, dlcCount, wishCount, tiers, scored, dealQuality, unownedMsrpSum });
+    // Modern panel
+    renderModernPanel(scored, ownedSet, tiers);
+    ensureViewToggle(table);
+    setView(loadViewPreference(), table);
   }
   // ═══════════════════════════════════════
   // BOOTSTRAP
