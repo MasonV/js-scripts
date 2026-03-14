@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      5.1.0
+// @version      5.2.0
 // @description  Per-game scoring with DLC/package handling, side evaluation panel, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -10,12 +10,62 @@
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/barter-bundle-scorer/barter-bundle-scorer.meta.js
 // @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/barter-bundle-scorer/barter-bundle-scorer.user.js
 // @grant        GM_addStyle
+// @grant        GM_xmlhttpRequest
+// @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
 (function () {
   'use strict';
-  const SCRIPT_VERSION = '5.1.0';
+  const SCRIPT_VERSION = '5.2.0';
   console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
+
+  // ═══════════════════════════════════════
+  // UPDATE CHECK
+  // ═══════════════════════════════════════
+  function checkForUpdate() {
+    const META_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/barter-bundle-scorer/barter-bundle-scorer.meta.js';
+    try {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: META_URL + '?_=' + Date.now(), // cache bust
+        onload(resp) {
+          if (resp.status !== 200) return;
+          const match = resp.responseText.match(/@version\s+(\S+)/);
+          if (!match) return;
+          const remote = match[1];
+          if (remote !== SCRIPT_VERSION) {
+            console.log(`[BVG Scorer] Update available: v${SCRIPT_VERSION} → v${remote}`);
+            showUpdateBanner(remote);
+          } else {
+            console.log(`[BVG Scorer] Up to date (v${SCRIPT_VERSION})`);
+          }
+        },
+        onerror() { console.warn('[BVG Scorer] Update check failed (network error)'); },
+      });
+    } catch (e) {
+      console.warn('[BVG Scorer] Update check unavailable:', e);
+    }
+  }
+
+  function showUpdateBanner(remoteVersion) {
+    const downloadURL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/barter-bundle-scorer/barter-bundle-scorer.user.js';
+    // Insert into the side banner if it exists, otherwise before the table
+    const anchor = document.getElementById('bvg-scorer-banner') || document.getElementById('bvg-modern-panel');
+    if (!anchor) return;
+    const banner = document.createElement('div');
+    banner.className = 'bvg-update-banner';
+    banner.innerHTML = `
+      <span>Update available: <strong>v${SCRIPT_VERSION}</strong> → <strong>v${remoteVersion}</strong>
+        — <a href="${downloadURL}" target="_blank">Install update</a></span>
+      <button class="bvg-update-dismiss" title="Dismiss">&times;</button>
+    `;
+    banner.querySelector('.bvg-update-dismiss').addEventListener('click', () => banner.remove());
+    anchor.parentElement.insertBefore(banner, anchor);
+  }
+
+  // Fire update check immediately on load
+  checkForUpdate();
+
   // ═══════════════════════════════════════
   // STYLES (GM_addStyle bypasses CSP)
   // ═══════════════════════════════════════
@@ -108,6 +158,34 @@
       letter-spacing: .7px;
       color: #8b949e;
       margin-bottom: 8px;
+    }
+    /* ── Update banner ── */
+    .bvg-update-banner {
+      background: #1a2332;
+      border: 1px solid #58a6ff;
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-bottom: 10px;
+      font-size: 12px;
+      color: #c9d1d9;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .bvg-update-banner a {
+      color: #58a6ff;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .bvg-update-banner a:hover { text-decoration: underline; }
+    .bvg-update-dismiss {
+      background: none;
+      border: none;
+      color: #8b949e;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 4px;
     }
     /* ── Score cells ── */
     td.bvg-score-cell {
