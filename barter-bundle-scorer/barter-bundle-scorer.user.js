@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      4.3.2
+// @version      4.5.1
 // @description  Per-game scoring with DLC/package handling, side evaluation panel, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -14,7 +14,8 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  console.log('[BVG Scorer] v4.3.2 loaded on', location.href);
+  const SCRIPT_VERSION = '4.5.1';
+  console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
   // ═══════════════════════════════════════
   // STYLES (GM_addStyle bypasses CSP)
   // ═══════════════════════════════════════
@@ -291,6 +292,8 @@
   // MATH
   // ═══════════════════════════════════════
   const clamp01 = x => Math.max(0, Math.min(1, x));
+  // Prevent XSS when interpolating DOM-sourced strings into innerHTML templates
+  const escHtml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   function confidenceFromReviews(n) {
     if (!n || n <= 0) return 0;
     return clamp01(n / (n + SETTINGS.confidenceAnchor));
@@ -479,7 +482,7 @@
   // ═══════════════════════════════════════
   // Detect DLC, soundtracks, artbooks, and package parents
   // so they can be excluded from bundle score calculations
-  const DLC_KEYWORDS = /\b(soundtrack|ost|artbook|art\s*book|wallpaper|skin\s*pack|costume|dlc|season\s*pass|expansion|bonus\s*content|digital\s*deluxe|deluxe\s*edition|collector.s\s*edition|upgrade)\b/i;
+  const DLC_KEYWORDS = /\b(soundtrack|ost|artbook|art\s*book|wallpaper|skin\s*pack|costume|dlc|season\s*pass|expansion|bonus\s*content|digital\s*deluxe|deluxe\s*edition|collector[''\u2019]?s\s*edition|upgrade)\b/i;
   function classifyItem(title, tr, ratingPct, reviews) {
     const titleLower = title.toLowerCase();
     // DLC/soundtrack/artbook: match by title keywords
@@ -704,9 +707,26 @@
     if (!panel) return;
     panel.querySelectorAll('input[data-key]').forEach(input => {
       const key = input.dataset.key;
-      const val = input.type === 'checkbox' ? input.checked : parseFloat(input.value);
-      if (key.startsWith('w.')) SETTINGS.weights[key.slice(2)] = val;
-      else SETTINGS[key] = val;
+      if (input.type === 'checkbox') {
+        if (key.startsWith('w.')) SETTINGS.weights[key.slice(2)] = input.checked;
+        else SETTINGS[key] = input.checked;
+        return;
+      }
+      const val = parseFloat(input.value);
+      if (!Number.isFinite(val)) {
+        console.warn(`[BVG Scorer] Invalid value for ${key}: "${input.value}", skipping`);
+        return;
+      }
+      // Clamp to the input's own min/max HTML attributes when present
+      const min = input.hasAttribute('min') ? parseFloat(input.min) : -Infinity;
+      const max = input.hasAttribute('max') ? parseFloat(input.max) : Infinity;
+      const clamped = Math.max(min, Math.min(max, val));
+      if (clamped !== val) {
+        console.warn(`[BVG Scorer] Clamped ${key}: ${val} → ${clamped}`);
+        input.value = clamped;
+      }
+      if (key.startsWith('w.')) SETTINGS.weights[key.slice(2)] = clamped;
+      else SETTINGS[key] = clamped;
     });
     saveSettings(SETTINGS);
   }
@@ -733,7 +753,7 @@
     }).join('');
     return `<div style="margin:8px 0;max-width:260px;">${bars}</div>`;
   }
-  function renderBanner(bundleRating, depthRating, personalRating, picks, ownedCount, gameCount, dlcCount, wishCount, tiers, scored, dealQuality, unownedMsrpSum) {
+  function renderBanner({ bundleRating, depthRating, personalRating, picks, ownedCount, gameCount, dlcCount, wishCount, tiers, scored, dealQuality, unownedMsrpSum }) {
     let banner = document.getElementById('bvg-scorer-banner');
     if (!banner) {
       banner = document.createElement('div');
@@ -752,7 +772,7 @@
       </div>`;
     };
     const picksText = picks
-      .map(p => `<span class="bvg-pick-name" style="color:${scoreColor(p.score)}">${p.title}</span> <span class="bvg-pick-score">${p.score.toFixed(1)}</span>`)
+      .map(p => `<span class="bvg-pick-name" style="color:${scoreColor(p.score)}">${escHtml(p.title)}</span> <span class="bvg-pick-score">${p.score.toFixed(1)}</span>`)
       .join(' &middot; ');
     // Per-tier scoring: compute average score for games in each tier
     const tierHTML = (tiers && tiers.length > 0) ? `
@@ -764,13 +784,13 @@
           const tierTop = tierGames.length > 0 ? Math.max(...tierGames.map(g => g.score)) : 0;
           const color = ratingColor(tierAvg);
           return `<div class="bvg-tier-row">
-            <span>${t.name}</span>
+            <span>${escHtml(t.name)}</span>
             <span>${t.price != null ? '<span class="bvg-tier-price">$' + t.price.toFixed(2) + '</span>' : ''} (${tierGames.length} games) &middot; Avg: <strong style="color:${color}">${tierAvg.toFixed(0)}</strong> &middot; Best: ${tierTop.toFixed(0)}</span>
           </div>`;
         }).join('')}
       </div>` : '';
     banner.innerHTML = `
-      <div class="bvg-title">Bundle Evaluation v4.3</div>
+      <div class="bvg-title">Bundle Evaluation v${SCRIPT_VERSION}</div>
       <div class="bvg-row">
         ${statBadge('Bundle', bundleRating, `top ${SETTINGS.topNMain}`)}
         ${statBadge('Depth', depthRating, `top ${SETTINGS.topNDepth}`)}
@@ -800,7 +820,6 @@
       SETTINGS = clone(DEFAULT_SETTINGS); saveSettings(SETTINGS); clearScoreCells(); run();
     });
     document.getElementById('bvg-export-btn')?.addEventListener('click', () => {
-      const games = (scored || []).filter(g => g.itemType === 'game');
       const topList = picks.map((p, i) => `${i + 1}. ${p.title} (${p.score.toFixed(1)})`).join('\n');
       const lines = [
         `Bundle Evaluation — ${document.title || location.href}`,
@@ -809,9 +828,12 @@
         dealQuality != null ? `Deal quality: ${dealQuality.toFixed(1)}x ($${unownedMsrpSum.toFixed(0)} unowned MSRP / $${CURRENT_BUNDLE_COST.toFixed(2)})` : '',
         '', 'Top Picks:', topList,
       ].filter(Boolean).join('\n');
+      const btn = document.getElementById('bvg-export-btn');
       navigator.clipboard.writeText(lines).then(() => {
-        const btn = document.getElementById('bvg-export-btn');
         if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.innerHTML = '&#128203; Copy Summary', 1500); }
+      }).catch(() => {
+        if (btn) { btn.textContent = 'Copy failed'; setTimeout(() => btn.innerHTML = '&#128203; Copy Summary', 2000); }
+        console.warn('[BVG Scorer] Clipboard write denied — page may not be in a secure context');
       });
     });
   }
@@ -1218,15 +1240,22 @@
     const gameCount = scored.filter(g => g.itemType === 'game').length;
     const dlcCount = scored.filter(g => g.itemType !== 'game').length;
     const wishCount = scored.filter(g => g.itemType === 'game' && g.wishlistedDOM).length;
-    renderBanner(bundleRating, depthRating, personalRating, topMain, ownedCount, gameCount, dlcCount, wishCount, tiers, scored, dealQuality, unownedMsrpSum);
+    renderBanner({ bundleRating, depthRating, personalRating, picks: topMain, ownedCount, gameCount, dlcCount, wishCount, tiers, scored, dealQuality, unownedMsrpSum });
   }
   // ═══════════════════════════════════════
   // BOOTSTRAP
   // ═══════════════════════════════════════
+  let _bvgObserver = null;
   function boot() {
+    // Disconnect any previous observer to prevent duplicates on re-run
+    if (_bvgObserver) {
+      _bvgObserver.disconnect();
+      _bvgObserver = null;
+      console.log('[BVG Scorer] Cleaned up previous MutationObserver');
+    }
     try { run(); } catch (e) { console.error('[BVG Scorer] Error:', e); }
     let debounce = null;
-    const observer = new MutationObserver(() => {
+    _bvgObserver = new MutationObserver(() => {
       clearTimeout(debounce);
       debounce = setTimeout(() => {
         if (!document.querySelector('.bvg-score-cell')) {
@@ -1234,7 +1263,7 @@
         }
       }, 400);
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    _bvgObserver.observe(document.body, { childList: true, subtree: true });
   }
   boot();
 })();
