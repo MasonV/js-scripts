@@ -481,7 +481,7 @@
   // ═══════════════════════════════════════
   // Detect DLC, soundtracks, artbooks, and package parents
   // so they can be excluded from bundle score calculations
-  const DLC_KEYWORDS = /\b(soundtrack|ost|artbook|art\s*book|wallpaper|skin\s*pack|costume|dlc|season\s*pass|expansion|bonus\s*content|digital\s*deluxe|deluxe\s*edition|collector.s\s*edition|upgrade)\b/i;
+  const DLC_KEYWORDS = /\b(soundtrack|ost|artbook|art\s*book|wallpaper|skin\s*pack|costume|dlc|season\s*pass|expansion|bonus\s*content|digital\s*deluxe|deluxe\s*edition|collector[''\u2019]?s\s*edition|upgrade)\b/i;
   function classifyItem(title, tr, ratingPct, reviews) {
     const titleLower = title.toLowerCase();
     // DLC/soundtrack/artbook: match by title keywords
