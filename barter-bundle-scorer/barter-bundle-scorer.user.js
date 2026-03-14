@@ -428,15 +428,21 @@
       opacity: .45;
       border-style: dashed;
     }
-    .bvg-card-img {
-      width: 120px;
-      min-height: 56px;
-      object-fit: cover;
+    .bvg-card-img-wrap {
+      position: relative;
+      overflow: hidden;
       background: #161b22;
+      min-height: 56px;
+    }
+    .bvg-card-img {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
       display: block;
     }
     .bvg-card-img-placeholder {
-      width: 120px;
       min-height: 56px;
       background: #161b22;
     }
@@ -617,7 +623,7 @@
       .bvg-card {
         grid-template-columns: 80px 1fr auto;
       }
-      .bvg-card-img { width: 80px; }
+      .bvg-card-img-wrap { width: 80px; }
       .bvg-card-img-placeholder { width: 80px; }
     }
   `);
@@ -806,11 +812,15 @@
         const prices = {};
         for (const cd of CURRENCY_DEFS) {
           const m = text.match(cd.re);
-          if (m) prices[cd.code] = parseFloat(m[1]);
+          if (m) prices[cd.code] = parseFloat(m[1] || m[2]);
         }
         const priceMatch = text.match(/\$\s*(\d+(?:\.\d{1,2})?)/);
+        // Extract a clean label: text before first price/currency indicator
+        const labelMatch = text.match(/^(.+?)(?:\s*[:|\-]\s*(?:\d|[$€£₽CA])|$)/);
+        const label = labelMatch ? labelMatch[1].replace(/\s*[:|\-–—]\s*$/, '').trim() : text.substring(0, 40);
         currentTier = {
           name: text.substring(0, 80),
+          label: label || text.substring(0, 40),
           price: priceMatch ? parseFloat(priceMatch[1]) : null,
           prices: prices,
           tr: tr,
@@ -1609,13 +1619,14 @@
   const STORAGE_KEY_VIEW = 'bvg_scorer_view_v1';
   const STORAGE_KEY_CURRENCY = 'bvg_scorer_currency_v1';
   // Currency symbols and regex patterns for extraction from tier text
+  // Matches both symbol-prefix ($9.99) and code-suffix (9.99 USD) formats
   const CURRENCY_DEFS = [
-    { code: 'USD', symbol: '$',  re: /\$\s*(\d+(?:\.\d{1,2})?)/ },
-    { code: 'EUR', symbol: '\u20AC', re: /\u20AC\s*(\d+(?:\.\d{1,2})?)/ },  // €
-    { code: 'GBP', symbol: '\u00A3', re: /\u00A3\s*(\d+(?:\.\d{1,2})?)/ },  // £
-    { code: 'CAD', symbol: 'C$', re: /C\$\s*(\d+(?:\.\d{1,2})?)/ },
-    { code: 'AUD', symbol: 'A$', re: /A\$\s*(\d+(?:\.\d{1,2})?)/ },
-    { code: 'RUB', symbol: '\u20BD', re: /(\d+(?:\.\d{1,2})?)\s*\u20BD/ },   // ₽ (suffix)
+    { code: 'USD', symbol: '$',  re: /(?:\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*USD)/ },
+    { code: 'EUR', symbol: '\u20AC', re: /(?:\u20AC\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*EUR)/ },
+    { code: 'GBP', symbol: '\u00A3', re: /(?:\u00A3\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*GBP)/ },
+    { code: 'CAD', symbol: 'C$', re: /(?:C\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*CAD)/ },
+    { code: 'AUD', symbol: 'A$', re: /(?:A\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*AUD)/ },
+    { code: 'RUB', symbol: '\u20BD', re: /(?:\u20BD\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*(?:\u20BD|RUB))/ },
   ];
   function loadCurrencyPref() {
     try { return localStorage.getItem(STORAGE_KEY_CURRENCY) || ''; } catch { return ''; }
@@ -1744,7 +1755,8 @@
           const fmtPrice = formatTierPrice(tier, st.currency);
           const priceStr = fmtPrice ? `<span class="bvg-td-price">${escHtml(fmtPrice)}</span>` : '';
           const statsStr = ts ? `<span class="bvg-td-stats">${ts.count} games &middot; avg ${ts.avg.toFixed(0)}</span>` : '';
-          cardsHTML += `<div class="bvg-tier-divider"><div class="bvg-td-left">${escHtml(tName)} ${priceStr}</div>${statsStr}</div>`;
+          const tierLabel = tier.label || tName;
+          cardsHTML += `<div class="bvg-tier-divider"><div class="bvg-td-left">${escHtml(tierLabel)} ${priceStr}</div>${statsStr}</div>`;
         }
       }
 
@@ -1754,7 +1766,7 @@
 
       // Game image
       const imgHTML = g.imgSrc
-        ? `<img class="bvg-card-img" src="${escHtml(g.imgSrc)}" alt="" loading="lazy">`
+        ? `<div class="bvg-card-img-wrap"><img class="bvg-card-img" src="${escHtml(g.imgSrc)}" alt="" loading="lazy"></div>`
         : '<div class="bvg-card-img-placeholder"></div>';
 
       // Tags (owned, DLC, unrated, tier — NOT wishlist, which is now inline in meta)
