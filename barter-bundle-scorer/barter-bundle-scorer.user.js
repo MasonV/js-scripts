@@ -291,6 +291,8 @@
   // MATH
   // ═══════════════════════════════════════
   const clamp01 = x => Math.max(0, Math.min(1, x));
+  // Prevent XSS when interpolating DOM-sourced strings into innerHTML templates
+  const escHtml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   function confidenceFromReviews(n) {
     if (!n || n <= 0) return 0;
     return clamp01(n / (n + SETTINGS.confidenceAnchor));
@@ -752,7 +754,7 @@
       </div>`;
     };
     const picksText = picks
-      .map(p => `<span class="bvg-pick-name" style="color:${scoreColor(p.score)}">${p.title}</span> <span class="bvg-pick-score">${p.score.toFixed(1)}</span>`)
+      .map(p => `<span class="bvg-pick-name" style="color:${scoreColor(p.score)}">${escHtml(p.title)}</span> <span class="bvg-pick-score">${p.score.toFixed(1)}</span>`)
       .join(' &middot; ');
     // Per-tier scoring: compute average score for games in each tier
     const tierHTML = (tiers && tiers.length > 0) ? `
@@ -764,7 +766,7 @@
           const tierTop = tierGames.length > 0 ? Math.max(...tierGames.map(g => g.score)) : 0;
           const color = ratingColor(tierAvg);
           return `<div class="bvg-tier-row">
-            <span>${t.name}</span>
+            <span>${escHtml(t.name)}</span>
             <span>${t.price != null ? '<span class="bvg-tier-price">$' + t.price.toFixed(2) + '</span>' : ''} (${tierGames.length} games) &middot; Avg: <strong style="color:${color}">${tierAvg.toFixed(0)}</strong> &middot; Best: ${tierTop.toFixed(0)}</span>
           </div>`;
         }).join('')}
