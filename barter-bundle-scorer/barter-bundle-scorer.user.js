@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      5.2.0
+// @version      5.3.0
 // @description  Per-game scoring with DLC/package handling, side evaluation panel, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -16,7 +16,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const SCRIPT_VERSION = '5.2.0';
+  const SCRIPT_VERSION = '5.3.0';
   console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
 
   // ═══════════════════════════════════════
@@ -628,6 +628,51 @@
     }
   `);
   // ═══════════════════════════════════════
+  // STORAGE AVAILABILITY
+  //
+  // localStorage can fail in private/incognito
+  // mode, when quota is exceeded, or when
+  // blocked by browser policy. We probe once
+  // at startup and surface a visible warning
+  // so users know settings won't persist.
+  // ═══════════════════════════════════════
+  let _storageAvailable = true;
+  (function probeStorage() {
+    const testKey = '__bvg_storage_probe__';
+    try {
+      localStorage.setItem(testKey, '1');
+      localStorage.removeItem(testKey);
+    } catch (e) {
+      _storageAvailable = false;
+      console.warn('[BVG Scorer] localStorage unavailable — settings will not persist.', e.message || e);
+    }
+  })();
+
+  // Wrapper for localStorage.setItem that warns once per session on failure
+  let _storageWarningShown = false;
+  function safeStorageSet(key, value) {
+    if (!_storageAvailable) return;
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      if (!_storageWarningShown) {
+        _storageWarningShown = true;
+        console.warn(`[BVG Scorer] Failed to write "${key}" — quota exceeded or storage blocked.`, e.message || e);
+        showStorageWarning();
+      }
+    }
+  }
+
+  function showStorageWarning() {
+    const banner = document.getElementById('bvg-scorer-banner');
+    if (!banner) return;
+    const warn = document.createElement('div');
+    warn.style.cssText = 'background:#2d1b1b;border:1px solid #8a1f1f;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:11px;color:#f0a0a0;';
+    warn.textContent = '⚠ Storage unavailable — your settings and owned-game overrides will not persist. Check browser privacy settings or quota.';
+    banner.prepend(warn);
+  }
+
+  // ═══════════════════════════════════════
   // SETTINGS
   // ═══════════════════════════════════════
   const STORAGE_KEY_OWNED    = 'bvg_scorer_owned_v2';
@@ -648,7 +693,7 @@
       return { ...d, ...s, weights: { ...d.weights, ...(s.weights || {}) } };
     } catch { return clone(DEFAULT_SETTINGS); }
   }
-  function saveSettings(s) { localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(s)); }
+  function saveSettings(s) { safeStorageSet(STORAGE_KEY_SETTINGS, JSON.stringify(s)); }
   let SETTINGS = loadSettings();
   let CURRENT_BUNDLE_COST = null;
   // Column injection counts per row type:
@@ -685,7 +730,7 @@
       return new Set(Array.isArray(a) ? a : []);
     } catch { return new Set(); }
   }
-  function saveOwnedSet(s) { localStorage.setItem(STORAGE_KEY_OWNED, JSON.stringify([...s])); }
+  function saveOwnedSet(s) { safeStorageSet(STORAGE_KEY_OWNED, JSON.stringify([...s])); }
   // ═══════════════════════════════════════
   // DOM: TABLE DETECTION
   // ═══════════════════════════════════════
@@ -941,12 +986,15 @@
     // Fallback: if the phased scan didn't reach review/rating data (e.g. no MSRP
     // column for this row), do a dedicated scan for a cell with two numbers where
     // one is ≤100 (rating%) and the other is the review count.
+    // Reasonableness guards: rating must be 1-100, review count must be <10M
+    // (Steam's most-reviewed game has ~1M). This prevents misidentifying
+    // unrelated numeric cells (e.g. app IDs, prices) as review data.
     if (ratingPct == null && reviews == null) {
       for (let i = cells.length - 1; i >= 0; i--) {
         const nums = numsIn(cells[i]);
         if (nums.length >= 2) {
           const sorted = [...nums].sort((a, b) => b - a);
-          if (sorted[1] <= 100) {
+          if (sorted[1] >= 1 && sorted[1] <= 100 && sorted[0] <= 10_000_000) {
             reviews = sorted[0];
             ratingPct = sorted[1];
             reviewCell = cells[i];
@@ -1529,13 +1577,16 @@
     table.dataset[key] = dir;
     headerRow.querySelectorAll('.bvg-sort-ind').forEach(s => { s.textContent = ''; });
     if (indicator) indicator.textContent = dir === 'desc' ? ' \u25BC' : ' \u25B2';
+    // Extract text from a cell at colIdx with bounds safety — rows may have
+    // fewer cells than the header due to colspan or missing columns.
+    const cellText = (tr) => {
+      const cells = tr.querySelectorAll('td');
+      if (colIdx >= cells.length) return '';
+      return cells[colIdx] ? cells[colIdx].textContent.replace(/,/g, '').trim() : '';
+    };
     groups.sort((a, b) => {
-      const aTr = a.primaryTr;
-      const bTr = b.primaryTr;
-      const aCell = aTr.querySelectorAll('td')[colIdx];
-      const bCell = bTr.querySelectorAll('td')[colIdx];
-      const aText = aCell ? aCell.textContent.replace(/,/g, '').trim() : '';
-      const bText = bCell ? bCell.textContent.replace(/,/g, '').trim() : '';
+      const aText = cellText(a.primaryTr);
+      const bText = cellText(b.primaryTr);
       const aNum = parseFloat(aText.replace(/[^0-9.\-]/g, ''));
       const bNum = parseFloat(bText.replace(/[^0-9.\-]/g, ''));
       if (!isNaN(aNum) && !isNaN(bNum)) return dir === 'asc' ? aNum - bNum : bNum - aNum;
@@ -1631,9 +1682,7 @@
   function loadCurrencyPref() {
     try { return localStorage.getItem(STORAGE_KEY_CURRENCY) || ''; } catch { return ''; }
   }
-  function saveCurrencyPref(c) {
-    try { localStorage.setItem(STORAGE_KEY_CURRENCY, c); } catch {}
-  }
+  function saveCurrencyPref(c) { safeStorageSet(STORAGE_KEY_CURRENCY, c); }
   // Format a tier price using the preferred currency, falling back to USD or first available
   function formatTierPrice(tier, currencyPref) {
     if (!tier.prices || !Object.keys(tier.prices).length) {
@@ -1676,9 +1725,7 @@
     try { return localStorage.getItem(STORAGE_KEY_VIEW) || 'modern'; }
     catch { return 'modern'; }
   }
-  function saveViewPreference(v) {
-    try { localStorage.setItem(STORAGE_KEY_VIEW, v); } catch {}
-  }
+  function saveViewPreference(v) { safeStorageSet(STORAGE_KEY_VIEW, v); }
 
   function renderModernPanel(scored, ownedSet, tiers) {
     let panel = document.getElementById('bvg-modern-panel');
@@ -1970,6 +2017,48 @@
   }
 
   // ═══════════════════════════════════════
+  // COLUMN INJECTION PIPELINE
+  //
+  // Single entry point for all DOM column
+  // modifications. Enforces correct ordering
+  // and validates column alignment afterward.
+  // ═══════════════════════════════════════
+  function injectColumns(table, scored, ownedSet) {
+    // Phase 1: Score column (adds 1 header + 1 data cell per game row)
+    ensureScoreHeader(table);
+    ensureScoreCells(scored, ownedSet);
+
+    // Phase 2: Review column split (hides 1 + adds 2 = net +1 per row)
+    splitReviewColumn(table, scored);
+
+    // Phase 3: Decorative tier labels (no column count change)
+    addTierLabels(scored);
+
+    // Phase 4: Fix colspan on non-game rows to match new column count
+    fixNonGameRows(table);
+
+    // Phase 5: Post-injection features that read final column layout
+    makeAllColumnsSortable(table);
+    labelEmptyHeaders(table);
+
+    // Validate: header cell count should match first game row's cell count.
+    // Mismatch indicates a colspan/injection bug — log for debugging.
+    const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
+    const firstGameRow = scored.length > 0 ? scored[0].tr : null;
+    if (headerRow && firstGameRow) {
+      const headerCols = [...headerRow.querySelectorAll('th, td')]
+        .filter(c => c.style.display !== 'none')
+        .reduce((sum, c) => sum + (c.colSpan || 1), 0);
+      const dataCols = [...firstGameRow.querySelectorAll('td')]
+        .filter(c => c.style.display !== 'none')
+        .reduce((sum, c) => sum + (c.colSpan || 1), 0);
+      if (headerCols !== dataCols) {
+        console.warn(`[BVG Scorer] Column mismatch after injection: header=${headerCols}, data=${dataCols}. Table alignment may be off.`);
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════
   // MAIN
   // ═══════════════════════════════════════
   function run() {
@@ -1995,14 +2084,12 @@
       const { score, breakdown } = scoreGame(g);
       return { ...g, score, breakdown };
     });
-    // DOM modifications
-    ensureScoreHeader(table);
-    ensureScoreCells(scored, ownedSet);
-    splitReviewColumn(table, scored);
-    addTierLabels(scored);
-    fixNonGameRows(table);
-    makeAllColumnsSortable(table);
-    labelEmptyHeaders(table);
+    // DOM modifications — centralized injection pipeline.
+    // Order matters: score column first (other injections reference its position),
+    // then review split (adds 2 columns), then tier labels (decorative, no column change),
+    // then fixup for non-game rows whose colspan must account for all injected columns,
+    // and finally sortable headers + label inference which read the final column layout.
+    injectColumns(table, scored, ownedSet);
     const bundleScores = computeBundleScores(scored, ownedSet);
     const { bundleRating, depthRating, personalRating, topMain, dealQuality, unownedMsrpSum } = bundleScores;
     const ownedCount = scored.filter(g => g.itemType === 'game' && ownedSet.has(g.title)).length;
@@ -2010,6 +2097,11 @@
     const dlcCount = scored.filter(g => g.itemType !== 'game').length;
     const wishCount = scored.filter(g => g.itemType === 'game' && g.wishlistedDOM).length;
     renderBanner({ bundleRating, depthRating, personalRating, picks: topMain, ownedCount, gameCount, dlcCount, wishCount, tiers, scored, dealQuality, unownedMsrpSum });
+    // Show storage warning after banner is rendered (if storage probe failed at startup)
+    if (!_storageAvailable && !_storageWarningShown) {
+      _storageWarningShown = true;
+      showStorageWarning();
+    }
     // Modern panel
     renderModernPanel(scored, ownedSet, tiers);
     ensureViewToggle(table);

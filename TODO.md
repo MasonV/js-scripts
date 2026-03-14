@@ -28,30 +28,30 @@ Synced from [Notion: AI Agent TODO Backlog](https://www.notion.so/faceefca3f034f
   - Extracts all game data from Barter's DOM into a structured data model and renders a card-based modern panel with search, sorting, ownership toggle, tier dividers, and filter chips. Original table hidden by default with a Modern/Classic toggle to switch views. View preference persisted in localStorage.
   - Completed: 2026-03-14
 
+- [x] **Add bounds checking to sortByColumn** `bug` SCORE: 2.4
+  - sortByColumn() directly accessed td[colIdx] without bounds checking. Extracted cellText() helper with bounds guard so rows with fewer cells than expected return empty string instead of crashing the comparator.
+  - Completed: 2026-03-14
+
+- [x] **Improve review/rating detection fallback validation** `bug` SCORE: 2.4
+  - Fallback scan now enforces reasonableness: rating must be 1-100, review count must be <10M. Prevents misidentifying unrelated numeric cells (app IDs, prices) as review data on malformed pages.
+  - Completed: 2026-03-14
+
+- [x] **Centralize column injection pipeline** `refactor` SCORE: 2.2
+  - Created injectColumns() orchestrator that enforces correct ordering of score column, review split, tier labels, colspan fixup, and sortable headers. Includes post-injection validation that header colspan sum matches data row cell count.
+  - Completed: 2026-03-14
+
+- [x] **Add localStorage availability test and error reporting** `debt` SCORE: 2.2
+  - Added startup probe for localStorage availability. All setItem calls routed through safeStorageSet() wrapper. Shows visible warning banner when storage is unavailable (incognito, quota exceeded, policy blocked). Warns once per session.
+  - Completed: 2026-03-14
+
 ### Open
-
-- [ ] **Add bounds checking to sortByColumn** `bug` SCORE: 2.4
-  - sortByColumn() directly accesses td[colIdx] without bounds checking. If a game row has fewer cells than expected, undefined is passed to the sort comparator causing silent failures.
-  - Effort: 4 | Simplicity: 3 | Efficiency: 1 | Safety: 2 | Value: 2
-
-- [ ] **Improve review/rating detection fallback validation** `bug` SCORE: 2.4
-  - Fallback scan searches for cells with 2+ numbers assuming larger is review count. No reasonableness check — accepts absurd values. Can misidentify columns on malformed pages.
-  - Effort: 4 | Simplicity: 3 | Efficiency: 1 | Safety: 2 | Value: 2
-
-- [ ] **Centralize column injection pipeline** `refactor` SCORE: 2.2
-  - Three separate functions handle column injection (score, review split, tier labels) with implicit dependencies on each other's side effects. Changes to one break others silently.
-  - Effort: 2 | Simplicity: 3 | Efficiency: 2 | Safety: 2 | Value: 2
-
-- [ ] **Add localStorage availability test and error reporting** `debt` SCORE: 2.2
-  - Multiple try/catch blocks silently fall back to defaults when localStorage fails. Users don't know settings weren't persisted. Privacy mode or quota exceeded failures invisible.
-  - Effort: 4 | Simplicity: 3 | Efficiency: 1 | Safety: 1 | Value: 2
 
 - [ ] **Add JSON export alongside clipboard text export** `feature` SCORE: 2.0
   - Current export copies formatted text to clipboard. Add structured JSON export for programmatic analysis and cross-tool data flow.
   - Effort: 4 | Simplicity: 1 | Efficiency: 1 | Safety: 1 | Value: 3
 
 - [ ] **Stabilize colspan fixup logic** `debt` SCORE: 2.0
-  - Last 4 commits (v4.3.1–v4.3.2) are all alignment fixes for colspan handling in injectScoreColumn(). Add explicit validation that header cell count matches data cell count after injection.
+  - Last 4 commits (v4.3.1–v4.3.2) are all alignment fixes for colspan handling in injectScoreColumn(). Post-injection validation now logs mismatches (via injectColumns()), but root cause fixup logic still fragile.
   - Effort: 2 | Simplicity: 1 | Efficiency: 1 | Safety: 3 | Value: 3
 
 - [ ] **Fix DLC classification logic inconsistency** `bug` SCORE: 2.0
