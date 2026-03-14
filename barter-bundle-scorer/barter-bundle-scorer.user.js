@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      6.0.0
+// @version      6.0.1
 // @description  Full-page bundle evaluation dashboard with per-game scoring, card grid, stats dashboard, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -16,7 +16,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const SCRIPT_VERSION = '6.0.0';
+  const SCRIPT_VERSION = '6.0.1';
   console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
 
   // ═══════════════════════════════════════
@@ -1115,7 +1115,7 @@
 
   function hideOriginalPage() {
     for (const child of document.body.children) {
-      if (child.id === 'bvg-app') continue;
+      if (child.id === 'bvg-app' || child.id === 'bvg-view-fab') continue;
       if (child.tagName === 'SCRIPT' || child.tagName === 'STYLE' || child.tagName === 'LINK') continue;
       child.style.display = 'none';
       child.dataset.bvgHidden = '1';
@@ -1710,10 +1710,13 @@
     // Extract metadata from original page before hiding
     const metadata = extractBundleMetadata();
 
+    // Create floating view toggle first so it's always available,
+    // even if renderApp throws
+    ensureViewFAB();
+
     // Hide original page and render custom app
     hideOriginalPage();
     renderApp(scored, ownedSet, tiers, bundleScores, metadata);
-    ensureViewFAB();
 
     // Apply page preference (modern by default, classic shows original page)
     const pagePref = loadPagePref();
