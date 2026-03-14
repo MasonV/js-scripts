@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      5.3.0
-// @description  Per-game scoring with DLC/package handling, side evaluation panel, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
+// @version      6.0.0
+// @description  Full-page bundle evaluation dashboard with per-game scoring, card grid, stats dashboard, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -16,7 +16,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const SCRIPT_VERSION = '5.3.0';
+  const SCRIPT_VERSION = '6.0.0';
   console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
 
   // ═══════════════════════════════════════
@@ -49,8 +49,7 @@
 
   function showUpdateBanner(remoteVersion) {
     const downloadURL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/barter-bundle-scorer/barter-bundle-scorer.user.js';
-    // Insert into the side banner if it exists, otherwise before the table
-    const anchor = document.getElementById('bvg-scorer-banner') || document.getElementById('bvg-modern-panel');
+    const anchor = document.getElementById('bvg-app');
     if (!anchor) return;
     const banner = document.createElement('div');
     banner.className = 'bvg-update-banner';
@@ -60,7 +59,7 @@
       <button class="bvg-update-dismiss" title="Dismiss">&times;</button>
     `;
     banner.querySelector('.bvg-update-dismiss').addEventListener('click', () => banner.remove());
-    anchor.parentElement.insertBefore(banner, anchor);
+    anchor.prepend(banner);
   }
 
   // Fire update check immediately on load
@@ -70,95 +69,27 @@
   // STYLES (GM_addStyle bypasses CSP)
   // ═══════════════════════════════════════
   GM_addStyle(`
-    /* ── Layout: use full width + room for side panel ── */
-    html, body { max-width: none !important; }
-    body { padding-right: 360px !important; }
-    .container, .container-fluid, .wrap, main {
-      width: 100% !important;
-      max-width: none !important;
-    }
-
-    /* ── Table layout: widen title column ── */
-    table.collection { table-layout: auto !important; width: 100% !important; }
-    table.collection th.cTitles,
-    table.collection td:nth-child(3) {
-      width: auto !important;
-      min-width: 200px;
-    }
-    /* ── Banner ── */
-    #bvg-scorer-banner {
-      position: fixed;
-      top: 14px;
-      right: 14px;
-      width: 332px;
-      z-index: 9999;
-      background: linear-gradient(180deg, #0d1117 0%, #111820 100%);
-      border: 1px solid #1f2937;
-      border-radius: 12px;
-      padding: 12px 14px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-      font-size: 13px; line-height: 1.5;
-      color: #c9d1d9;
-      box-shadow: 0 2px 12px rgba(0,0,0,.4);
-      max-height: calc(100vh - 28px);
-      overflow: auto;
-    }
-    #bvg-scorer-banner strong { color: #e6edf3; }
-    #bvg-scorer-banner .bvg-row {
+    /* ── App root ── */
+    #bvg-app {
       display: grid;
+      grid-template-rows: auto auto auto 1fr;
       grid-template-columns: 1fr;
-      gap: 8px;
+      min-height: 100vh;
+      max-width: 2400px;
+      margin: 0 auto;
+      padding: 16px 24px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #c9d1d9;
+      background: #010409;
+      box-sizing: border-box;
     }
-    /* ── Stat badges ── */
-    #bvg-scorer-banner .bvg-stat {
-      background: #161b22;
-      border: 1px solid #21262d;
-      border-radius: 8px;
-      padding: 5px 14px;
-      display: flex; align-items: center; gap: 8px;
-      position: relative;
-      overflow: hidden;
-    }
-    #bvg-scorer-banner .bvg-stat .bvg-score-bar {
-      position: absolute; left: 0; bottom: 0;
-      height: 3px;
-      border-radius: 0 0 8px 8px;
-      transition: width .3s ease;
-    }
-    #bvg-scorer-banner .bvg-stat .bvg-score-num {
-      font-size: 18px;
-      font-weight: 800;
-      letter-spacing: -0.5px;
-      font-variant-numeric: tabular-nums;
-    }
-    #bvg-scorer-banner .bvg-stat .bvg-score-denom {
-      font-size: 11px; opacity: .45; font-weight: 400;
-    }
-    #bvg-scorer-banner .bvg-stat .bvg-score-label {
-      font-size: 10px; text-transform: uppercase;
-      letter-spacing: .5px; opacity: .55; font-weight: 600;
-    }
-    #bvg-scorer-banner .bvg-picks {
-      margin-top: 8px; font-size: 12px; line-height: 1.55;
-    }
-    #bvg-scorer-banner .bvg-picks strong { margin-right: 4px; }
-    #bvg-scorer-banner .bvg-pick-name {
-      font-weight: 600;
-    }
-    #bvg-scorer-banner .bvg-pick-score {
-      opacity: .45; font-size: 11px; font-weight: 400;
-    }
-    #bvg-scorer-banner .bvg-meta {
-      opacity: .55; margin-top: 8px; font-size: 10px;
-      letter-spacing: .2px;
-    }
-    #bvg-scorer-banner .bvg-title {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: .7px;
-      color: #8b949e;
-      margin-bottom: 8px;
-    }
+    #bvg-app *, #bvg-app *::before, #bvg-app *::after { box-sizing: border-box; }
+    #bvg-app strong { color: #e6edf3; }
+    #bvg-app a { color: #58a6ff; text-decoration: none; }
+    #bvg-app a:hover { text-decoration: underline; }
+
     /* ── Update banner ── */
     .bvg-update-banner {
       background: #1a2332;
@@ -173,237 +104,198 @@
       justify-content: space-between;
       gap: 8px;
     }
-    .bvg-update-banner a {
-      color: #58a6ff;
-      font-weight: 600;
-      text-decoration: none;
-    }
-    .bvg-update-banner a:hover { text-decoration: underline; }
+    .bvg-update-banner a { color: #58a6ff; font-weight: 600; }
     .bvg-update-dismiss {
-      background: none;
-      border: none;
-      color: #8b949e;
-      cursor: pointer;
-      font-size: 14px;
-      padding: 0 4px;
-    }
-    /* ── Score cells ── */
-    td.bvg-score-cell {
-      font-weight: 800;
-      font-variant-numeric: tabular-nums;
-      padding: 6px 10px !important;
-      white-space: nowrap;
-      cursor: pointer;
-      user-select: none;
-      text-align: center;
-      border-radius: 4px;
-      transition: opacity .15s, transform .1s;
-      color: #fff;
-      font-size: 14px;
-      letter-spacing: -0.3px;
-      min-width: 38px;
-      text-shadow: 0 1px 2px rgba(0,0,0,.4);
-      vertical-align: middle;
-    }
-    td.bvg-score-cell:hover {
-      opacity: .85;
-      transform: scale(1.03);
-    }
-    td.bvg-score-cell.bvg-owned {
-      background: #1a1e24 !important;
-      color: #555d68 !important;
-      text-decoration: line-through;
-      text-shadow: none;
-    }
-    td.bvg-score-cell.bvg-dlc {
-      background: #1a1e24 !important;
-      color: #555d68 !important;
-      font-size: 11px !important;
-      font-weight: 400 !important;
-      text-shadow: none;
-      opacity: .6;
-    }
-    /* ── Score header ── */
-    th.bvg-score-header {
-      min-width: 42px;
-      text-align: center;
-    }
-    /* ── Sortable headers ── */
-    th.bvg-sortable { cursor: pointer; user-select: none; }
-    th.bvg-sortable:hover { text-decoration: underline; }
-    .bvg-sort-ind {
-      font-size: 14px;
-      font-weight: 700;
-      margin-left: 2px;
-      vertical-align: middle;
-      opacity: .8;
-    }
-    /* ── Tier labels (inline beside game title) ── */
-    .bvg-tier-label {
-      display: inline-block;
-      font-size: 10px;
-      font-weight: 600;
-      color: #8b949e;
-      background: #21262d;
-      border-radius: 4px;
-      padding: 1px 6px;
-      margin-left: 6px;
-      vertical-align: middle;
-    }
-    /* ── Split review cells ── */
-    .bvg-review-cell {
-      font-variant-numeric: tabular-nums;
-      white-space: nowrap;
-      text-align: center;
-      padding: 4px 8px !important;
-    }
-    .bvg-review-header {
-      text-align: center;
-      min-width: 50px;
-    }
-    /* ── Tier section in banner ── */
-    #bvg-scorer-banner .bvg-tiers {
-      margin-top: 8px;
-      font-size: 12px;
-      line-height: 1.55;
-    }
-    #bvg-scorer-banner .bvg-tier-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 2px 0;
-      border-bottom: 1px solid #21262d;
-    }
-    #bvg-scorer-banner .bvg-tier-price {
-      font-weight: 700;
-      color: #58a6ff;
-    }
-    /* ── Settings panel ── */
-    #bvg-settings-panel {
-      display: none;
-      background: #0d1117;
-      border: 1px solid #21262d;
-      border-radius: 10px;
-      padding: 16px 20px;
-      margin-top: 10px;
-      font-size: 12px;
-    }
-    #bvg-settings-panel.open { display: block; }
-    #bvg-settings-panel label {
-      display: flex; align-items: center; gap: 10px;
-      margin: 6px 0; color: #8b949e;
-    }
-    #bvg-settings-panel input[type="number"] {
-      width: 58px;
-      background: #161b22; color: #c9d1d9;
-      border: 1px solid #30363d; border-radius: 5px;
-      padding: 3px 7px; font-size: 12px;
-      font-variant-numeric: tabular-nums;
-    }
-    #bvg-settings-panel input[type="number"]:focus {
-      outline: none; border-color: #58a6ff;
-    }
-    #bvg-settings-panel input[type="checkbox"] { accent-color: #58a6ff; }
-    .bvg-settings-btn {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #8b949e;
-      padding: 5px 14px;
-      cursor: pointer;
-      font-size: 11px;
-      font-weight: 600;
-      transition: all .15s;
-    }
-    .bvg-settings-btn:hover {
-      color: #e6edf3;
-      border-color: #58a6ff;
-      background: #1a2332;
+      background: none; border: none; color: #8b949e;
+      cursor: pointer; font-size: 14px; padding: 0 4px;
     }
 
-    /* ── Modern Panel ── */
-    #bvg-modern-panel {
-      max-width: calc(100% - 380px);
-      margin: 16px auto;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-      color: #c9d1d9;
+    /* ── Header bar ── */
+    .bvg-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 8px 0 12px;
+      border-bottom: 1px solid #21262d;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
     }
-    /* ── View toggle (always inside modern panel wrapper) ── */
-    .bvg-view-toggle {
+    .bvg-header-left { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .bvg-header-title {
+      font-size: 20px; font-weight: 700; color: #e6edf3;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .bvg-header-sub {
+      font-size: 12px; color: #8b949e;
+      display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    }
+    .bvg-header-right {
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex-shrink: 0;
+    }
+    .bvg-header-link {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      padding: 5px 12px; font-size: 12px; font-weight: 600;
+      color: #c9d1d9; transition: all .15s;
+    }
+    .bvg-header-link:hover { color: #e6edf3; border-color: #58a6ff; text-decoration: none; }
+    .bvg-header-badge {
+      font-size: 10px; color: #8b949e; background: #161b22;
+      border: 1px solid #21262d; border-radius: 4px;
+      padding: 2px 8px; font-weight: 600;
+    }
+
+    /* ── Stats dashboard (horizontal strip) ── */
+    .bvg-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 10px;
+      padding: 12px 0;
+      border-bottom: 1px solid #21262d;
+      margin-bottom: 12px;
+    }
+    .bvg-stat-card {
+      background: #0d1117;
+      border: 1px solid #1f2937;
+      border-radius: 10px;
+      padding: 10px 14px;
+      position: relative;
+      overflow: hidden;
+    }
+    .bvg-stat-card .bvg-score-bar {
+      position: absolute; left: 0; bottom: 0;
+      height: 3px; border-radius: 0 0 10px 10px;
+      transition: width .3s ease;
+    }
+    .bvg-stat-card .bvg-score-num {
+      font-size: 22px; font-weight: 800;
+      letter-spacing: -0.5px; font-variant-numeric: tabular-nums;
+    }
+    .bvg-stat-card .bvg-score-denom {
+      font-size: 11px; opacity: .45; font-weight: 400;
+    }
+    .bvg-stat-card .bvg-score-label {
+      font-size: 10px; text-transform: uppercase;
+      letter-spacing: .5px; opacity: .55; font-weight: 600;
+    }
+    /* ── Picks card ── */
+    .bvg-picks-card {
+      background: #0d1117;
+      border: 1px solid #1f2937;
+      border-radius: 10px;
+      padding: 10px 14px;
+    }
+    .bvg-picks-card .bvg-section-label {
+      font-size: 10px; text-transform: uppercase;
+      letter-spacing: .5px; color: #8b949e; font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .bvg-pick-item {
+      font-size: 12px; line-height: 1.6;
+      display: flex; gap: 6px; align-items: baseline;
+    }
+    .bvg-pick-name { font-weight: 600; }
+    .bvg-pick-score { opacity: .45; font-size: 11px; font-weight: 400; }
+    /* ── Histogram card ── */
+    .bvg-histogram-card {
+      background: #0d1117;
+      border: 1px solid #1f2937;
+      border-radius: 10px;
+      padding: 10px 14px;
+    }
+    /* ── Meta card ── */
+    .bvg-meta-card {
+      background: #0d1117;
+      border: 1px solid #1f2937;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: #8b949e;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .bvg-meta-card .bvg-meta-highlight {
+      color: #e6edf3; font-weight: 700;
+    }
+    /* ── Tier scoring card ── */
+    .bvg-tiers-card {
+      background: #0d1117;
+      border: 1px solid #1f2937;
+      border-radius: 10px;
+      padding: 10px 14px;
+    }
+    .bvg-tiers-card .bvg-section-label {
+      font-size: 10px; text-transform: uppercase;
+      letter-spacing: .5px; color: #8b949e; font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .bvg-tier-row {
+      display: flex; justify-content: space-between;
+      padding: 3px 0; border-bottom: 1px solid #21262d;
+      font-size: 12px;
+    }
+    .bvg-tier-row:last-child { border-bottom: none; }
+    .bvg-tier-price { font-weight: 700; color: #58a6ff; }
+
+    /* ── Toolbar ── */
+    .bvg-toolbar {
+      display: flex;
+      gap: 8px;
+      padding: 10px 0;
+      flex-wrap: wrap;
+      align-items: center;
+      border-bottom: 1px solid #21262d;
+      margin-bottom: 14px;
+    }
+    .bvg-page-toggle {
       display: inline-flex;
       background: #161b22;
       border: 1px solid #30363d;
       border-radius: 8px;
       overflow: hidden;
-      margin-bottom: 14px;
     }
-    .bvg-view-toggle button {
-      background: transparent;
-      border: none;
-      color: #8b949e;
-      padding: 7px 16px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all .15s;
-      -webkit-appearance: none;
-      appearance: none;
+    .bvg-page-toggle button {
+      background: transparent; border: none; color: #8b949e;
+      padding: 7px 16px; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: all .15s;
+      -webkit-appearance: none; appearance: none;
     }
-    .bvg-view-toggle button.active {
-      background: #21262d;
-      color: #e6edf3;
+    .bvg-page-toggle button.active { background: #21262d; color: #e6edf3; }
+    .bvg-page-toggle button:hover:not(.active) { color: #c9d1d9; }
+    .bvg-toolbar input[type="text"] {
+      background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+      color: #c9d1d9; padding: 6px 12px; font-size: 13px; width: 220px;
     }
-    .bvg-view-toggle button:hover:not(.active) {
-      color: #c9d1d9;
-    }
-    /* ── Filter bar ── */
-    .bvg-filter-bar {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-    .bvg-filter-bar input[type="text"] {
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #c9d1d9;
-      padding: 6px 12px;
-      font-size: 13px;
-      width: 220px;
-    }
-    .bvg-filter-bar input[type="text"]:focus { outline: none; border-color: #58a6ff; }
-    .bvg-filter-bar select {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #c9d1d9;
-      padding: 6px 10px;
-      font-size: 12px;
-      cursor: pointer;
+    .bvg-toolbar input[type="text"]:focus { outline: none; border-color: #58a6ff; }
+    .bvg-toolbar select {
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      color: #c9d1d9; padding: 6px 10px; font-size: 12px; cursor: pointer;
     }
     .bvg-filter-chip {
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      color: #8b949e;
-      padding: 5px 12px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all .15s;
-      -webkit-appearance: none;
-      appearance: none;
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      color: #8b949e; padding: 5px 12px; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: all .15s;
+      -webkit-appearance: none; appearance: none;
     }
     .bvg-filter-chip:hover, .bvg-filter-chip.active {
-      color: #e6edf3;
-      border-color: #58a6ff;
-      background: #1a2332;
+      color: #e6edf3; border-color: #58a6ff; background: #1a2332;
     }
+    .bvg-settings-btn {
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      color: #8b949e; padding: 5px 14px; cursor: pointer;
+      font-size: 11px; font-weight: 600; transition: all .15s;
+    }
+    .bvg-settings-btn:hover {
+      color: #e6edf3; border-color: #58a6ff; background: #1a2332;
+    }
+    .bvg-toolbar-spacer { flex: 1; }
+
     /* ── Game cards ── */
     .bvg-cards {
-      display: flex;
-      flex-direction: column;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
       gap: 6px;
     }
     .bvg-card {
@@ -417,216 +309,133 @@
       overflow: hidden;
       transition: border-color .15s, background .15s;
     }
-    .bvg-card:hover {
-      border-color: #30363d;
-      background: #111820;
-    }
-    .bvg-card.bvg-card-owned {
-      opacity: .5;
-    }
-    .bvg-card.bvg-card-dlc {
-      opacity: .45;
-      border-style: dashed;
-    }
+    .bvg-card:hover { border-color: #30363d; background: #111820; }
+    .bvg-card.bvg-card-owned { opacity: .5; }
+    .bvg-card.bvg-card-dlc { opacity: .45; border-style: dashed; }
     .bvg-card-img-wrap {
-      position: relative;
-      overflow: hidden;
-      background: #161b22;
-      min-height: 56px;
+      position: relative; overflow: hidden;
+      background: #161b22; min-height: 56px;
     }
     .bvg-card-img {
-      position: absolute;
-      top: 0; left: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      object-fit: cover; display: block;
     }
-    .bvg-card-img-placeholder {
-      min-height: 56px;
-      background: #161b22;
-    }
+    .bvg-card-img-placeholder { min-height: 56px; background: #161b22; }
     .bvg-card-body {
-      min-width: 0;
-      padding: 8px 14px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
+      min-width: 0; padding: 8px 14px;
+      display: flex; flex-direction: column; justify-content: center;
     }
     .bvg-card-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: #e6edf3;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      font-size: 14px; font-weight: 600; color: #e6edf3;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .bvg-card-title a { color: inherit; text-decoration: none; }
     .bvg-card-title a:hover { text-decoration: underline; }
     .bvg-card-rank {
-      font-size: 11px;
-      font-weight: 700;
-      color: #8b949e;
-      margin-right: 6px;
-      letter-spacing: .3px;
+      font-size: 11px; font-weight: 700; color: #8b949e;
+      margin-right: 6px; letter-spacing: .3px;
     }
     .bvg-card-meta {
-      font-size: 11px;
-      color: #8b949e;
-      margin-top: 3px;
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
+      font-size: 11px; color: #8b949e; margin-top: 3px;
+      display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
     }
-    .bvg-card-meta .bvg-cm-val {
-      color: #c9d1d9;
-      font-weight: 600;
-    }
-    .bvg-card-meta .bvg-cm-wish {
-      color: #58a6ff;
-      font-weight: 600;
-    }
-    .bvg-card-meta .bvg-cm-sep {
-      color: #30363d;
-      font-size: 10px;
-    }
-    .bvg-card-tags {
-      display: flex;
-      gap: 5px;
-      flex-wrap: wrap;
-      margin-top: 4px;
-    }
+    .bvg-card-meta .bvg-cm-val { color: #c9d1d9; font-weight: 600; }
+    .bvg-card-meta .bvg-cm-wish { color: #58a6ff; font-weight: 600; }
+    .bvg-card-meta .bvg-cm-sep { color: #30363d; font-size: 10px; }
+    .bvg-card-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 4px; }
     .bvg-card-tag {
-      font-size: 10px;
-      font-weight: 600;
-      padding: 1px 7px;
-      border-radius: 4px;
-      background: #21262d;
-      color: #8b949e;
+      font-size: 10px; font-weight: 600; padding: 1px 7px;
+      border-radius: 4px; background: #21262d; color: #8b949e;
     }
     .bvg-card-tag.tag-owned { background: #1d2b1d; color: #3fb950; }
     .bvg-card-tag.tag-dlc { background: #2b221d; color: #d29922; }
     .bvg-card-tag.tag-unrated { background: #2d333b; color: #8b949e; }
     .bvg-card-right {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
-      padding: 8px 16px;
-      white-space: nowrap;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 4px; padding: 8px 16px; white-space: nowrap;
     }
     .bvg-card-score {
-      width: 44px;
-      height: 44px;
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 800;
-      font-size: 20px;
-      color: #fff;
+      width: 44px; height: 44px; border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 20px; color: #fff;
       text-shadow: 0 1px 3px rgba(0,0,0,.5);
-      cursor: pointer;
-      user-select: none;
-      transition: transform .1s;
-      flex-shrink: 0;
-      letter-spacing: -0.5px;
+      cursor: pointer; user-select: none; transition: transform .1s;
+      flex-shrink: 0; letter-spacing: -0.5px;
     }
     .bvg-card-score:hover { transform: scale(1.08); }
     .bvg-card-score.bvg-unrated {
-      background: #2d333b !important;
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0;
-      text-shadow: none;
-      color: #8b949e;
+      background: #2d333b !important; font-size: 11px;
+      font-weight: 600; letter-spacing: 0; text-shadow: none; color: #8b949e;
     }
-    .bvg-card-msrp {
-      font-weight: 600;
-      font-size: 12px;
-      color: #8b949e;
-    }
+    .bvg-card-msrp { font-weight: 600; font-size: 12px; color: #8b949e; }
+
     /* ── Tier divider in card view ── */
     .bvg-tier-divider {
-      background: #161b22;
-      border: 1px solid #21262d;
-      border-radius: 8px;
-      padding: 8px 16px;
-      margin: 6px 0 2px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 13px;
-      font-weight: 700;
-      color: #e6edf3;
+      grid-column: 1 / -1;
+      background: #161b22; border: 1px solid #21262d; border-radius: 8px;
+      padding: 8px 16px; margin: 6px 0 2px;
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 13px; font-weight: 700; color: #e6edf3;
     }
-    .bvg-tier-divider .bvg-td-left {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .bvg-tier-divider .bvg-td-price {
-      color: #58a6ff;
-      font-weight: 700;
-    }
-    .bvg-tier-divider .bvg-td-stats {
-      font-size: 11px;
-      font-weight: 400;
-      color: #8b949e;
-    }
+    .bvg-tier-divider .bvg-td-left { display: flex; align-items: center; gap: 10px; }
+    .bvg-tier-divider .bvg-td-price { color: #58a6ff; font-weight: 700; }
+    .bvg-tier-divider .bvg-td-stats { font-size: 11px; font-weight: 400; color: #8b949e; }
+
     /* ── Card count footer ── */
     .bvg-cards-footer {
-      text-align: center;
-      color: #8b949e;
-      font-size: 11px;
-      padding: 10px 0;
+      grid-column: 1 / -1;
+      text-align: center; color: #8b949e; font-size: 11px; padding: 10px 0;
     }
 
-    /* ── Responsive: 2-column cards on wide screens ── */
-    @media (min-width: 1600px) {
-      .bvg-cards {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 6px;
-      }
-      .bvg-tier-divider {
-        grid-column: 1 / -1;
-      }
+    /* ── Settings modal ── */
+    .bvg-modal-backdrop {
+      position: fixed; inset: 0; z-index: 10000;
+      background: rgba(0,0,0,.6); display: flex;
+      align-items: center; justify-content: center;
     }
-    @media (min-width: 2200px) {
-      .bvg-cards {
-        grid-template-columns: repeat(3, 1fr);
-      }
+    .bvg-modal {
+      background: #0d1117; border: 1px solid #30363d; border-radius: 12px;
+      padding: 20px 24px; max-width: 520px; width: 90%;
+      max-height: 80vh; overflow-y: auto; color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 12px;
     }
+    .bvg-modal-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 14px;
+    }
+    .bvg-modal-header h3 {
+      margin: 0; font-size: 16px; font-weight: 700; color: #e6edf3;
+    }
+    .bvg-modal-close {
+      background: none; border: none; color: #8b949e;
+      cursor: pointer; font-size: 18px; padding: 0 4px;
+    }
+    .bvg-modal-close:hover { color: #e6edf3; }
+    .bvg-modal label {
+      display: flex; align-items: center; gap: 10px;
+      margin: 6px 0; color: #8b949e;
+    }
+    .bvg-modal input[type="number"] {
+      width: 58px; background: #161b22; color: #c9d1d9;
+      border: 1px solid #30363d; border-radius: 5px;
+      padding: 3px 7px; font-size: 12px; font-variant-numeric: tabular-nums;
+    }
+    .bvg-modal input[type="number"]:focus { outline: none; border-color: #58a6ff; }
+    .bvg-modal input[type="checkbox"] { accent-color: #58a6ff; }
 
-    @media (max-width: 1300px) {
-      body { padding-right: 0 !important; }
-      #bvg-scorer-banner {
-        position: sticky;
-        top: 0;
-        right: auto;
-        width: auto;
-        max-height: none;
-        border-radius: 0;
-        border-left: 0;
-        border-right: 0;
-      }
-      #bvg-scorer-banner .bvg-row {
-        grid-template-columns: repeat(2, minmax(120px, 1fr));
-      }
-      #bvg-modern-panel { max-width: 100%; padding: 0 8px; }
-    }
-    /* ── Mobile: compact cards ── */
-    @media (max-width: 600px) {
-      .bvg-card {
-        grid-template-columns: 80px 1fr auto;
-      }
-      .bvg-card-img-wrap { width: 80px; }
-      .bvg-card-img-placeholder { width: 80px; }
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      #bvg-app { padding: 8px 10px; }
+      .bvg-cards { grid-template-columns: 1fr; }
+      .bvg-card { grid-template-columns: 80px 1fr auto; }
+      .bvg-header { flex-direction: column; align-items: flex-start; }
+      .bvg-toolbar { flex-direction: column; align-items: stretch; }
+      .bvg-toolbar input[type="text"] { width: 100%; }
     }
   `);
+
   // ═══════════════════════════════════════
   // STORAGE AVAILABILITY
   //
@@ -664,12 +473,12 @@
   }
 
   function showStorageWarning() {
-    const banner = document.getElementById('bvg-scorer-banner');
-    if (!banner) return;
+    const app = document.getElementById('bvg-app');
+    if (!app) return;
     const warn = document.createElement('div');
     warn.style.cssText = 'background:#2d1b1b;border:1px solid #8a1f1f;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:11px;color:#f0a0a0;';
     warn.textContent = '⚠ Storage unavailable — your settings and owned-game overrides will not persist. Check browser privacy settings or quota.';
-    banner.prepend(warn);
+    app.prepend(warn);
   }
 
   // ═══════════════════════════════════════
@@ -696,11 +505,7 @@
   function saveSettings(s) { safeStorageSet(STORAGE_KEY_SETTINGS, JSON.stringify(s)); }
   let SETTINGS = loadSettings();
   let CURRENT_BUNDLE_COST = null;
-  // Column injection counts per row type:
-  // Score column (+1) uses rowspan=2 so bargraph rows don't need adjustment for it.
-  // Review split: original hidden + 2 new = net +1.
-  const EXTRA_COLS_BARGRAPH = 1; // review split only (Score handled by rowspan)
-  const EXTRA_COLS_OTHER    = 2; // Score + review split
+
   // ═══════════════════════════════════════
   // MATH
   // ═══════════════════════════════════════
@@ -719,6 +524,7 @@
     const adj = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n);
     return clamp01((centre - adj) / denom);
   }
+
   // ═══════════════════════════════════════
   // OWNED SET (manual overrides)
   // ═══════════════════════════════════════
@@ -731,6 +537,7 @@
     } catch { return new Set(); }
   }
   function saveOwnedSet(s) { safeStorageSet(STORAGE_KEY_OWNED, JSON.stringify([...s])); }
+
   // ═══════════════════════════════════════
   // DOM: TABLE DETECTION
   // ═══════════════════════════════════════
@@ -746,6 +553,7 @@
     }
     return bestScore >= 6 ? best : null;
   }
+
   // ═══════════════════════════════════════
   // ROW CLASSIFICATION
   //
@@ -785,57 +593,7 @@
     return [...table.querySelectorAll('tr')]
       .filter(tr => classifyRow(tr) === ROW_GAME);
   }
-  // ═══════════════════════════════════════
-  // ROW PAIRING
-  //
-  // Barter.vg often uses rowspan=2 on the
-  // image cell, meaning each game spans TWO
-  // <tr> elements. The first <tr> has the
-  // game link; the second <tr> is a "child"
-  // row with additional data.
-  //
-  // We detect this by checking if any cell
-  // in a game row has rowspan > 1. If so,
-  // the next sibling <tr> is its pair.
-  //
-  // When sorting, we must move both rows
-  // together as a unit.
-  // ═══════════════════════════════════════
-  function getRowGroup(tr) {
-    // Each game row on barter.vg is followed by a bargraph row
-    // (td.bargraphs with colspan). The image cell has rowspan=2
-    // spanning both rows. We must move them together.
-    const sibling = tr.nextElementSibling;
-    if (sibling && sibling.tagName === 'TR') {
-      const type = classifyRow(sibling);
-      if (type === ROW_BARGRAPH || type === ROW_OTHER) {
-        return [tr, sibling];
-      }
-      // Also catch by checking for bargraphs class directly
-      if (sibling.querySelector('td.bargraphs')) {
-        return [tr, sibling];
-      }
-    }
-    return [tr];
-  }
-  // Build groups: array of { rows: [tr, ...], score: number, primaryTr: tr }
-  function buildGameGroups(table) {
-    const tbody = table.querySelector('tbody') || table;
-    const allTrs = [...tbody.querySelectorAll('tr')];
-    const visited = new Set();
-    const groups = [];
-    for (const tr of allTrs) {
-      if (visited.has(tr)) continue;
-      if (classifyRow(tr) !== ROW_GAME) continue;
-      const group = getRowGroup(tr);
-      group.forEach(r => visited.add(r));
-      groups.push({
-        rows: group,
-        primaryTr: tr,
-      });
-    }
-    return groups;
-  }
+
   // ═══════════════════════════════════════
   // TIER DETECTION
   //
@@ -844,6 +602,18 @@
   // table in order and tag each game row with
   // its tier name and price.
   // ═══════════════════════════════════════
+  const STORAGE_KEY_CURRENCY = 'bvg_scorer_currency_v1';
+  // Currency symbols and regex patterns for extraction from tier text
+  // Matches both symbol-prefix ($9.99) and code-suffix (9.99 USD) formats
+  const CURRENCY_DEFS = [
+    { code: 'USD', symbol: '$',  re: /(?:\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*USD)/ },
+    { code: 'EUR', symbol: '\u20AC', re: /(?:\u20AC\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*EUR)/ },
+    { code: 'GBP', symbol: '\u00A3', re: /(?:\u00A3\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*GBP)/ },
+    { code: 'CAD', symbol: 'C$', re: /(?:C\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*CAD)/ },
+    { code: 'AUD', symbol: 'A$', re: /(?:A\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*AUD)/ },
+    { code: 'RUB', symbol: '\u20BD', re: /(?:\u20BD\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*(?:\u20BD|RUB))/ },
+  ];
+
   function detectTiers(table) {
     const tbody = table.querySelector('tbody') || table;
     const allTrs = [...tbody.querySelectorAll('tr')];
@@ -880,6 +650,7 @@
     }
     return tiers;
   }
+
   // ═══════════════════════════════════════
   // OWNED DETECTION FROM DOM
   //
@@ -889,9 +660,7 @@
   // accurate without manual clicking.
   // ═══════════════════════════════════════
   function isOwnedInDOM(tr) {
-    // Barter.vg marks owned games with: <a class="libr" title="in library">📚</a>
     if (tr.querySelector('a.libr[title="in library"]')) return true;
-    // Fallback: any 📚 in the row
     if (tr.textContent.includes('📚')) return true;
     return false;
   }
@@ -901,6 +670,7 @@
     if (text.includes('wishlisted')) return true;
     return /(^|\s)[★☆](\s|$)/.test(tr.textContent);
   }
+
   // ═══════════════════════════════════════
   // DATA EXTRACTION (right-to-left)
   // ═══════════════════════════════════════
@@ -909,34 +679,22 @@
   const DLC_KEYWORDS = /\b(soundtrack|ost|artbook|art\s*book|wallpaper|skin\s*pack|costume|dlc|season\s*pass|expansion|bonus\s*content|digital\s*deluxe|deluxe\s*edition|collector[''\u2019]?s\s*edition|upgrade)\b/i;
   function classifyItem(title, tr, ratingPct, reviews) {
     const titleLower = title.toLowerCase();
-    // DLC/soundtrack/artbook: match by title keywords
     if (DLC_KEYWORDS.test(titleLower)) {
-      // Exception: if it has substantial reviews, it might be a real game
-      // with "Deluxe Edition" in the name (like a GOTY edition)
-      // Only flag as DLC if reviews are very low or missing
       if (reviews && reviews > 100) return 'game';
       return 'dlc';
     }
-    // Package sub-item indicator: check if the row is inside a
-    // "^ N item package" group. These rows follow a tier-like
-    // label containing "item package"
-    // We detect this by checking previous sibling rows
     let prev = tr.previousElementSibling;
     let depth = 0;
     while (prev && depth < 5) {
       const text = prev.textContent.trim().toLowerCase();
       if (/\d+\s*item\s*package/.test(text)) {
-        // This game is inside a package — it's a sub-item
-        // The main game in the package has reviews; DLC won't
         if (!reviews || reviews < 10) return 'dlc';
-        return 'game'; // It's the actual game inside the package
+        return 'game';
       }
-      // Stop if we hit a tier header or another game with a bargraph
       if (prev.querySelector('td.bargraphs') || prev.querySelector('td.tierLine')) break;
       prev = prev.previousElementSibling;
       depth++;
     }
-    // Package parent: has price but no reviews (it's a Steam sub, not an app)
     if (!ratingPct && !reviews) return 'package';
     return 'game';
   }
@@ -945,7 +703,7 @@
     const title = titleA ? titleA.textContent.trim() : 'Unknown';
     const cells = [...tr.querySelectorAll('td')];
     let msrp = null, bundledTimes = null, reviews = null, ratingPct = null;
-    let reviewCell = null; // DOM reference for review/rating split
+    let reviewCell = null;
     const numsIn = (cell) => {
       if (!cell) return [];
       return (cell.textContent.replace(/,/g, '').match(/\d+(?:\.\d+)?/g) || []).map(Number);
@@ -971,7 +729,7 @@
         continue;
       }
       if (phase === 2) {
-        reviewCell = cells[i]; // track the combined cell for splitting
+        reviewCell = cells[i];
         if (nums.length >= 2) {
           const sorted = [...nums].sort((a, b) => b - a);
           reviews = sorted[0];
@@ -986,9 +744,6 @@
     // Fallback: if the phased scan didn't reach review/rating data (e.g. no MSRP
     // column for this row), do a dedicated scan for a cell with two numbers where
     // one is ≤100 (rating%) and the other is the review count.
-    // Reasonableness guards: rating must be 1-100, review count must be <10M
-    // (Steam's most-reviewed game has ~1M). This prevents misidentifying
-    // unrelated numeric cells (e.g. app IDs, prices) as review data.
     if (ratingPct == null && reviews == null) {
       for (let i = cells.length - 1; i >= 0; i--) {
         const nums = numsIn(cells[i]);
@@ -1006,20 +761,17 @@
     const ownedDOM = isOwnedInDOM(tr);
     const wishlistedDOM = isWishlistedInDOM(tr);
     const itemType = classifyItem(title, tr, ratingPct, reviews);
-    // Extract game thumbnail image from the row
     const imgEl = tr.querySelector('img[src*="steam"], img[src*="cdn"], img[src*="capsule"], img[src*="header"]')
       || tr.querySelector('img');
     const imgSrc = imgEl ? imgEl.src : null;
     console.log(`[BVG] ${title}: type=${itemType} wish=${wishlistedDOM} rating=${ratingPct}% reviews=${reviews} msrp=${msrp} bundled=${bundledTimes}`);
     return { title, ratingPct, reviews, msrp, bundledTimes, ownedDOM, wishlistedDOM, itemType, tr, reviewCell, imgSrc };
   }
+
   // ═══════════════════════════════════════
   // SCORING
   // ═══════════════════════════════════════
   function scoreGame(g) {
-    // Unrated games (no rating AND no reviews) get a neutral midpoint for
-    // rating/confidence so they aren't unfairly tanked to near-zero. They
-    // are then scored primarily by value and MSRP.
     const isUnrated = g.ratingPct == null && (!g.reviews || g.reviews <= 0);
     const ratingRaw = g.ratingPct ? clamp01(g.ratingPct / 100) : (isUnrated ? 0.5 : 0);
     const conf = isUnrated ? 0.3 : confidenceFromReviews(g.reviews);
@@ -1033,7 +785,6 @@
     const wishlistBonus = g.wishlistedDOM ? 1 : 0;
     const pen = g.bundledTimes != null ? clamp01(g.bundledTimes / SETTINGS.bundledPenaltyCap) : 0;
     const w = SETTINGS.weights;
-    // Normalize positive weights to sum to 1.0 so scores map cleanly to 0-100
     const posSum = w.rating + w.confidence + w.value + w.bundleValue + w.wishlist;
     const n = posSum > 0 ? posSum : 1;
     const raw = (w.rating / n) * rating + (w.confidence / n) * conf + (w.value / n) * val + (w.bundleValue / n) * bundleValue + (w.wishlist / n) * wishlistBonus - w.rebundlePenalty * pen;
@@ -1077,6 +828,9 @@
     return lines.join('\n');
   }
 
+  // ═══════════════════════════════════════
+  // BUNDLE COST DETECTION
+  // ═══════════════════════════════════════
   function detectBundleCost(table) {
     const scope = (table?.parentElement || document.body);
     const probe = scope.textContent || '';
@@ -1095,6 +849,7 @@
     if (!matches.length) return null;
     return Math.min(...matches);
   }
+
   // ═══════════════════════════════════════
   // BUNDLE-LEVEL SCORES (normalized 0-100)
   //
@@ -1109,7 +864,6 @@
   //   <50 = weak
   // ═══════════════════════════════════════
   function computeBundleScores(scored, ownedSet) {
-    // Only count actual games for bundle ratings (exclude DLC, soundtracks, packages)
     const scorable = scored.filter(g => g.itemType === 'game');
     const sorted = [...scorable].sort((a, b) => b.score - a.score);
     const topMain  = sorted.slice(0, SETTINGS.topNMain);
@@ -1117,7 +871,6 @@
     const personal = sorted.filter(g => !ownedSet.has(g.title));
     const personalTop = personal.slice(0, SETTINGS.topNMain);
     const avg = (arr) => arr.length > 0 ? arr.reduce((s, g) => s + g.score, 0) / arr.length : 0;
-    // Deal quality: total MSRP of unowned games / bundle cost
     const unownedMsrpSum = personal.reduce((s, g) => s + (g.msrp || 0), 0);
     const dealQuality = CURRENT_BUNDLE_COST && CURRENT_BUNDLE_COST > 0
       ? unownedMsrpSum / CURRENT_BUNDLE_COST : null;
@@ -1130,8 +883,36 @@
       unownedMsrpSum,
     };
   }
+
   // ═══════════════════════════════════════
-  // BANNER
+  // HISTOGRAM
+  // ═══════════════════════════════════════
+  function buildHistogramHTML(scored) {
+    if (!scored || !scored.length) return '';
+    const games = scored.filter(g => g.itemType === 'game');
+    const buckets = [
+      { label: '85+', min: 85, max: 101, color: '#1a7f37' },
+      { label: '70-84', min: 70, max: 85, color: '#6e6411' },
+      { label: '50-69', min: 50, max: 70, color: '#7c4518' },
+      { label: '<50', min: 0, max: 50, color: '#7a1d1d' },
+    ];
+    const counts = buckets.map(b => games.filter(g => g.score >= b.min && g.score < b.max).length);
+    const maxCount = Math.max(1, ...counts);
+    const bars = buckets.map((b, i) => {
+      const pct = (counts[i] / maxCount) * 100;
+      return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;">
+        <span style="width:38px;text-align:right;color:#8b949e;">${b.label}</span>
+        <div style="flex:1;height:14px;background:#21262d;border-radius:3px;overflow:hidden;">
+          <div style="width:${pct}%;height:100%;background:${b.color};border-radius:3px;"></div>
+        </div>
+        <span style="width:20px;color:#8b949e;">${counts[i]}</span>
+      </div>`;
+    }).join('');
+    return `<div style="margin:4px 0;">${bars}</div>`;
+  }
+
+  // ═══════════════════════════════════════
+  // SETTINGS HTML
   // ═══════════════════════════════════════
   function buildSettingsHTML() {
     const s = SETTINGS, w = s.weights;
@@ -1174,7 +955,6 @@
         console.warn(`[BVG Scorer] Invalid value for ${key}: "${input.value}", skipping`);
         return;
       }
-      // Clamp to the input's own min/max HTML attributes when present
       const min = input.hasAttribute('min') ? parseFloat(input.min) : -Infinity;
       const max = input.hasAttribute('max') ? parseFloat(input.max) : Infinity;
       const clamped = Math.max(min, Math.min(max, val));
@@ -1187,514 +967,23 @@
     });
     saveSettings(SETTINGS);
   }
-  function buildHistogramHTML(scored) {
-    if (!scored || !scored.length) return '';
-    const games = scored.filter(g => g.itemType === 'game');
-    const buckets = [
-      { label: '85+', min: 85, max: 101, color: '#1a7f37' },
-      { label: '70-84', min: 70, max: 85, color: '#6e6411' },
-      { label: '50-69', min: 50, max: 70, color: '#7c4518' },
-      { label: '<50', min: 0, max: 50, color: '#7a1d1d' },
-    ];
-    const counts = buckets.map(b => games.filter(g => g.score >= b.min && g.score < b.max).length);
-    const maxCount = Math.max(1, ...counts);
-    const bars = buckets.map((b, i) => {
-      const pct = (counts[i] / maxCount) * 100;
-      return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;">
-        <span style="width:38px;text-align:right;color:#8b949e;">${b.label}</span>
-        <div style="flex:1;height:14px;background:#21262d;border-radius:3px;overflow:hidden;">
-          <div style="width:${pct}%;height:100%;background:${b.color};border-radius:3px;"></div>
-        </div>
-        <span style="width:20px;color:#8b949e;">${counts[i]}</span>
-      </div>`;
-    }).join('');
-    return `<div style="margin:8px 0;max-width:260px;">${bars}</div>`;
-  }
-  function renderBanner({ bundleRating, depthRating, personalRating, picks, ownedCount, gameCount, dlcCount, wishCount, tiers, scored, dealQuality, unownedMsrpSum }) {
-    let banner = document.getElementById('bvg-scorer-banner');
-    if (!banner) {
-      banner = document.createElement('div');
-      banner.id = 'bvg-scorer-banner';
-      document.body.prepend(banner);
-    }
-    const statBadge = (label, rating, detail) => {
-      const c = ratingColor(rating);
-      return `<div class="bvg-stat">
-        <div>
-          <div class="bvg-score-label">${label}</div>
-          <div><span class="bvg-score-num" style="color:${c}">${rating.toFixed(0)}</span><span class="bvg-score-denom">/100</span></div>
-          <div class="bvg-score-label">${detail}</div>
-        </div>
-        <div class="bvg-score-bar" style="width:${rating}%;background:${c}"></div>
-      </div>`;
-    };
-    const picksText = picks
-      .map(p => `<span class="bvg-pick-name" style="color:${scoreColor(p.score)}">${escHtml(p.title)}</span> <span class="bvg-pick-score">${p.score.toFixed(1)}</span>`)
-      .join(' &middot; ');
-    // Per-tier scoring: compute average score for games in each tier
-    const tierHTML = (tiers && tiers.length > 0) ? `
-      <div class="bvg-title" style="margin-top:10px">Tier Scoring</div>
-      <div class="bvg-tiers">
-        ${tiers.map(t => {
-          const tierGames = (scored || []).filter(g => g.itemType === 'game' && g.tr && g.tr.dataset.bvgTier === t.name);
-          const tierAvg = tierGames.length > 0 ? tierGames.reduce((s, g) => s + g.score, 0) / tierGames.length : 0;
-          const tierTop = tierGames.length > 0 ? Math.max(...tierGames.map(g => g.score)) : 0;
-          const color = ratingColor(tierAvg);
-          return `<div class="bvg-tier-row">
-            <span>${escHtml(t.name)}</span>
-            <span>${t.price != null ? '<span class="bvg-tier-price">$' + t.price.toFixed(2) + '</span>' : ''} (${tierGames.length} games) &middot; Avg: <strong style="color:${color}">${tierAvg.toFixed(0)}</strong> &middot; Best: ${tierTop.toFixed(0)}</span>
-          </div>`;
-        }).join('')}
-      </div>` : '';
-    banner.innerHTML = `
-      <div class="bvg-title">Bundle Evaluation v${SCRIPT_VERSION}</div>
-      <div class="bvg-row">
-        ${statBadge('Bundle', bundleRating, `top ${SETTINGS.topNMain}`)}
-        ${statBadge('Depth', depthRating, `top ${SETTINGS.topNDepth}`)}
-        ${statBadge('Personal', personalRating, `excl. owned`)}
-        <button class="bvg-settings-btn" id="bvg-export-btn">&#128203; Copy Summary</button>
-        <button class="bvg-settings-btn" id="bvg-settings-toggle">&#9881; Settings</button>
-      </div>
-      <div class="bvg-picks"><strong>Top picks:</strong> ${picksText || 'n/a'}</div>
-      ${buildHistogramHTML(scored)}
-      <div class="bvg-meta">
-        ${ownedCount} of ${gameCount} games owned${dlcCount > 0 ? ` &middot; ${dlcCount} DLC/extras excluded` : ''} &middot; Click any score to toggle owned &middot;
-        ${wishCount} wishlisted${CURRENT_BUNDLE_COST ? ` &middot; Bundle cost detected: $${CURRENT_BUNDLE_COST.toFixed(2)}` : ''}
-        ${dealQuality != null ? ` &middot; <strong>Deal: ${dealQuality.toFixed(1)}x</strong> ($${unownedMsrpSum.toFixed(0)} unowned MSRP)` : ''} &middot;
-        Rating: ${SETTINGS.useWilsonAdjustedRating ? 'Wilson-adjusted' : 'Raw % (confidence-weighted)'}
-      </div>
-      ${tierHTML}
-      <div id="bvg-settings-panel">${buildSettingsHTML()}</div>
-    `;
-    document.getElementById('bvg-settings-toggle')
-      ?.addEventListener('click', () => {
-        document.getElementById('bvg-settings-panel')?.classList.toggle('open');
-      });
-    document.getElementById('bvg-settings-apply')?.addEventListener('click', () => {
-      readSettingsFromPanel(); clearScoreCells(); run();
-    });
-    document.getElementById('bvg-settings-reset')?.addEventListener('click', () => {
-      SETTINGS = clone(DEFAULT_SETTINGS); saveSettings(SETTINGS); clearScoreCells(); run();
-    });
-    document.getElementById('bvg-export-btn')?.addEventListener('click', () => {
-      const topList = picks.map((p, i) => `${i + 1}. ${p.title} (${p.score.toFixed(1)})`).join('\n');
-      const lines = [
-        `Bundle Evaluation — ${document.title || location.href}`,
-        `Bundle: ${bundleRating.toFixed(0)}/100 | Depth: ${depthRating.toFixed(0)}/100 | Personal: ${personalRating.toFixed(0)}/100`,
-        `${ownedCount}/${gameCount} owned | ${wishCount} wishlisted${dlcCount > 0 ? ` | ${dlcCount} DLC excluded` : ''}`,
-        dealQuality != null ? `Deal quality: ${dealQuality.toFixed(1)}x ($${unownedMsrpSum.toFixed(0)} unowned MSRP / $${CURRENT_BUNDLE_COST.toFixed(2)})` : '',
-        '', 'Top Picks:', topList,
-      ].filter(Boolean).join('\n');
-      const btn = document.getElementById('bvg-export-btn');
-      navigator.clipboard.writeText(lines).then(() => {
-        if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.innerHTML = '&#128203; Copy Summary', 1500); }
-      }).catch(() => {
-        if (btn) { btn.textContent = 'Copy failed'; setTimeout(() => btn.innerHTML = '&#128203; Copy Summary', 2000); }
-        console.warn('[BVG Scorer] Clipboard write denied — page may not be in a secure context');
-      });
-    });
-  }
-  // ═══════════════════════════════════════
-  // SCORE COLUMN + COLSPAN FIXUP
-  // ═══════════════════════════════════════
-  function ensureScoreHeader(table) {
-    const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
-    if (!headerRow || headerRow.querySelector('.bvg-score-header')) return;
 
-    const th = document.createElement('th');
-    th.textContent = 'Score';
-    th.className = 'bvg-score-header bvg-sortable';
-    const ind = document.createElement('span');
-    ind.className = 'bvg-sort-ind';
-    th.appendChild(ind);
-    // Insert after the first cell (checkbox column) to keep it pinned left.
-    // If the first cell has colspan > 1 (e.g. Barter's "Select All" spans
-    // checkbox + title), shrink it by 1 so our new Score column aligns with
-    // the Score data cells that are inserted at the same position in data rows.
-    const firstCell = headerRow.querySelector('th, td');
-    if (firstCell) {
-      if (firstCell.colSpan > 1) {
-        firstCell.dataset.bvgOrigColspan = firstCell.colSpan;
-        firstCell.colSpan -= 1;
-      }
-      firstCell.insertAdjacentElement('afterend', th);
-    } else {
-      headerRow.prepend(th);
-    }
-    th.addEventListener('click', () => sortByScore(table, ind));
-  }
-  // Fix tier headers and summary rows: bump their colspan or add spacer cells.
-  // Bargraph rows are paired with game rows via rowspan on Score, so they only
-  // need adjustment for the review column split (+1). All other non-game rows
-  // need +2 (Score column + review split).
-  function fixNonGameRows(table) {
-    const allRows = [...table.querySelectorAll('tr')];
-    for (const tr of allRows) {
-      const type = classifyRow(tr);
-      if (type === ROW_HEADER || type === ROW_GAME) continue;
-      if (tr.querySelector('.bvg-spacer')) continue; // already fixed
-      const extraCols = (type === ROW_BARGRAPH) ? EXTRA_COLS_BARGRAPH : EXTRA_COLS_OTHER;
-      const firstCell = tr.querySelector('td');
-      if (firstCell && firstCell.colSpan > 1) {
-        firstCell.colSpan += extraCols;
-        firstCell.classList.add('bvg-spacer');
-      } else {
-        if (type === ROW_BARGRAPH) {
-          // Bargraph: only needs review-split spacer (Score handled by rowspan)
-          const spacer = document.createElement('td');
-          spacer.className = 'bvg-spacer';
-          tr.appendChild(spacer);
-        } else {
-          // Score spacer — insert after first cell to match Score column position
-          const scoreSpace = document.createElement('td');
-          scoreSpace.className = 'bvg-spacer';
-          if (firstCell) firstCell.insertAdjacentElement('afterend', scoreSpace);
-          else tr.prepend(scoreSpace);
-          // Review-split spacer — append at end
-          const reviewSpace = document.createElement('td');
-          reviewSpace.className = 'bvg-spacer';
-          tr.appendChild(reviewSpace);
-        }
-      }
-    }
-  }
-  function clearScoreCells() {
-    // Restore header colspan that was decremented for Score column alignment
-    document.querySelectorAll('[data-bvg-orig-colspan]').forEach(el => {
-      el.colSpan = parseInt(el.dataset.bvgOrigColspan);
-      delete el.dataset.bvgOrigColspan;
-    });
-    // Restore original review cells that were hidden during split
-    document.querySelectorAll('.bvg-review-original').forEach(el => {
-      el.style.display = '';
-      el.classList.remove('bvg-review-original');
-    });
-    // Restore original review header
-    document.querySelectorAll('.bvg-review-header-original').forEach(el => {
-      el.style.display = '';
-      el.classList.remove('bvg-review-header-original');
-    });
-    // Remove all injected elements
-    document.querySelectorAll('.bvg-score-cell, .bvg-score-header, .bvg-review-cell, .bvg-review-header, .bvg-spacer, .bvg-tier-label').forEach(el => el.remove());
-    // Clear labeled headers
-    document.querySelectorAll('[data-bvg-labeled]').forEach(el => {
-      delete el.dataset.bvgLabeled;
-    });
-    // Clear tier data attributes
-    document.querySelectorAll('[data-bvg-tier]').forEach(el => {
-      delete el.dataset.bvgTier;
-      delete el.dataset.bvgTierPrice;
-    });
-  }
-  function ensureScoreCells(scoredGames, ownedSet) {
-    for (const g of scoredGames) {
-      const tr = g.tr;
-      if (tr.querySelector('.bvg-score-cell')) continue;
-      const td = document.createElement('td');
-      td.className = 'bvg-score-cell';
-      td.dataset.score = String(g.score);
-      td.textContent = g.score.toFixed(1);
-      td.title = formatBreakdown(g.breakdown);
-      // Span both game row and its paired bargraph row to prevent double-row cell
-      const group = getRowGroup(tr);
-      if (group.length > 1) td.rowSpan = 2;
-      const owned = ownedSet.has(g.title);
-      const isDLC = g.itemType === 'dlc' || g.itemType === 'package';
-      if (owned) {
-        td.classList.add('bvg-owned');
-      } else if (isDLC) {
-        td.classList.add('bvg-dlc');
-      } else {
-        td.style.background = scoreBg(g.score);
-      }
-      td.addEventListener('click', () => {
-        const set = loadOwnedSet();
-        if (set.has(g.title)) set.delete(g.title);
-        else set.add(g.title);
-        saveOwnedSet(set);
-        clearScoreCells();
-        run();
-      });
-      if (g.wishlistedDOM) td.title += '\nWishlisted: yes';
-      // Insert after the first cell (checkbox) to keep it pinned left
-      const firstCell = tr.querySelector('td');
-      if (firstCell) firstCell.insertAdjacentElement('afterend', td);
-      else tr.prepend(td);
-    }
-  }
   // ═══════════════════════════════════════
-  // REVIEW COLUMN SPLIT
-  //
-  // Barter.vg combines review count and
-  // rating % in a single cell. We hide the
-  // original and insert two distinct columns.
+  // CURRENCY HELPERS
   // ═══════════════════════════════════════
-  function splitReviewColumn(table, scoredGames) {
-    const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
-    // Split the header: find the review/rating th
-    if (headerRow && !headerRow.querySelector('.bvg-review-header')) {
-      const ths = [...headerRow.querySelectorAll('th, td')];
-      let reviewTh = null;
-      for (const th of ths) {
-        const text = th.textContent.toLowerCase();
-        if ((text.includes('review') || text.includes('rating') || text.includes('score')) &&
-            !th.classList.contains('bvg-score-header')) {
-          reviewTh = th;
-          break;
-        }
-      }
-      // Fallback: find header by column index of first game's review cell
-      if (!reviewTh) {
-        const firstGame = scoredGames.find(g => g.reviewCell);
-        if (firstGame) {
-          const dataCells = [...firstGame.tr.querySelectorAll('td')];
-          const colIdx = dataCells.indexOf(firstGame.reviewCell);
-          if (colIdx >= 0 && colIdx < ths.length) {
-            const candidate = ths[colIdx];
-            if (candidate && !candidate.classList.contains('bvg-score-header')) {
-              reviewTh = candidate;
-            }
-          }
-        }
-      }
-      if (reviewTh) {
-        reviewTh.style.display = 'none';
-        reviewTh.classList.add('bvg-review-header-original');
-        const countTh = document.createElement('th');
-        countTh.textContent = '#';
-        countTh.className = 'bvg-review-header bvg-sortable';
-        const countInd = document.createElement('span');
-        countInd.className = 'bvg-sort-ind';
-        countTh.appendChild(countInd);
-        const ratingTh = document.createElement('th');
-        ratingTh.textContent = 'Rating';
-        ratingTh.className = 'bvg-review-header bvg-sortable';
-        const ratingInd = document.createElement('span');
-        ratingInd.className = 'bvg-sort-ind';
-        ratingTh.appendChild(ratingInd);
-        reviewTh.insertAdjacentElement('afterend', ratingTh);
-        reviewTh.insertAdjacentElement('afterend', countTh);
-      }
-    }
-    // Split each game row's review cell
-    for (const g of scoredGames) {
-      const tr = g.tr;
-      if (tr.querySelector('.bvg-review-cell')) continue;
-      if (!g.reviewCell) continue;
-      // Hide original combined cell
-      g.reviewCell.style.display = 'none';
-      g.reviewCell.classList.add('bvg-review-original');
-      const countTd = document.createElement('td');
-      countTd.className = 'bvg-review-cell';
-      countTd.textContent = g.reviews != null ? g.reviews.toLocaleString() : '\u2014';
-      const ratingTd = document.createElement('td');
-      ratingTd.className = 'bvg-review-cell';
-      if (g.ratingPct != null) {
-        ratingTd.textContent = g.ratingPct + '%';
-        ratingTd.style.color = ratingColor(g.ratingPct);
-        ratingTd.style.fontWeight = '700';
-      } else {
-        ratingTd.textContent = '\u2014';
-      }
-      // Insert after the hidden original (count first, then rating)
-      g.reviewCell.insertAdjacentElement('afterend', ratingTd);
-      g.reviewCell.insertAdjacentElement('afterend', countTd);
-    }
-  }
-  // ═══════════════════════════════════════
-  // TIER LABELS (inline next to game title)
-  // ═══════════════════════════════════════
-  function addTierLabels(scoredGames) {
-    for (const g of scoredGames) {
-      const tr = g.tr;
-      if (tr.querySelector('.bvg-tier-label')) continue;
-      const tierName = tr.dataset.bvgTier;
-      if (!tierName) continue;
-      const titleA = tr.querySelector('a[href*="/i/"], a[href*="/game/"]');
-      if (!titleA) continue;
-      const label = document.createElement('span');
-      label.className = 'bvg-tier-label';
-      const tierPrice = tr.dataset.bvgTierPrice;
-      label.textContent = tierPrice ? '$' + parseFloat(tierPrice).toFixed(2) + ' tier' : tierName;
-      titleA.insertAdjacentElement('afterend', label);
-    }
-  }
-  // ═══════════════════════════════════════
-  // SORTING
-  //
-  // When any sort is active, tier headers
-  // and summary rows are HIDDEN (they only
-  // make sense in the original page order).
-  // Refresh the page to restore them.
-  // Only game rows are reordered.
-  // ═══════════════════════════════════════
-  function hideTierRows(table) {
-    const tbody = table.querySelector('tbody') || table;
-    [...tbody.querySelectorAll('tr')].forEach(tr => {
-      const type = classifyRow(tr);
-      // Hide tier headers and summary, but NOT bargraph rows
-      // (bargraphs are paired with game rows and must move with them)
-      if (type === ROW_TIER || type === ROW_SUMMARY) {
-        tr.style.display = 'none';
-        tr.dataset.bvgHidden = '1';
-      }
-    });
-  }
-  function sortByScore(table, indicator) {
-    const tbody = table.querySelector('tbody') || table;
-    // Hide tier/summary rows
-    hideTierRows(table);
-    // Build game groups (paired rows)
-    const groups = buildGameGroups(table);
-    // Toggle sort direction
-    const current = table.dataset.bvgSortDir || 'desc';
-    const dir = current === 'desc' ? 'asc' : 'desc';
-    table.dataset.bvgSortDir = dir;
-    // Clear all sort indicators, set active one
-    const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
-    headerRow?.querySelectorAll('.bvg-sort-ind').forEach(s => { s.textContent = ''; });
-    if (indicator) indicator.textContent = dir === 'desc' ? ' \u25BC' : ' \u25B2';
-    // Sort groups by score
-    groups.sort((a, b) => {
-      const av = parseFloat(a.primaryTr.querySelector('.bvg-score-cell')?.dataset.score) || 0;
-      const bv = parseFloat(b.primaryTr.querySelector('.bvg-score-cell')?.dataset.score) || 0;
-      return dir === 'asc' ? av - bv : bv - av;
-    });
-    // Reinsert all rows in group order
-    for (const g of groups) {
-      for (const r of g.rows) tbody.appendChild(r);
-    }
-  }
-  // Sort by any other column (same group-aware approach)
-  function sortByColumn(table, colIdx, indicator, headerRow) {
-    const tbody = table.querySelector('tbody') || table;
-    // Hide tier/summary rows
-    hideTierRows(table);
-    const groups = buildGameGroups(table);
-    const key = `bvgSortDir_${colIdx}`;
-    const current = table.dataset[key] || 'desc';
-    const dir = current === 'desc' ? 'asc' : 'desc';
-    table.dataset[key] = dir;
-    headerRow.querySelectorAll('.bvg-sort-ind').forEach(s => { s.textContent = ''; });
-    if (indicator) indicator.textContent = dir === 'desc' ? ' \u25BC' : ' \u25B2';
-    // Extract text from a cell at colIdx with bounds safety — rows may have
-    // fewer cells than the header due to colspan or missing columns.
-    const cellText = (tr) => {
-      const cells = tr.querySelectorAll('td');
-      if (colIdx >= cells.length) return '';
-      return cells[colIdx] ? cells[colIdx].textContent.replace(/,/g, '').trim() : '';
-    };
-    groups.sort((a, b) => {
-      const aText = cellText(a.primaryTr);
-      const bText = cellText(b.primaryTr);
-      const aNum = parseFloat(aText.replace(/[^0-9.\-]/g, ''));
-      const bNum = parseFloat(bText.replace(/[^0-9.\-]/g, ''));
-      if (!isNaN(aNum) && !isNaN(bNum)) return dir === 'asc' ? aNum - bNum : bNum - aNum;
-      if (aText < bText) return dir === 'asc' ? -1 : 1;
-      if (aText > bText) return dir === 'asc' ? 1 : -1;
-      return 0;
-    });
-    for (const g of groups) {
-      for (const r of g.rows) tbody.appendChild(r);
-    }
-  }
-  function makeAllColumnsSortable(table) {
-    const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
-    if (!headerRow) return;
-    [...headerRow.querySelectorAll('th, td')].forEach((h, idx) => {
-      if (h.classList.contains('bvg-score-header')) return;
-      if (h.dataset.bvgSortBound === '1') return;
-      h.dataset.bvgSortBound = '1';
-      h.classList.add('bvg-sortable');
-      const ind = document.createElement('span');
-      ind.className = 'bvg-sort-ind';
-      h.appendChild(ind);
-      h.addEventListener('click', () => sortByColumn(table, idx, ind, headerRow));
-    });
-  }
-  // ═══════════════════════════════════════
-  // HEADER LABELS
-  //
-  // Barter.vg headers may be empty or use
-  // emojis without text. We detect column
-  // purpose from data cells and add labels.
-  // ═══════════════════════════════════════
-  function isEmojiOrSymbolOnly(text) {
-    const stripped = text.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}\u200d\ufe0f\u2600-\u27bf\s]/gu, '').trim();
-    return stripped.length === 0;
-  }
-  function inferColumnLabel(cells) {
-    for (const cell of cells) {
-      if (!cell) continue;
-      if (cell.querySelector('input[type="checkbox"]')) return null;
-      if (cell.querySelector('img') && !cell.textContent.trim()) return null;
-      if (cell.querySelector('a[href*="/i/"], a[href*="/game/"]')) return 'Title';
-      const text = cell.textContent.trim();
-      if (/\$\d+(\.\d{2})?/.test(text)) return 'MSRP';
-    }
-    const texts = cells.filter(Boolean).map(c => c.textContent.trim());
-    if (texts.length && texts.every(t => /^\d{1,4}$/.test(t))) return 'Bundled';
-    return null;
-  }
-  function labelEmptyHeaders(table) {
-    const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
-    if (!headerRow) return;
-    const headers = [...headerRow.querySelectorAll('th, td')];
-    const dataRows = findGameRows(table).slice(0, 3);
-    for (let idx = 0; idx < headers.length; idx++) {
-      const h = headers[idx];
-      if (h.classList.contains('bvg-score-header') ||
-          h.classList.contains('bvg-review-header') ||
-          h.classList.contains('bvg-review-header-original') ||
-          h.dataset.bvgLabeled === '1') continue;
-      const text = h.textContent.trim();
-      if (text && !isEmojiOrSymbolOnly(text)) continue;
-      const samples = dataRows.map(r => {
-        const cells = [...r.querySelectorAll('td')];
-        return cells[idx] || null;
-      });
-      const label = inferColumnLabel(samples);
-      if (label) {
-        h.textContent = label;
-        h.dataset.bvgLabeled = '1';
-      }
-    }
-  }
-  // ═══════════════════════════════════════
-  // MODERN PANEL
-  //
-  // Card-based game list that replaces the
-  // original Barter table. Supports search,
-  // sort, ownership toggle, and tier groups.
-  // ═══════════════════════════════════════
-  const STORAGE_KEY_VIEW = 'bvg_scorer_view_v1';
-  const STORAGE_KEY_CURRENCY = 'bvg_scorer_currency_v1';
-  // Currency symbols and regex patterns for extraction from tier text
-  // Matches both symbol-prefix ($9.99) and code-suffix (9.99 USD) formats
-  const CURRENCY_DEFS = [
-    { code: 'USD', symbol: '$',  re: /(?:\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*USD)/ },
-    { code: 'EUR', symbol: '\u20AC', re: /(?:\u20AC\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*EUR)/ },
-    { code: 'GBP', symbol: '\u00A3', re: /(?:\u00A3\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*GBP)/ },
-    { code: 'CAD', symbol: 'C$', re: /(?:C\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*CAD)/ },
-    { code: 'AUD', symbol: 'A$', re: /(?:A\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*AUD)/ },
-    { code: 'RUB', symbol: '\u20BD', re: /(?:\u20BD\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*(?:\u20BD|RUB))/ },
-  ];
   function loadCurrencyPref() {
     try { return localStorage.getItem(STORAGE_KEY_CURRENCY) || ''; } catch { return ''; }
   }
   function saveCurrencyPref(c) { safeStorageSet(STORAGE_KEY_CURRENCY, c); }
-  // Format a tier price using the preferred currency, falling back to USD or first available
   function formatTierPrice(tier, currencyPref) {
     if (!tier.prices || !Object.keys(tier.prices).length) {
       return tier.price != null ? `$${tier.price.toFixed(2)}` : null;
     }
-    // If a preference is set and the tier has that currency, use it
     if (currencyPref && tier.prices[currencyPref] != null) {
       const def = CURRENCY_DEFS.find(c => c.code === currencyPref);
       const sym = def ? def.symbol : currencyPref;
       return `${sym}${tier.prices[currencyPref].toFixed(2)}`;
     }
-    // No preference or not available — show USD if present, else first available
     if (tier.prices.USD != null) return `$${tier.prices.USD.toFixed(2)}`;
     const first = Object.keys(tier.prices)[0];
     if (first) {
@@ -1704,7 +993,6 @@
     }
     return tier.price != null ? `$${tier.price.toFixed(2)}` : null;
   }
-  // Collect all currencies seen across tiers
   function collectAvailableCurrencies(tiers) {
     const seen = new Set();
     for (const t of tiers) {
@@ -1712,7 +1000,139 @@
     }
     return [...seen];
   }
-  let _modernPanelState = {
+
+  // ═══════════════════════════════════════
+  // BUNDLE METADATA EXTRACTION
+  //
+  // Reads header-level info from the original
+  // Barter page before we hide it. This data
+  // populates our custom header bar.
+  // ═══════════════════════════════════════
+  function extractBundleMetadata() {
+    const meta = {
+      title: '',
+      subtitle: '',
+      buyLinks: [],
+      dates: '',
+      wishlistInfo: '',
+    };
+
+    // Bundle title: first <h1>, or fallback to <title> minus site suffix
+    const h1 = document.querySelector('h1');
+    if (h1) {
+      meta.title = h1.textContent.trim();
+    } else {
+      meta.title = (document.title || '').replace(/\s*[-–|]\s*Barter\.vg.*$/i, '').trim();
+    }
+
+    // Subtitle: look for store name and status info near the top
+    // Barter shows store name (e.g. "Fanatical ✓") and dates
+    const bodyText = document.body.textContent || '';
+
+    // Dates: "Started X ago ... Ends Y"
+    const dateMatch = bodyText.match(/((?:Started|Began)\s+.+?(?:Ends?\s+\S+(?:\s+\S+)?))/i);
+    if (dateMatch) meta.dates = dateMatch[1].trim();
+
+    // Wishlist info: "N games from wishlist in active bundles"
+    const wishMatch = bodyText.match(/(\d+\s+games?\s+from\s+wishlist\s+in\s+active\s+bundles?)/i);
+    if (wishMatch) meta.wishlistInfo = wishMatch[1].trim();
+
+    // Buy links: anchors that point to known stores or external bundle pages
+    const storeSelectors = [
+      'a[href*="fanatical.com"]',
+      'a[href*="humblebundle.com"]',
+      'a[href*="indiegala.com"]',
+      'a[href*="groupees.com"]',
+      'a[href*="store.steampowered.com"]',
+      'a[href*="steamgifts.com"]',
+      'a[href*="reddit.com"]',
+    ];
+    const seen = new Set();
+    for (const sel of storeSelectors) {
+      document.querySelectorAll(sel).forEach(a => {
+        const href = a.href;
+        if (seen.has(href)) return;
+        seen.add(href);
+        // Derive a label from the link text or hostname
+        let label = a.textContent.trim();
+        if (!label || label.length > 30) {
+          try { label = new URL(href).hostname.replace('www.', ''); }
+          catch { label = 'Link'; }
+        }
+        meta.buyLinks.push({ href, label });
+      });
+    }
+
+    // Store name: check for known store indicators
+    const storeEl = document.querySelector('a[href*="fanatical.com"], a[href*="humblebundle.com"], a[href*="indiegala.com"]');
+    if (storeEl) {
+      try {
+        const host = new URL(storeEl.href).hostname.replace('www.', '');
+        const storeName = host.split('.')[0];
+        meta.subtitle = storeName.charAt(0).toUpperCase() + storeName.slice(1);
+      } catch { /* ignore */ }
+    }
+
+    return meta;
+  }
+
+  // ═══════════════════════════════════════
+  // PAGE MANAGEMENT
+  //
+  // Hides the original Barter page and shows
+  // our custom app, or vice versa for Classic
+  // Page toggle.
+  // ═══════════════════════════════════════
+  const STORAGE_KEY_PAGE = 'bvg_scorer_page_v1';
+  function loadPagePref() {
+    try { return localStorage.getItem(STORAGE_KEY_PAGE) || 'modern'; }
+    catch { return 'modern'; }
+  }
+  function savePagePref(v) { safeStorageSet(STORAGE_KEY_PAGE, v); }
+
+  function hideOriginalPage() {
+    for (const child of document.body.children) {
+      if (child.id === 'bvg-app') continue;
+      if (child.tagName === 'SCRIPT' || child.tagName === 'STYLE' || child.tagName === 'LINK') continue;
+      child.style.display = 'none';
+      child.dataset.bvgHidden = '1';
+    }
+  }
+
+  function showOriginalPage() {
+    for (const child of document.body.children) {
+      if (child.dataset.bvgHidden === '1') {
+        child.style.display = '';
+        delete child.dataset.bvgHidden;
+      }
+    }
+  }
+
+  function setPage(mode) {
+    savePagePref(mode);
+    const app = document.getElementById('bvg-app');
+    if (mode === 'modern') {
+      hideOriginalPage();
+      if (app) app.style.display = '';
+    } else {
+      showOriginalPage();
+      if (app) app.style.display = 'none';
+    }
+    // Update toggle button states
+    document.querySelectorAll('.bvg-page-toggle button').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.page === mode);
+    });
+  }
+
+  // ═══════════════════════════════════════
+  // RENDER: APP SHELL
+  //
+  // Master render function that creates the
+  // full-page custom layout. Sub-renderers
+  // populate each section.
+  // ═══════════════════════════════════════
+  // Shared state for the game grid (filters/sort)
+  let _gridState = {
     sortKey: 'score',
     sortDir: 'desc',
     search: '',
@@ -1721,23 +1141,341 @@
     currency: loadCurrencyPref(),
   };
 
-  function loadViewPreference() {
-    try { return localStorage.getItem(STORAGE_KEY_VIEW) || 'modern'; }
-    catch { return 'modern'; }
-  }
-  function saveViewPreference(v) { safeStorageSet(STORAGE_KEY_VIEW, v); }
+  // Cached references for targeted re-renders
+  let _appRefs = {
+    statsContainer: null,
+    contentContainer: null,
+    scored: null,
+    ownedSet: null,
+    tiers: null,
+    bundleScores: null,
+    metadata: null,
+  };
 
-  function renderModernPanel(scored, ownedSet, tiers) {
-    let panel = document.getElementById('bvg-modern-panel');
-    if (!panel) {
-      panel = document.createElement('div');
-      panel.id = 'bvg-modern-panel';
-      const table = findItemTable();
-      if (table) table.parentElement.insertBefore(panel, table);
-      else document.body.appendChild(panel);
+  function renderApp(scored, ownedSet, tiers, bundleScores, metadata) {
+    _appRefs.scored = scored;
+    _appRefs.ownedSet = ownedSet;
+    _appRefs.tiers = tiers;
+    _appRefs.bundleScores = bundleScores;
+    _appRefs.metadata = metadata;
+
+    let app = document.getElementById('bvg-app');
+    if (!app) {
+      app = document.createElement('div');
+      app.id = 'bvg-app';
+      document.body.appendChild(app);
+    }
+    app.innerHTML = '';
+
+    renderHeader(app, metadata);
+    renderStatsDashboard(app, bundleScores, scored, tiers);
+    renderToolbar(app, tiers);
+    renderContent(app, scored, ownedSet, tiers);
+
+    // Show storage warning if needed
+    if (!_storageAvailable && !_storageWarningShown) {
+      _storageWarningShown = true;
+      showStorageWarning();
+    }
+  }
+
+  // ═══════════════════════════════════════
+  // RENDER: HEADER BAR
+  // ═══════════════════════════════════════
+  function renderHeader(app, metadata) {
+    const header = document.createElement('div');
+    header.className = 'bvg-header';
+
+    // Left: title + subtitle
+    let subParts = [];
+    if (metadata.subtitle) subParts.push(escHtml(metadata.subtitle));
+    if (metadata.dates) subParts.push(escHtml(metadata.dates));
+    if (metadata.wishlistInfo) subParts.push(escHtml(metadata.wishlistInfo));
+
+    header.innerHTML = `
+      <div class="bvg-header-left">
+        <div class="bvg-header-title">${escHtml(metadata.title)}</div>
+        ${subParts.length ? `<div class="bvg-header-sub">${subParts.join('<span style="color:#30363d"> | </span>')}</div>` : ''}
+      </div>
+      <div class="bvg-header-right">
+        ${metadata.buyLinks.map(l => `<a class="bvg-header-link" href="${escHtml(l.href)}" target="_blank">${escHtml(l.label)}</a>`).join('')}
+        <span class="bvg-header-badge">v${SCRIPT_VERSION}</span>
+      </div>
+    `;
+    app.appendChild(header);
+  }
+
+  // ═══════════════════════════════════════
+  // RENDER: STATS DASHBOARD
+  // ═══════════════════════════════════════
+  function renderStatsDashboard(app, bundleScores, scored, tiers) {
+    const { bundleRating, depthRating, personalRating, topMain, dealQuality, unownedMsrpSum } = bundleScores;
+    const ownedCount = scored.filter(g => g.itemType === 'game' && _appRefs.ownedSet.has(g.title)).length;
+    const gameCount = scored.filter(g => g.itemType === 'game').length;
+    const dlcCount = scored.filter(g => g.itemType !== 'game').length;
+    const wishCount = scored.filter(g => g.itemType === 'game' && g.wishlistedDOM).length;
+
+    const stats = document.createElement('div');
+    stats.className = 'bvg-stats';
+    _appRefs.statsContainer = stats;
+
+    const statBadge = (label, rating, detail) => {
+      const c = ratingColor(rating);
+      return `<div class="bvg-stat-card">
+        <div class="bvg-score-label">${label}</div>
+        <div><span class="bvg-score-num" style="color:${c}">${rating.toFixed(0)}</span><span class="bvg-score-denom">/100</span></div>
+        <div class="bvg-score-label">${detail}</div>
+        <div class="bvg-score-bar" style="width:${rating}%;background:${c}"></div>
+      </div>`;
+    };
+
+    // Top picks
+    const picksHTML = topMain
+      .map(p => `<div class="bvg-pick-item"><span class="bvg-pick-name" style="color:${scoreColor(p.score)}">${escHtml(p.title)}</span> <span class="bvg-pick-score">${p.score.toFixed(1)}</span></div>`)
+      .join('');
+
+    // Tier scoring
+    let tierHTML = '';
+    if (tiers && tiers.length > 0) {
+      const tierRows = tiers.map(t => {
+        const tierGames = (scored || []).filter(g => g.itemType === 'game' && g.tr && g.tr.dataset.bvgTier === t.name);
+        const tierAvg = tierGames.length > 0 ? tierGames.reduce((s, g) => s + g.score, 0) / tierGames.length : 0;
+        const tierTop = tierGames.length > 0 ? Math.max(...tierGames.map(g => g.score)) : 0;
+        const color = ratingColor(tierAvg);
+        return `<div class="bvg-tier-row">
+          <span>${escHtml(t.label || t.name)}</span>
+          <span>${t.price != null ? '<span class="bvg-tier-price">$' + t.price.toFixed(2) + '</span>' : ''} (${tierGames.length}) Avg: <strong style="color:${color}">${tierAvg.toFixed(0)}</strong> Best: ${tierTop.toFixed(0)}</span>
+        </div>`;
+      }).join('');
+      tierHTML = `<div class="bvg-tiers-card">
+        <div class="bvg-section-label">Tier Scoring</div>
+        ${tierRows}
+      </div>`;
     }
 
-    const st = _modernPanelState;
+    stats.innerHTML = `
+      ${statBadge('Bundle', bundleRating, `top ${SETTINGS.topNMain}`)}
+      ${statBadge('Depth', depthRating, `top ${SETTINGS.topNDepth}`)}
+      ${statBadge('Personal', personalRating, `excl. owned`)}
+      <div class="bvg-picks-card">
+        <div class="bvg-section-label">Top Picks</div>
+        ${picksHTML || '<span style="color:#8b949e">n/a</span>'}
+      </div>
+      <div class="bvg-histogram-card">
+        <div class="bvg-section-label" style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#8b949e;font-weight:600;margin-bottom:6px;">Score Distribution</div>
+        ${buildHistogramHTML(scored)}
+      </div>
+      <div class="bvg-meta-card">
+        <span>${ownedCount} of ${gameCount} games owned${dlcCount > 0 ? ` &middot; ${dlcCount} DLC/extras` : ''}</span>
+        <span>${wishCount} wishlisted${CURRENT_BUNDLE_COST ? ` &middot; Bundle: $${CURRENT_BUNDLE_COST.toFixed(2)}` : ''}</span>
+        ${dealQuality != null ? `<span><span class="bvg-meta-highlight">Deal: ${dealQuality.toFixed(1)}x</span> ($${unownedMsrpSum.toFixed(0)} unowned MSRP)</span>` : ''}
+        <span>Rating: ${SETTINGS.useWilsonAdjustedRating ? 'Wilson-adjusted' : 'Raw % (confidence-weighted)'}</span>
+      </div>
+      ${tierHTML}
+    `;
+
+    app.appendChild(stats);
+  }
+
+  // ═══════════════════════════════════════
+  // RENDER: TOOLBAR
+  // ═══════════════════════════════════════
+  function renderToolbar(app, tiers) {
+    const st = _gridState;
+    const dirArrow = st.sortDir === 'desc' ? '&#9660;' : '&#9650;';
+    const pagePref = loadPagePref();
+
+    // Currency selector
+    const availCurrencies = collectAvailableCurrencies(tiers);
+    let currencySelectHTML = '';
+    if (availCurrencies.length > 1) {
+      const opts = availCurrencies.map(c => {
+        const def = CURRENCY_DEFS.find(d => d.code === c);
+        const label = def ? `${def.symbol} ${c}` : c;
+        const sel = st.currency === c ? ' selected' : '';
+        return `<option value="${c}"${sel}>${escHtml(label)}</option>`;
+      }).join('');
+      currencySelectHTML = `<select id="bvg-currency-select"><option value=""${!st.currency ? ' selected' : ''}>Currency</option>${opts}</select>`;
+    }
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'bvg-toolbar';
+    toolbar.innerHTML = `
+      <div class="bvg-page-toggle">
+        <button type="button" data-page="modern" class="${pagePref === 'modern' ? 'active' : ''}">Modern</button>
+        <button type="button" data-page="classic" class="${pagePref !== 'modern' ? 'active' : ''}">Classic</button>
+      </div>
+      <input type="text" id="bvg-search" placeholder="Search games..." value="${escHtml(st.search)}">
+      <select id="bvg-sort-select">
+        <option value="score"${st.sortKey === 'score' ? ' selected' : ''}>Score ${st.sortKey === 'score' ? dirArrow : ''}</option>
+        <option value="title"${st.sortKey === 'title' ? ' selected' : ''}>Title ${st.sortKey === 'title' ? dirArrow : ''}</option>
+        <option value="rating"${st.sortKey === 'rating' ? ' selected' : ''}>Rating ${st.sortKey === 'rating' ? dirArrow : ''}</option>
+        <option value="reviews"${st.sortKey === 'reviews' ? ' selected' : ''}>Reviews ${st.sortKey === 'reviews' ? dirArrow : ''}</option>
+        <option value="msrp"${st.sortKey === 'msrp' ? ' selected' : ''}>MSRP ${st.sortKey === 'msrp' ? dirArrow : ''}</option>
+      </select>
+      ${currencySelectHTML}
+      <button type="button" class="bvg-filter-chip${st.hideOwned ? ' active' : ''}" id="bvg-toggle-owned">Hide owned</button>
+      <button type="button" class="bvg-filter-chip${st.hideDLC ? ' active' : ''}" id="bvg-toggle-dlc">Hide DLC</button>
+      <span class="bvg-toolbar-spacer"></span>
+      <button class="bvg-settings-btn" id="bvg-export-btn">&#128203; Copy Summary</button>
+      <button class="bvg-settings-btn" id="bvg-settings-gear">&#9881; Settings</button>
+    `;
+
+    // Page toggle
+    toolbar.querySelectorAll('.bvg-page-toggle button').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setPage(btn.dataset.page);
+      });
+    });
+
+    // Search
+    let searchDebounce = null;
+    const searchInput = toolbar.querySelector('#bvg-search');
+    searchInput?.addEventListener('input', () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        st.search = searchInput.value;
+        reRenderContent();
+      }, 200);
+    });
+
+    // Sort
+    toolbar.querySelector('#bvg-sort-select')?.addEventListener('change', (e) => {
+      if (st.sortKey === e.target.value) {
+        st.sortDir = st.sortDir === 'desc' ? 'asc' : 'desc';
+      } else {
+        st.sortKey = e.target.value;
+        st.sortDir = 'desc';
+      }
+      reRenderContent();
+    });
+
+    // Currency
+    toolbar.querySelector('#bvg-currency-select')?.addEventListener('change', (e) => {
+      st.currency = e.target.value;
+      saveCurrencyPref(st.currency);
+      reRenderContent();
+    });
+
+    // Filters
+    toolbar.querySelector('#bvg-toggle-owned')?.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      st.hideOwned = !st.hideOwned;
+      reRenderContent();
+    });
+    toolbar.querySelector('#bvg-toggle-dlc')?.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      st.hideDLC = !st.hideDLC;
+      reRenderContent();
+    });
+
+    // Export
+    toolbar.querySelector('#bvg-export-btn')?.addEventListener('click', () => {
+      const bs = _appRefs.bundleScores;
+      const s = _appRefs.scored;
+      const os = _appRefs.ownedSet;
+      if (!bs || !s) return;
+      const ownedCount = s.filter(g => g.itemType === 'game' && os.has(g.title)).length;
+      const gameCount = s.filter(g => g.itemType === 'game').length;
+      const wishCount = s.filter(g => g.itemType === 'game' && g.wishlistedDOM).length;
+      const dlcCount = s.filter(g => g.itemType !== 'game').length;
+      const topList = bs.topMain.map((p, i) => `${i + 1}. ${p.title} (${p.score.toFixed(1)})`).join('\n');
+      const lines = [
+        `Bundle Evaluation — ${document.title || location.href}`,
+        `Bundle: ${bs.bundleRating.toFixed(0)}/100 | Depth: ${bs.depthRating.toFixed(0)}/100 | Personal: ${bs.personalRating.toFixed(0)}/100`,
+        `${ownedCount}/${gameCount} owned | ${wishCount} wishlisted${dlcCount > 0 ? ` | ${dlcCount} DLC excluded` : ''}`,
+        bs.dealQuality != null ? `Deal quality: ${bs.dealQuality.toFixed(1)}x ($${bs.unownedMsrpSum.toFixed(0)} unowned MSRP / $${CURRENT_BUNDLE_COST.toFixed(2)})` : '',
+        '', 'Top Picks:', topList,
+      ].filter(Boolean).join('\n');
+      const btn = toolbar.querySelector('#bvg-export-btn');
+      navigator.clipboard.writeText(lines).then(() => {
+        if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.innerHTML = '&#128203; Copy Summary', 1500); }
+      }).catch(() => {
+        if (btn) { btn.textContent = 'Copy failed'; setTimeout(() => btn.innerHTML = '&#128203; Copy Summary', 2000); }
+        console.warn('[BVG Scorer] Clipboard write denied — page may not be in a secure context');
+      });
+    });
+
+    // Settings gear
+    toolbar.querySelector('#bvg-settings-gear')?.addEventListener('click', () => {
+      openSettingsModal();
+    });
+
+    app.appendChild(toolbar);
+  }
+
+  // ═══════════════════════════════════════
+  // RENDER: SETTINGS MODAL
+  // ═══════════════════════════════════════
+  function openSettingsModal() {
+    // Prevent duplicate modals
+    if (document.querySelector('.bvg-modal-backdrop')) return;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'bvg-modal-backdrop';
+    const modal = document.createElement('div');
+    modal.className = 'bvg-modal';
+    modal.innerHTML = `
+      <div class="bvg-modal-header">
+        <h3>Scoring Settings</h3>
+        <button class="bvg-modal-close" title="Close">&times;</button>
+      </div>
+      <div id="bvg-settings-panel">${buildSettingsHTML()}</div>
+    `;
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+
+    // Close on backdrop click
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) backdrop.remove();
+    });
+    // Close on X button
+    modal.querySelector('.bvg-modal-close')?.addEventListener('click', () => backdrop.remove());
+    // Close on Escape
+    const onEsc = (e) => {
+      if (e.key === 'Escape') { backdrop.remove(); document.removeEventListener('keydown', onEsc); }
+    };
+    document.addEventListener('keydown', onEsc);
+
+    // Apply & Reset
+    modal.querySelector('#bvg-settings-apply')?.addEventListener('click', () => {
+      readSettingsFromPanel();
+      backdrop.remove();
+      run();
+    });
+    modal.querySelector('#bvg-settings-reset')?.addEventListener('click', () => {
+      SETTINGS = clone(DEFAULT_SETTINGS);
+      saveSettings(SETTINGS);
+      backdrop.remove();
+      run();
+    });
+  }
+
+  // ═══════════════════════════════════════
+  // RENDER: CONTENT AREA (game grid)
+  // ═══════════════════════════════════════
+  function renderContent(app, scored, ownedSet, tiers) {
+    const container = document.createElement('div');
+    container.id = 'bvg-content';
+    _appRefs.contentContainer = container;
+    renderGameGrid(container, scored, ownedSet, tiers);
+    app.appendChild(container);
+  }
+
+  // Targeted re-render for filter/sort changes (avoids full app rebuild)
+  function reRenderContent() {
+    const container = _appRefs.contentContainer;
+    if (!container || !_appRefs.scored) return;
+    renderGameGrid(container, _appRefs.scored, _appRefs.ownedSet, _appRefs.tiers);
+    // Update toolbar active states for filters
+    document.querySelector('#bvg-toggle-owned')?.classList.toggle('active', _gridState.hideOwned);
+    document.querySelector('#bvg-toggle-dlc')?.classList.toggle('active', _gridState.hideDLC);
+  }
+
+  function renderGameGrid(container, scored, ownedSet, tiers) {
+    const st = _gridState;
 
     // Filter
     let filtered = [...scored];
@@ -1776,7 +1514,7 @@
     let currentTierName = null;
     let rank = 0;
 
-    // Precompute tier stats for dividers
+    // Precompute tier stats
     const tierStats = new Map();
     if (showTierDividers) {
       for (const t of tiers) {
@@ -1816,7 +1554,7 @@
         ? `<div class="bvg-card-img-wrap"><img class="bvg-card-img" src="${escHtml(g.imgSrc)}" alt="" loading="lazy"></div>`
         : '<div class="bvg-card-img-placeholder"></div>';
 
-      // Tags (owned, DLC, unrated, tier — NOT wishlist, which is now inline in meta)
+      // Tags
       let tags = '';
       if (isOwned) tags += '<span class="bvg-card-tag tag-owned">Owned</span>';
       if (isDLC) tags += `<span class="bvg-card-tag tag-dlc">${g.itemType === 'package' ? 'Package' : 'DLC'}</span>`;
@@ -1832,7 +1570,7 @@
       const scoreBgStyle = isUnrated ? '' : `background:${scoreBg(g.score)}`;
       const scoreLabel = isUnrated ? 'N/R' : g.score.toFixed(0);
 
-      // Build meta items with separators
+      // Meta items
       const metaParts = [];
       if (g.ratingPct != null) metaParts.push(`<span>Rating <span class="bvg-cm-val" style="color:${ratingColor(g.ratingPct)}">${g.ratingPct}%</span></span>`);
       if (g.reviews != null) metaParts.push(`<span>Reviews <span class="bvg-cm-val">${g.reviews.toLocaleString()}</span></span>`);
@@ -1859,96 +1597,14 @@
 
     const totalShown = filtered.length;
     const totalGames = scored.filter(g => g.itemType === 'game').length;
-    const dirArrow = st.sortDir === 'desc' ? '&#9660;' : '&#9650;';
-    const viewPref = loadViewPreference();
 
-    // Currency selector (only if multiple currencies detected)
-    const availCurrencies = collectAvailableCurrencies(tiers);
-    let currencySelectHTML = '';
-    if (availCurrencies.length > 1) {
-      const opts = availCurrencies.map(c => {
-        const def = CURRENCY_DEFS.find(d => d.code === c);
-        const label = def ? `${def.symbol} ${c}` : c;
-        const sel = st.currency === c ? ' selected' : '';
-        return `<option value="${c}"${sel}>${escHtml(label)}</option>`;
-      }).join('');
-      currencySelectHTML = `<select id="bvg-currency-select"><option value=""${!st.currency ? ' selected' : ''}>Currency</option>${opts}</select>`;
-    }
-
-    panel.innerHTML = `
-      <div class="bvg-view-toggle" id="bvg-view-toggle">
-        <button type="button" data-view="modern" class="${viewPref === 'modern' ? 'active' : ''}">Modern</button>
-        <button type="button" data-view="classic" class="${viewPref !== 'modern' ? 'active' : ''}">Classic</button>
-      </div>
-      <div class="bvg-filter-bar">
-        <input type="text" id="bvg-search" placeholder="Search games..." value="${escHtml(st.search)}">
-        <select id="bvg-sort-select">
-          <option value="score"${st.sortKey === 'score' ? ' selected' : ''}>Score ${st.sortKey === 'score' ? dirArrow : ''}</option>
-          <option value="title"${st.sortKey === 'title' ? ' selected' : ''}>Title ${st.sortKey === 'title' ? dirArrow : ''}</option>
-          <option value="rating"${st.sortKey === 'rating' ? ' selected' : ''}>Rating ${st.sortKey === 'rating' ? dirArrow : ''}</option>
-          <option value="reviews"${st.sortKey === 'reviews' ? ' selected' : ''}>Reviews ${st.sortKey === 'reviews' ? dirArrow : ''}</option>
-          <option value="msrp"${st.sortKey === 'msrp' ? ' selected' : ''}>MSRP ${st.sortKey === 'msrp' ? dirArrow : ''}</option>
-        </select>
-        ${currencySelectHTML}
-        <button type="button" class="bvg-filter-chip${st.hideOwned ? ' active' : ''}" id="bvg-toggle-owned">Hide owned</button>
-        <button type="button" class="bvg-filter-chip${st.hideDLC ? ' active' : ''}" id="bvg-toggle-dlc">Hide DLC</button>
-      </div>
+    container.innerHTML = `
       <div class="bvg-cards">${cardsHTML}</div>
       <div class="bvg-cards-footer">Showing ${totalShown} of ${scored.length} items (${totalGames} games)</div>
     `;
 
-    // Bind view toggle (inside panel — always in same position)
-    panel.querySelectorAll('#bvg-view-toggle button').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setView(btn.dataset.view, findItemTable());
-      });
-    });
-
-    // Bind filter events
-    const searchInput = panel.querySelector('#bvg-search');
-    let searchDebounce = null;
-    searchInput?.addEventListener('input', () => {
-      clearTimeout(searchDebounce);
-      searchDebounce = setTimeout(() => {
-        st.search = searchInput.value;
-        renderModernPanel(scored, ownedSet, tiers);
-      }, 200);
-    });
-
-    panel.querySelector('#bvg-currency-select')?.addEventListener('change', (e) => {
-      st.currency = e.target.value;
-      saveCurrencyPref(st.currency);
-      renderModernPanel(scored, ownedSet, tiers);
-    });
-
-    panel.querySelector('#bvg-sort-select')?.addEventListener('change', (e) => {
-      if (st.sortKey === e.target.value) {
-        st.sortDir = st.sortDir === 'desc' ? 'asc' : 'desc';
-      } else {
-        st.sortKey = e.target.value;
-        st.sortDir = 'desc';
-      }
-      renderModernPanel(scored, ownedSet, tiers);
-    });
-
-    panel.querySelector('#bvg-toggle-owned')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      st.hideOwned = !st.hideOwned;
-      renderModernPanel(scored, ownedSet, tiers);
-    });
-
-    panel.querySelector('#bvg-toggle-dlc')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      st.hideDLC = !st.hideDLC;
-      renderModernPanel(scored, ownedSet, tiers);
-    });
-
     // Ownership toggle on card score click
-    panel.querySelectorAll('.bvg-card-score').forEach(el => {
+    container.querySelectorAll('.bvg-card-score').forEach(el => {
       el.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -1959,101 +1615,16 @@
         if (set.has(title)) set.delete(title);
         else set.add(title);
         saveOwnedSet(set);
-        clearScoreCells();
         run();
       });
     });
 
-    // Focus search after re-render if it was focused
-    if (document.activeElement?.id === 'bvg-search' || st.search) {
-      const newInput = panel.querySelector('#bvg-search');
-      if (newInput && st.search) {
-        newInput.focus();
-        newInput.setSelectionRange(newInput.value.length, newInput.value.length);
-      }
-    }
-  }
-
-  function setView(mode, table) {
-    saveViewPreference(mode);
-    const panel = document.getElementById('bvg-modern-panel');
-    const classicToggle = document.getElementById('bvg-classic-view-toggle');
-    if (mode === 'modern') {
-      if (table) table.style.display = 'none';
-      if (panel) panel.style.display = '';
-      if (classicToggle) classicToggle.style.display = 'none';
-    } else {
-      if (table) table.style.display = '';
-      if (panel) panel.style.display = 'none';
-      if (classicToggle) classicToggle.style.display = '';
-    }
-    // Update toggle button states in both the panel toggle and the classic toggle
-    document.querySelectorAll('.bvg-view-toggle button').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.view === mode);
-    });
-  }
-
-  function ensureViewToggle(table) {
-    // Toggle is now rendered inside renderModernPanel; only need a
-    // standalone toggle above the classic table when in classic mode
-    if (document.getElementById('bvg-classic-view-toggle')) return;
-    const toggle = document.createElement('div');
-    toggle.id = 'bvg-classic-view-toggle';
-    toggle.className = 'bvg-view-toggle';
-    toggle.innerHTML = `
-      <button type="button" data-view="modern">Modern</button>
-      <button type="button" data-view="classic" class="active">Classic</button>
-    `;
-    if (table) table.parentElement.insertBefore(toggle, table);
-    else document.body.prepend(toggle);
-
-    toggle.querySelectorAll('button').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setView(btn.dataset.view, table);
-      });
-    });
-  }
-
-  // ═══════════════════════════════════════
-  // COLUMN INJECTION PIPELINE
-  //
-  // Single entry point for all DOM column
-  // modifications. Enforces correct ordering
-  // and validates column alignment afterward.
-  // ═══════════════════════════════════════
-  function injectColumns(table, scored, ownedSet) {
-    // Phase 1: Score column (adds 1 header + 1 data cell per game row)
-    ensureScoreHeader(table);
-    ensureScoreCells(scored, ownedSet);
-
-    // Phase 2: Review column split (hides 1 + adds 2 = net +1 per row)
-    splitReviewColumn(table, scored);
-
-    // Phase 3: Decorative tier labels (no column count change)
-    addTierLabels(scored);
-
-    // Phase 4: Fix colspan on non-game rows to match new column count
-    fixNonGameRows(table);
-
-    // Phase 5: Post-injection features that read final column layout
-    makeAllColumnsSortable(table);
-    labelEmptyHeaders(table);
-
-    // Validate: header cell count should match first game row's cell count.
-    // Mismatch indicates a colspan/injection bug — log for debugging.
-    const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
-    const firstGameRow = scored.length > 0 ? scored[0].tr : null;
-    if (headerRow && firstGameRow) {
-      const headerCols = [...headerRow.querySelectorAll('th, td')]
-        .filter(c => c.style.display !== 'none')
-        .reduce((sum, c) => sum + (c.colSpan || 1), 0);
-      const dataCols = [...firstGameRow.querySelectorAll('td')]
-        .filter(c => c.style.display !== 'none')
-        .reduce((sum, c) => sum + (c.colSpan || 1), 0);
-      if (headerCols !== dataCols) {
-        console.warn(`[BVG Scorer] Column mismatch after injection: header=${headerCols}, data=${dataCols}. Table alignment may be off.`);
+    // Preserve search focus after re-render
+    if (_gridState.search) {
+      const searchInput = document.querySelector('#bvg-search');
+      if (searchInput) {
+        searchInput.focus();
+        searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length);
       }
     }
   }
@@ -2068,11 +1639,13 @@
     const rows = findGameRows(table);
     if (!rows.length) { console.warn('[BVG Scorer] No game rows.'); return; }
     console.log(`[BVG Scorer] Found ${rows.length} games.`);
+
     // Detect tiers BEFORE any DOM modifications
     const tiers = detectTiers(table);
     if (tiers.length) console.log(`[BVG Scorer] Detected ${tiers.length} tier(s):`, tiers.map(t => t.name));
     CURRENT_BUNDLE_COST = detectBundleCost(table);
     console.log('[BVG Scorer] Bundle cost detected:', CURRENT_BUNDLE_COST);
+
     // Build owned set: merge DOM-detected + manually toggled
     const manualOwned = loadOwnedSet();
     const games = rows.map(tr => extractGame(tr));
@@ -2084,29 +1657,23 @@
       const { score, breakdown } = scoreGame(g);
       return { ...g, score, breakdown };
     });
-    // DOM modifications — centralized injection pipeline.
-    // Order matters: score column first (other injections reference its position),
-    // then review split (adds 2 columns), then tier labels (decorative, no column change),
-    // then fixup for non-game rows whose colspan must account for all injected columns,
-    // and finally sortable headers + label inference which read the final column layout.
-    injectColumns(table, scored, ownedSet);
+
     const bundleScores = computeBundleScores(scored, ownedSet);
-    const { bundleRating, depthRating, personalRating, topMain, dealQuality, unownedMsrpSum } = bundleScores;
-    const ownedCount = scored.filter(g => g.itemType === 'game' && ownedSet.has(g.title)).length;
-    const gameCount = scored.filter(g => g.itemType === 'game').length;
-    const dlcCount = scored.filter(g => g.itemType !== 'game').length;
-    const wishCount = scored.filter(g => g.itemType === 'game' && g.wishlistedDOM).length;
-    renderBanner({ bundleRating, depthRating, personalRating, picks: topMain, ownedCount, gameCount, dlcCount, wishCount, tiers, scored, dealQuality, unownedMsrpSum });
-    // Show storage warning after banner is rendered (if storage probe failed at startup)
-    if (!_storageAvailable && !_storageWarningShown) {
-      _storageWarningShown = true;
-      showStorageWarning();
+
+    // Extract metadata from original page before hiding
+    const metadata = extractBundleMetadata();
+
+    // Hide original page and render custom app
+    hideOriginalPage();
+    renderApp(scored, ownedSet, tiers, bundleScores, metadata);
+
+    // Apply page preference (modern by default, classic shows original page)
+    const pagePref = loadPagePref();
+    if (pagePref === 'classic') {
+      setPage('classic');
     }
-    // Modern panel
-    renderModernPanel(scored, ownedSet, tiers);
-    ensureViewToggle(table);
-    setView(loadViewPreference(), table);
   }
+
   // ═══════════════════════════════════════
   // BOOTSTRAP
   // ═══════════════════════════════════════
@@ -2123,7 +1690,7 @@
     _bvgObserver = new MutationObserver(() => {
       clearTimeout(debounce);
       debounce = setTimeout(() => {
-        if (!document.querySelector('.bvg-score-cell')) {
+        if (!document.querySelector('#bvg-app')) {
           try { run(); } catch (e) { console.error('[BVG Scorer] Rerun error:', e); }
         }
       }, 400);

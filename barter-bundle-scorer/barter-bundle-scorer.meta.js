@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      5.3.0
-// @description  Per-game scoring with DLC/package handling, side evaluation panel, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
+// @version      6.0.0
+// @description  Full-page bundle evaluation dashboard with per-game scoring, card grid, stats dashboard, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
 // @homepageURL  https://github.com/MasonV/js-scripts
