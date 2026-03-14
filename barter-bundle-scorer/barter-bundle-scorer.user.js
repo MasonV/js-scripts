@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      5.1.0
+// @version      5.2.0
 // @description  Per-game scoring with DLC/package handling, side evaluation panel, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -14,7 +14,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const SCRIPT_VERSION = '5.1.0';
+  const SCRIPT_VERSION = '5.2.0';
   console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
   // ═══════════════════════════════════════
   // STYLES (GM_addStyle bypasses CSP)
@@ -330,13 +330,13 @@
     }
     .bvg-card {
       display: grid;
-      grid-template-columns: 52px 80px 1fr auto;
-      gap: 12px;
-      align-items: center;
+      grid-template-columns: 120px 1fr auto;
+      gap: 0;
+      align-items: stretch;
       background: #0d1117;
       border: 1px solid #1f2937;
       border-radius: 10px;
-      padding: 10px 16px;
+      overflow: hidden;
       transition: border-color .15s, background .15s;
     }
     .bvg-card:hover {
@@ -350,12 +350,94 @@
       opacity: .45;
       border-style: dashed;
     }
-    .bvg-card-score {
-      width: 52px;
-      height: 52px;
-      border-radius: 10px;
+    .bvg-card-img {
+      width: 120px;
+      min-height: 56px;
+      object-fit: cover;
+      background: #161b22;
+      display: block;
+    }
+    .bvg-card-img-placeholder {
+      width: 120px;
+      min-height: 56px;
+      background: #161b22;
+    }
+    .bvg-card-body {
+      min-width: 0;
+      padding: 8px 14px;
       display: flex;
       flex-direction: column;
+      justify-content: center;
+    }
+    .bvg-card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #e6edf3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .bvg-card-title a { color: inherit; text-decoration: none; }
+    .bvg-card-title a:hover { text-decoration: underline; }
+    .bvg-card-rank {
+      font-size: 11px;
+      font-weight: 700;
+      color: #8b949e;
+      margin-right: 6px;
+      letter-spacing: .3px;
+    }
+    .bvg-card-meta {
+      font-size: 11px;
+      color: #8b949e;
+      margin-top: 3px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .bvg-card-meta .bvg-cm-val {
+      color: #c9d1d9;
+      font-weight: 600;
+    }
+    .bvg-card-meta .bvg-cm-wish {
+      color: #58a6ff;
+      font-weight: 600;
+    }
+    .bvg-card-meta .bvg-cm-sep {
+      color: #30363d;
+      font-size: 10px;
+    }
+    .bvg-card-tags {
+      display: flex;
+      gap: 5px;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+    .bvg-card-tag {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 7px;
+      border-radius: 4px;
+      background: #21262d;
+      color: #8b949e;
+    }
+    .bvg-card-tag.tag-owned { background: #1d2b1d; color: #3fb950; }
+    .bvg-card-tag.tag-dlc { background: #2b221d; color: #d29922; }
+    .bvg-card-tag.tag-unrated { background: #2d333b; color: #8b949e; }
+    .bvg-card-right {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      padding: 8px 16px;
+      white-space: nowrap;
+    }
+    .bvg-card-score {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      display: flex;
       align-items: center;
       justify-content: center;
       font-weight: 800;
@@ -377,90 +459,10 @@
       text-shadow: none;
       color: #8b949e;
     }
-    .bvg-card-score .bvg-card-rank {
-      font-size: 9px;
-      font-weight: 600;
-      opacity: .7;
-      letter-spacing: .5px;
-      text-shadow: none;
-    }
-    .bvg-card-img {
-      width: 80px;
-      height: 38px;
-      border-radius: 4px;
-      object-fit: cover;
-      background: #161b22;
-      flex-shrink: 0;
-    }
-    .bvg-card-img-placeholder {
-      width: 80px;
-      height: 38px;
-      border-radius: 4px;
-      background: #161b22;
-      flex-shrink: 0;
-    }
-    .bvg-card-body {
-      min-width: 0;
-    }
-    .bvg-card-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: #e6edf3;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .bvg-card-title a { color: inherit; text-decoration: none; }
-    .bvg-card-title a:hover { text-decoration: underline; }
-    .bvg-card-meta {
-      font-size: 11px;
-      color: #8b949e;
-      margin-top: 3px;
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-    .bvg-card-meta .bvg-cm-val {
-      color: #c9d1d9;
-      font-weight: 600;
-    }
-    .bvg-card-tags {
-      display: flex;
-      gap: 5px;
-      flex-wrap: wrap;
-      margin-top: 4px;
-    }
-    .bvg-card-tag {
-      font-size: 10px;
-      font-weight: 600;
-      padding: 1px 7px;
-      border-radius: 4px;
-      background: #21262d;
-      color: #8b949e;
-    }
-    .bvg-card-tag.tag-wish { background: #1a2332; color: #58a6ff; }
-    .bvg-card-tag.tag-owned { background: #1d2b1d; color: #3fb950; }
-    .bvg-card-tag.tag-dlc { background: #2b221d; color: #d29922; }
-    .bvg-card-tag.tag-unrated { background: #2d333b; color: #8b949e; }
-    .bvg-card-right {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 4px;
-      font-size: 12px;
-      white-space: nowrap;
-    }
     .bvg-card-msrp {
-      font-weight: 700;
-      font-size: 14px;
-      color: #e6edf3;
-    }
-    .bvg-card-rating {
-      font-weight: 700;
-    }
-    .bvg-card-reviews {
+      font-weight: 600;
+      font-size: 12px;
       color: #8b949e;
-      font-size: 11px;
     }
     /* ── Tier divider in card view ── */
     .bvg-tier-divider {
@@ -498,6 +500,23 @@
       padding: 10px 0;
     }
 
+    /* ── Responsive: 2-column cards on wide screens ── */
+    @media (min-width: 1600px) {
+      .bvg-cards {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
+      }
+      .bvg-tier-divider {
+        grid-column: 1 / -1;
+      }
+    }
+    @media (min-width: 2200px) {
+      .bvg-cards {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+
     @media (max-width: 1300px) {
       body { padding-right: 0 !important; }
       #bvg-scorer-banner {
@@ -514,6 +533,14 @@
         grid-template-columns: repeat(2, minmax(120px, 1fr));
       }
       #bvg-modern-panel { max-width: 100%; padding: 0 8px; }
+    }
+    /* ── Mobile: compact cards ── */
+    @media (max-width: 600px) {
+      .bvg-card {
+        grid-template-columns: 80px 1fr auto;
+      }
+      .bvg-card-img { width: 80px; }
+      .bvg-card-img-placeholder { width: 80px; }
     }
   `);
   // ═══════════════════════════════════════
@@ -697,10 +724,17 @@
       const type = classifyRow(tr);
       if (type === ROW_TIER) {
         const text = tr.textContent.trim().replace(/\s+/g, ' ');
+        // Extract prices for all supported currencies
+        const prices = {};
+        for (const cd of CURRENCY_DEFS) {
+          const m = text.match(cd.re);
+          if (m) prices[cd.code] = parseFloat(m[1]);
+        }
         const priceMatch = text.match(/\$\s*(\d+(?:\.\d{1,2})?)/);
         currentTier = {
           name: text.substring(0, 80),
           price: priceMatch ? parseFloat(priceMatch[1]) : null,
+          prices: prices,
           tr: tr,
           games: [],
         };
@@ -814,6 +848,23 @@
           else reviews = nums[0];
         }
         phase = 3;
+      }
+    }
+    // Fallback: if the phased scan didn't reach review/rating data (e.g. no MSRP
+    // column for this row), do a dedicated scan for a cell with two numbers where
+    // one is ≤100 (rating%) and the other is the review count.
+    if (ratingPct == null && reviews == null) {
+      for (let i = cells.length - 1; i >= 0; i--) {
+        const nums = numsIn(cells[i]);
+        if (nums.length >= 2) {
+          const sorted = [...nums].sort((a, b) => b - a);
+          if (sorted[1] <= 100) {
+            reviews = sorted[0];
+            ratingPct = sorted[1];
+            reviewCell = cells[i];
+            break;
+          }
+        }
       }
     }
     const ownedDOM = isOwnedInDOM(tr);
@@ -1478,12 +1529,58 @@
   // sort, ownership toggle, and tier groups.
   // ═══════════════════════════════════════
   const STORAGE_KEY_VIEW = 'bvg_scorer_view_v1';
+  const STORAGE_KEY_CURRENCY = 'bvg_scorer_currency_v1';
+  // Currency symbols and regex patterns for extraction from tier text
+  const CURRENCY_DEFS = [
+    { code: 'USD', symbol: '$',  re: /\$\s*(\d+(?:\.\d{1,2})?)/ },
+    { code: 'EUR', symbol: '\u20AC', re: /\u20AC\s*(\d+(?:\.\d{1,2})?)/ },  // €
+    { code: 'GBP', symbol: '\u00A3', re: /\u00A3\s*(\d+(?:\.\d{1,2})?)/ },  // £
+    { code: 'CAD', symbol: 'C$', re: /C\$\s*(\d+(?:\.\d{1,2})?)/ },
+    { code: 'AUD', symbol: 'A$', re: /A\$\s*(\d+(?:\.\d{1,2})?)/ },
+    { code: 'RUB', symbol: '\u20BD', re: /(\d+(?:\.\d{1,2})?)\s*\u20BD/ },   // ₽ (suffix)
+  ];
+  function loadCurrencyPref() {
+    try { return localStorage.getItem(STORAGE_KEY_CURRENCY) || ''; } catch { return ''; }
+  }
+  function saveCurrencyPref(c) {
+    try { localStorage.setItem(STORAGE_KEY_CURRENCY, c); } catch {}
+  }
+  // Format a tier price using the preferred currency, falling back to USD or first available
+  function formatTierPrice(tier, currencyPref) {
+    if (!tier.prices || !Object.keys(tier.prices).length) {
+      return tier.price != null ? `$${tier.price.toFixed(2)}` : null;
+    }
+    // If a preference is set and the tier has that currency, use it
+    if (currencyPref && tier.prices[currencyPref] != null) {
+      const def = CURRENCY_DEFS.find(c => c.code === currencyPref);
+      const sym = def ? def.symbol : currencyPref;
+      return `${sym}${tier.prices[currencyPref].toFixed(2)}`;
+    }
+    // No preference or not available — show USD if present, else first available
+    if (tier.prices.USD != null) return `$${tier.prices.USD.toFixed(2)}`;
+    const first = Object.keys(tier.prices)[0];
+    if (first) {
+      const def = CURRENCY_DEFS.find(c => c.code === first);
+      const sym = def ? def.symbol : first;
+      return `${sym}${tier.prices[first].toFixed(2)}`;
+    }
+    return tier.price != null ? `$${tier.price.toFixed(2)}` : null;
+  }
+  // Collect all currencies seen across tiers
+  function collectAvailableCurrencies(tiers) {
+    const seen = new Set();
+    for (const t of tiers) {
+      if (t.prices) Object.keys(t.prices).forEach(c => seen.add(c));
+    }
+    return [...seen];
+  }
   let _modernPanelState = {
     sortKey: 'score',
     sortDir: 'desc',
     search: '',
     hideOwned: false,
     hideDLC: false,
+    currency: loadCurrencyPref(),
   };
 
   function loadViewPreference() {
@@ -1566,7 +1663,8 @@
         if (tName && tName !== currentTierName) {
           currentTierName = tName;
           const ts = tierStats.get(tName);
-          const priceStr = tier.price != null ? `<span class="bvg-td-price">$${tier.price.toFixed(2)}</span>` : '';
+          const fmtPrice = formatTierPrice(tier, st.currency);
+          const priceStr = fmtPrice ? `<span class="bvg-td-price">${escHtml(fmtPrice)}</span>` : '';
           const statsStr = ts ? `<span class="bvg-td-stats">${ts.count} games &middot; avg ${ts.avg.toFixed(0)}</span>` : '';
           cardsHTML += `<div class="bvg-tier-divider"><div class="bvg-td-left">${escHtml(tName)} ${priceStr}</div>${statsStr}</div>`;
         }
@@ -1581,39 +1679,43 @@
         ? `<img class="bvg-card-img" src="${escHtml(g.imgSrc)}" alt="" loading="lazy">`
         : '<div class="bvg-card-img-placeholder"></div>';
 
-      // Tags
+      // Tags (owned, DLC, unrated, tier — NOT wishlist, which is now inline in meta)
       let tags = '';
       if (isOwned) tags += '<span class="bvg-card-tag tag-owned">Owned</span>';
-      if (g.wishlistedDOM) tags += '<span class="bvg-card-tag tag-wish">Wishlisted</span>';
       if (isDLC) tags += `<span class="bvg-card-tag tag-dlc">${g.itemType === 'package' ? 'Package' : 'DLC'}</span>`;
       if (isUnrated) tags += '<span class="bvg-card-tag tag-unrated">Unrated</span>';
       const tierForTag = tierMap.get(g.tr);
-      if (tierForTag && tierForTag.price != null && !showTierDividers) {
-        tags += `<span class="bvg-card-tag">$${tierForTag.price.toFixed(2)} tier</span>`;
+      if (tierForTag) {
+        const tierPriceStr = formatTierPrice(tierForTag, st.currency);
+        if (tierPriceStr) tags += `<span class="bvg-card-tag">${escHtml(tierPriceStr)} tier</span>`;
       }
 
       const cardClass = `bvg-card${isOwned ? ' bvg-card-owned' : ''}${isDLC ? ' bvg-card-dlc' : ''}`;
       const scoreClass = `bvg-card-score${isUnrated ? ' bvg-unrated' : ''}`;
       const scoreBgStyle = isUnrated ? '' : `background:${scoreBg(g.score)}`;
-      const scoreLabel = isUnrated ? `<span class="bvg-card-rank">#${rank}</span>N/R` : `<span class="bvg-card-rank">#${rank}</span>${g.score.toFixed(0)}`;
+      const scoreLabel = isUnrated ? 'N/R' : g.score.toFixed(0);
+
+      // Build meta items with separators
+      const metaParts = [];
+      if (g.ratingPct != null) metaParts.push(`<span>Rating <span class="bvg-cm-val" style="color:${ratingColor(g.ratingPct)}">${g.ratingPct}%</span></span>`);
+      if (g.reviews != null) metaParts.push(`<span>Reviews <span class="bvg-cm-val">${g.reviews.toLocaleString()}</span></span>`);
+      if (g.bundledTimes != null) metaParts.push(`<span>Bundled <span class="bvg-cm-val">${g.bundledTimes}x</span></span>`);
+      if (g.wishlistedDOM) metaParts.push('<span class="bvg-cm-wish">Wishlisted</span>');
+      const metaHTML = metaParts.join('<span class="bvg-cm-sep">&middot;</span>');
 
       cardsHTML += `
         <div class="${cardClass}" data-bvg-title="${escHtml(g.title)}">
-          <div class="${scoreClass}" style="${scoreBgStyle}" title="${escHtml(formatBreakdown(g.breakdown))}">
-            ${scoreLabel}
-          </div>
           ${imgHTML}
           <div class="bvg-card-body">
-            <div class="bvg-card-title"><a href="${escHtml(href)}">${escHtml(g.title)}</a></div>
-            <div class="bvg-card-meta">
-              ${g.ratingPct != null ? `<span>Rating <span class="bvg-cm-val" style="color:${ratingColor(g.ratingPct)}">${g.ratingPct}%</span></span>` : ''}
-              ${g.reviews != null ? `<span>Reviews <span class="bvg-cm-val">${g.reviews.toLocaleString()}</span></span>` : ''}
-              ${g.bundledTimes != null ? `<span>Bundled <span class="bvg-cm-val">${g.bundledTimes}x</span></span>` : ''}
-            </div>
+            <div class="bvg-card-title"><span class="bvg-card-rank">#${rank}</span><a href="${escHtml(href)}">${escHtml(g.title)}</a></div>
+            <div class="bvg-card-meta">${metaHTML}</div>
             ${tags ? `<div class="bvg-card-tags">${tags}</div>` : ''}
           </div>
           <div class="bvg-card-right">
-            ${g.msrp != null ? `<span class="bvg-card-msrp">$${g.msrp.toFixed(2)}</span>` : '<span class="bvg-card-msrp" style="opacity:.3">&mdash;</span>'}
+            <div class="${scoreClass}" style="${scoreBgStyle}" title="${escHtml(formatBreakdown(g.breakdown))}">
+              ${scoreLabel}
+            </div>
+            ${g.msrp != null ? `<span class="bvg-card-msrp">$${g.msrp.toFixed(2)}</span>` : ''}
           </div>
         </div>`;
     }
@@ -1622,6 +1724,19 @@
     const totalGames = scored.filter(g => g.itemType === 'game').length;
     const dirArrow = st.sortDir === 'desc' ? '&#9660;' : '&#9650;';
     const viewPref = loadViewPreference();
+
+    // Currency selector (only if multiple currencies detected)
+    const availCurrencies = collectAvailableCurrencies(tiers);
+    let currencySelectHTML = '';
+    if (availCurrencies.length > 1) {
+      const opts = availCurrencies.map(c => {
+        const def = CURRENCY_DEFS.find(d => d.code === c);
+        const label = def ? `${def.symbol} ${c}` : c;
+        const sel = st.currency === c ? ' selected' : '';
+        return `<option value="${c}"${sel}>${escHtml(label)}</option>`;
+      }).join('');
+      currencySelectHTML = `<select id="bvg-currency-select"><option value=""${!st.currency ? ' selected' : ''}>Currency</option>${opts}</select>`;
+    }
 
     panel.innerHTML = `
       <div class="bvg-view-toggle" id="bvg-view-toggle">
@@ -1637,6 +1752,7 @@
           <option value="reviews"${st.sortKey === 'reviews' ? ' selected' : ''}>Reviews ${st.sortKey === 'reviews' ? dirArrow : ''}</option>
           <option value="msrp"${st.sortKey === 'msrp' ? ' selected' : ''}>MSRP ${st.sortKey === 'msrp' ? dirArrow : ''}</option>
         </select>
+        ${currencySelectHTML}
         <button type="button" class="bvg-filter-chip${st.hideOwned ? ' active' : ''}" id="bvg-toggle-owned">Hide owned</button>
         <button type="button" class="bvg-filter-chip${st.hideDLC ? ' active' : ''}" id="bvg-toggle-dlc">Hide DLC</button>
       </div>
@@ -1662,6 +1778,12 @@
         st.search = searchInput.value;
         renderModernPanel(scored, ownedSet, tiers);
       }, 200);
+    });
+
+    panel.querySelector('#bvg-currency-select')?.addEventListener('change', (e) => {
+      st.currency = e.target.value;
+      saveCurrencyPref(st.currency);
+      renderModernPanel(scored, ownedSet, tiers);
     });
 
     panel.querySelector('#bvg-sort-select')?.addEventListener('change', (e) => {
