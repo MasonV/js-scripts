@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      5.0.0
+// @version      5.1.0
 // @description  Per-game scoring with DLC/package handling, side evaluation panel, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -14,7 +14,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const SCRIPT_VERSION = '5.0.0';
+  const SCRIPT_VERSION = '5.1.0';
   console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
   // ═══════════════════════════════════════
   // STYLES (GM_addStyle bypasses CSP)
@@ -249,6 +249,7 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
       color: #c9d1d9;
     }
+    /* ── View toggle (always inside modern panel wrapper) ── */
     .bvg-view-toggle {
       display: inline-flex;
       background: #161b22;
@@ -266,6 +267,8 @@
       font-weight: 600;
       cursor: pointer;
       transition: all .15s;
+      -webkit-appearance: none;
+      appearance: none;
     }
     .bvg-view-toggle button.active {
       background: #21262d;
@@ -311,6 +314,8 @@
       font-weight: 600;
       cursor: pointer;
       transition: all .15s;
+      -webkit-appearance: none;
+      appearance: none;
     }
     .bvg-filter-chip:hover, .bvg-filter-chip.active {
       color: #e6edf3;
@@ -325,13 +330,13 @@
     }
     .bvg-card {
       display: grid;
-      grid-template-columns: 56px 1fr auto;
-      gap: 14px;
+      grid-template-columns: 52px 80px 1fr auto;
+      gap: 12px;
       align-items: center;
       background: #0d1117;
       border: 1px solid #1f2937;
       border-radius: 10px;
-      padding: 12px 16px;
+      padding: 10px 16px;
       transition: border-color .15s, background .15s;
     }
     .bvg-card:hover {
@@ -364,12 +369,35 @@
       letter-spacing: -0.5px;
     }
     .bvg-card-score:hover { transform: scale(1.08); }
+    .bvg-card-score.bvg-unrated {
+      background: #2d333b !important;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0;
+      text-shadow: none;
+      color: #8b949e;
+    }
     .bvg-card-score .bvg-card-rank {
       font-size: 9px;
       font-weight: 600;
       opacity: .7;
       letter-spacing: .5px;
       text-shadow: none;
+    }
+    .bvg-card-img {
+      width: 80px;
+      height: 38px;
+      border-radius: 4px;
+      object-fit: cover;
+      background: #161b22;
+      flex-shrink: 0;
+    }
+    .bvg-card-img-placeholder {
+      width: 80px;
+      height: 38px;
+      border-radius: 4px;
+      background: #161b22;
+      flex-shrink: 0;
     }
     .bvg-card-body {
       min-width: 0;
@@ -413,6 +441,7 @@
     .bvg-card-tag.tag-wish { background: #1a2332; color: #58a6ff; }
     .bvg-card-tag.tag-owned { background: #1d2b1d; color: #3fb950; }
     .bvg-card-tag.tag-dlc { background: #2b221d; color: #d29922; }
+    .bvg-card-tag.tag-unrated { background: #2d333b; color: #8b949e; }
     .bvg-card-right {
       display: flex;
       flex-direction: column;
@@ -435,19 +464,22 @@
     }
     /* ── Tier divider in card view ── */
     .bvg-tier-divider {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 8px 16px;
+      margin: 6px 0 2px;
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 8px 0 4px;
+      justify-content: space-between;
       font-size: 13px;
       font-weight: 700;
       color: #e6edf3;
     }
-    .bvg-tier-divider::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      background: #21262d;
+    .bvg-tier-divider .bvg-td-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
     .bvg-tier-divider .bvg-td-price {
       color: #58a6ff;
@@ -787,16 +819,24 @@
     const ownedDOM = isOwnedInDOM(tr);
     const wishlistedDOM = isWishlistedInDOM(tr);
     const itemType = classifyItem(title, tr, ratingPct, reviews);
+    // Extract game thumbnail image from the row
+    const imgEl = tr.querySelector('img[src*="steam"], img[src*="cdn"], img[src*="capsule"], img[src*="header"]')
+      || tr.querySelector('img');
+    const imgSrc = imgEl ? imgEl.src : null;
     console.log(`[BVG] ${title}: type=${itemType} wish=${wishlistedDOM} rating=${ratingPct}% reviews=${reviews} msrp=${msrp} bundled=${bundledTimes}`);
-    return { title, ratingPct, reviews, msrp, bundledTimes, ownedDOM, wishlistedDOM, itemType, tr, reviewCell };
+    return { title, ratingPct, reviews, msrp, bundledTimes, ownedDOM, wishlistedDOM, itemType, tr, reviewCell, imgSrc };
   }
   // ═══════════════════════════════════════
   // SCORING
   // ═══════════════════════════════════════
   function scoreGame(g) {
-    const ratingRaw = g.ratingPct ? clamp01(g.ratingPct / 100) : 0;
-    const conf = confidenceFromReviews(g.reviews);
-    const rating = SETTINGS.useWilsonAdjustedRating
+    // Unrated games (no rating AND no reviews) get a neutral midpoint for
+    // rating/confidence so they aren't unfairly tanked to near-zero. They
+    // are then scored primarily by value and MSRP.
+    const isUnrated = g.ratingPct == null && (!g.reviews || g.reviews <= 0);
+    const ratingRaw = g.ratingPct ? clamp01(g.ratingPct / 100) : (isUnrated ? 0.5 : 0);
+    const conf = isUnrated ? 0.3 : confidenceFromReviews(g.reviews);
+    const rating = SETTINGS.useWilsonAdjustedRating && !isUnrated
       ? wilsonLowerBound(ratingRaw, g.reviews || 0)
       : ratingRaw;
     const val = clamp01((g.msrp || 0) / SETTINGS.msrpCap);
@@ -812,7 +852,7 @@
     const raw = (w.rating / n) * rating + (w.confidence / n) * conf + (w.value / n) * val + (w.bundleValue / n) * bundleValue + (w.wishlist / n) * wishlistBonus - w.rebundlePenalty * pen;
     return {
       score: Math.max(0, raw * 100),
-      breakdown: { rating, ratingRaw, conf, val, bundleValue, wishlistBonus, pen },
+      breakdown: { rating, ratingRaw, conf, val, bundleValue, wishlistBonus, pen, isUnrated },
     };
   }
   function scoreColor(s) {
@@ -834,15 +874,20 @@
     return '#8a1f1f';
   }
   function formatBreakdown(b) {
-    return [
-      `Rating:     ${(b.ratingRaw * 100).toFixed(0)}%` +
-        (b.rating !== b.ratingRaw ? ` (Wilson: ${(b.rating * 100).toFixed(1)}%)` : ''),
-      `Confidence: ${(b.conf * 100).toFixed(1)}%`,
-      `Value:      ${(b.val * 100).toFixed(1)}%`,
-      `Bundle $:   ${(b.bundleValue * 100).toFixed(1)}%`,
-      `Wishlist:  +${(b.wishlistBonus * 100).toFixed(0)}%`,
-      `Rebundle:  -${(b.pen * 100).toFixed(1)}%`,
-    ].join('\n');
+    const lines = [];
+    if (b.isUnrated) {
+      lines.push('Rating:     N/A (unrated — using neutral 50%)');
+      lines.push('Confidence: N/A (unrated — using 30% baseline)');
+    } else {
+      lines.push(`Rating:     ${(b.ratingRaw * 100).toFixed(0)}%` +
+        (b.rating !== b.ratingRaw ? ` (Wilson: ${(b.rating * 100).toFixed(1)}%)` : ''));
+      lines.push(`Confidence: ${(b.conf * 100).toFixed(1)}%`);
+    }
+    lines.push(`Value:      ${(b.val * 100).toFixed(1)}%`);
+    lines.push(`Bundle $:   ${(b.bundleValue * 100).toFixed(1)}%`);
+    lines.push(`Wishlist:  +${(b.wishlistBonus * 100).toFixed(0)}%`);
+    lines.push(`Rebundle:  -${(b.pen * 100).toFixed(1)}%`);
+    return lines.join('\n');
   }
 
   function detectBundleCost(table) {
@@ -1512,6 +1557,7 @@
       rank++;
       const isOwned = ownedSet.has(g.title);
       const isDLC = g.itemType === 'dlc' || g.itemType === 'package';
+      const isUnrated = g.breakdown.isUnrated;
 
       // Tier divider
       if (showTierDividers) {
@@ -1522,7 +1568,7 @@
           const ts = tierStats.get(tName);
           const priceStr = tier.price != null ? `<span class="bvg-td-price">$${tier.price.toFixed(2)}</span>` : '';
           const statsStr = ts ? `<span class="bvg-td-stats">${ts.count} games &middot; avg ${ts.avg.toFixed(0)}</span>` : '';
-          cardsHTML += `<div class="bvg-tier-divider">${escHtml(tName)} ${priceStr} ${statsStr}</div>`;
+          cardsHTML += `<div class="bvg-tier-divider"><div class="bvg-td-left">${escHtml(tName)} ${priceStr}</div>${statsStr}</div>`;
         }
       }
 
@@ -1530,24 +1576,33 @@
       const titleA = g.tr.querySelector('a[href*="/i/"], a[href*="/game/"]');
       const href = titleA ? titleA.getAttribute('href') : '#';
 
+      // Game image
+      const imgHTML = g.imgSrc
+        ? `<img class="bvg-card-img" src="${escHtml(g.imgSrc)}" alt="" loading="lazy">`
+        : '<div class="bvg-card-img-placeholder"></div>';
+
       // Tags
       let tags = '';
       if (isOwned) tags += '<span class="bvg-card-tag tag-owned">Owned</span>';
       if (g.wishlistedDOM) tags += '<span class="bvg-card-tag tag-wish">Wishlisted</span>';
       if (isDLC) tags += `<span class="bvg-card-tag tag-dlc">${g.itemType === 'package' ? 'Package' : 'DLC'}</span>`;
+      if (isUnrated) tags += '<span class="bvg-card-tag tag-unrated">Unrated</span>';
       const tierForTag = tierMap.get(g.tr);
       if (tierForTag && tierForTag.price != null && !showTierDividers) {
         tags += `<span class="bvg-card-tag">$${tierForTag.price.toFixed(2)} tier</span>`;
       }
 
       const cardClass = `bvg-card${isOwned ? ' bvg-card-owned' : ''}${isDLC ? ' bvg-card-dlc' : ''}`;
+      const scoreClass = `bvg-card-score${isUnrated ? ' bvg-unrated' : ''}`;
+      const scoreBgStyle = isUnrated ? '' : `background:${scoreBg(g.score)}`;
+      const scoreLabel = isUnrated ? `<span class="bvg-card-rank">#${rank}</span>N/R` : `<span class="bvg-card-rank">#${rank}</span>${g.score.toFixed(0)}`;
 
       cardsHTML += `
         <div class="${cardClass}" data-bvg-title="${escHtml(g.title)}">
-          <div class="bvg-card-score" style="background:${scoreBg(g.score)}" title="${escHtml(formatBreakdown(g.breakdown))}">
-            <span class="bvg-card-rank">#${rank}</span>
-            ${g.score.toFixed(0)}
+          <div class="${scoreClass}" style="${scoreBgStyle}" title="${escHtml(formatBreakdown(g.breakdown))}">
+            ${scoreLabel}
           </div>
+          ${imgHTML}
           <div class="bvg-card-body">
             <div class="bvg-card-title"><a href="${escHtml(href)}">${escHtml(g.title)}</a></div>
             <div class="bvg-card-meta">
@@ -1566,8 +1621,13 @@
     const totalShown = filtered.length;
     const totalGames = scored.filter(g => g.itemType === 'game').length;
     const dirArrow = st.sortDir === 'desc' ? '&#9660;' : '&#9650;';
+    const viewPref = loadViewPreference();
 
     panel.innerHTML = `
+      <div class="bvg-view-toggle" id="bvg-view-toggle">
+        <button type="button" data-view="modern" class="${viewPref === 'modern' ? 'active' : ''}">Modern</button>
+        <button type="button" data-view="classic" class="${viewPref !== 'modern' ? 'active' : ''}">Classic</button>
+      </div>
       <div class="bvg-filter-bar">
         <input type="text" id="bvg-search" placeholder="Search games..." value="${escHtml(st.search)}">
         <select id="bvg-sort-select">
@@ -1577,14 +1637,23 @@
           <option value="reviews"${st.sortKey === 'reviews' ? ' selected' : ''}>Reviews ${st.sortKey === 'reviews' ? dirArrow : ''}</option>
           <option value="msrp"${st.sortKey === 'msrp' ? ' selected' : ''}>MSRP ${st.sortKey === 'msrp' ? dirArrow : ''}</option>
         </select>
-        <button class="bvg-filter-chip${st.hideOwned ? ' active' : ''}" id="bvg-toggle-owned">Hide owned</button>
-        <button class="bvg-filter-chip${st.hideDLC ? ' active' : ''}" id="bvg-toggle-dlc">Hide DLC</button>
+        <button type="button" class="bvg-filter-chip${st.hideOwned ? ' active' : ''}" id="bvg-toggle-owned">Hide owned</button>
+        <button type="button" class="bvg-filter-chip${st.hideDLC ? ' active' : ''}" id="bvg-toggle-dlc">Hide DLC</button>
       </div>
       <div class="bvg-cards">${cardsHTML}</div>
       <div class="bvg-cards-footer">Showing ${totalShown} of ${scored.length} items (${totalGames} games)</div>
     `;
 
-    // Bind events
+    // Bind view toggle (inside panel — always in same position)
+    panel.querySelectorAll('#bvg-view-toggle button').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setView(btn.dataset.view, findItemTable());
+      });
+    });
+
+    // Bind filter events
     const searchInput = panel.querySelector('#bvg-search');
     let searchDebounce = null;
     searchInput?.addEventListener('input', () => {
@@ -1605,19 +1674,25 @@
       renderModernPanel(scored, ownedSet, tiers);
     });
 
-    panel.querySelector('#bvg-toggle-owned')?.addEventListener('click', () => {
+    panel.querySelector('#bvg-toggle-owned')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       st.hideOwned = !st.hideOwned;
       renderModernPanel(scored, ownedSet, tiers);
     });
 
-    panel.querySelector('#bvg-toggle-dlc')?.addEventListener('click', () => {
+    panel.querySelector('#bvg-toggle-dlc')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       st.hideDLC = !st.hideDLC;
       renderModernPanel(scored, ownedSet, tiers);
     });
 
     // Ownership toggle on card score click
     panel.querySelectorAll('.bvg-card-score').forEach(el => {
-      el.addEventListener('click', () => {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const card = el.closest('.bvg-card');
         const title = card?.dataset.bvgTitle;
         if (!title) return;
@@ -1643,33 +1718,42 @@
   function setView(mode, table) {
     saveViewPreference(mode);
     const panel = document.getElementById('bvg-modern-panel');
+    const classicToggle = document.getElementById('bvg-classic-view-toggle');
     if (mode === 'modern') {
       if (table) table.style.display = 'none';
       if (panel) panel.style.display = '';
+      if (classicToggle) classicToggle.style.display = 'none';
     } else {
       if (table) table.style.display = '';
       if (panel) panel.style.display = 'none';
+      if (classicToggle) classicToggle.style.display = '';
     }
-    // Update toggle button states
+    // Update toggle button states in both the panel toggle and the classic toggle
     document.querySelectorAll('.bvg-view-toggle button').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.view === mode);
     });
   }
 
   function ensureViewToggle(table) {
-    if (document.getElementById('bvg-view-toggle')) return;
+    // Toggle is now rendered inside renderModernPanel; only need a
+    // standalone toggle above the classic table when in classic mode
+    if (document.getElementById('bvg-classic-view-toggle')) return;
     const toggle = document.createElement('div');
-    toggle.id = 'bvg-view-toggle';
+    toggle.id = 'bvg-classic-view-toggle';
     toggle.className = 'bvg-view-toggle';
     toggle.innerHTML = `
-      <button data-view="modern">Modern</button>
-      <button data-view="classic">Classic</button>
+      <button type="button" data-view="modern">Modern</button>
+      <button type="button" data-view="classic" class="active">Classic</button>
     `;
     if (table) table.parentElement.insertBefore(toggle, table);
     else document.body.prepend(toggle);
 
     toggle.querySelectorAll('button').forEach(btn => {
-      btn.addEventListener('click', () => setView(btn.dataset.view, table));
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setView(btn.dataset.view, table);
+      });
     });
   }
 
