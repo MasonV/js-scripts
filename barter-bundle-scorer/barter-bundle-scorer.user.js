@@ -1242,10 +1242,17 @@
   // ═══════════════════════════════════════
   // BOOTSTRAP
   // ═══════════════════════════════════════
+  let _bvgObserver = null;
   function boot() {
+    // Disconnect any previous observer to prevent duplicates on re-run
+    if (_bvgObserver) {
+      _bvgObserver.disconnect();
+      _bvgObserver = null;
+      console.log('[BVG Scorer] Cleaned up previous MutationObserver');
+    }
     try { run(); } catch (e) { console.error('[BVG Scorer] Error:', e); }
     let debounce = null;
-    const observer = new MutationObserver(() => {
+    _bvgObserver = new MutationObserver(() => {
       clearTimeout(debounce);
       debounce = setTimeout(() => {
         if (!document.querySelector('.bvg-score-cell')) {
@@ -1253,7 +1260,7 @@
         }
       }, 400);
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    _bvgObserver.observe(document.body, { childList: true, subtree: true });
   }
   boot();
 })();
