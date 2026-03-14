@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      4.3.1
+// @version      4.3.2
 // @description  Per-game scoring with DLC/package handling, side evaluation panel, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -14,7 +14,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  console.log('[BVG Scorer] v4.3.1 loaded on', location.href);
+  console.log('[BVG Scorer] v4.3.2 loaded on', location.href);
   // ═══════════════════════════════════════
   // STYLES (GM_addStyle bypasses CSP)
   // ═══════════════════════════════════════
@@ -828,10 +828,20 @@
     const ind = document.createElement('span');
     ind.className = 'bvg-sort-ind';
     th.appendChild(ind);
-    // Insert after the first cell (checkbox column) to keep it pinned left
+    // Insert after the first cell (checkbox column) to keep it pinned left.
+    // If the first cell has colspan > 1 (e.g. Barter's "Select All" spans
+    // checkbox + title), shrink it by 1 so our new Score column aligns with
+    // the Score data cells that are inserted at the same position in data rows.
     const firstCell = headerRow.querySelector('th, td');
-    if (firstCell) firstCell.insertAdjacentElement('afterend', th);
-    else headerRow.prepend(th);
+    if (firstCell) {
+      if (firstCell.colSpan > 1) {
+        firstCell.dataset.bvgOrigColspan = firstCell.colSpan;
+        firstCell.colSpan -= 1;
+      }
+      firstCell.insertAdjacentElement('afterend', th);
+    } else {
+      headerRow.prepend(th);
+    }
     th.addEventListener('click', () => sortByScore(table, ind));
   }
   // Fix tier headers and summary rows: bump their colspan or add spacer cells.
@@ -870,6 +880,11 @@
     }
   }
   function clearScoreCells() {
+    // Restore header colspan that was decremented for Score column alignment
+    document.querySelectorAll('[data-bvg-orig-colspan]').forEach(el => {
+      el.colSpan = parseInt(el.dataset.bvgOrigColspan);
+      delete el.dataset.bvgOrigColspan;
+    });
     // Restore original review cells that were hidden during split
     document.querySelectorAll('.bvg-review-original').forEach(el => {
       el.style.display = '';
