@@ -24,6 +24,10 @@ Synced from [Notion: AI Agent TODO Backlog](https://www.notion.so/faceefca3f034f
   - MutationObserver in boot() watched document.body with subtree:true and never disconnected. Now stores ref in _bvgObserver and disconnects before creating new one.
   - Completed: 2026-03-13
 
+- [x] **UI Refresh — Modern panel redesign** `feature`
+  - Extracts all game data from Barter's DOM into a structured data model and renders a card-based modern panel with search, sorting, ownership toggle, tier dividers, and filter chips. Original table hidden by default with a Modern/Classic toggle to switch views. View preference persisted in localStorage.
+  - Completed: 2026-03-14
+
 ### Open
 
 - [ ] **Add JSON export alongside clipboard text export** `feature` SCORE: 2.0
