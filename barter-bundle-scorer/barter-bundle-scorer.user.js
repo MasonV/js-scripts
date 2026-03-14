@@ -706,9 +706,26 @@
     if (!panel) return;
     panel.querySelectorAll('input[data-key]').forEach(input => {
       const key = input.dataset.key;
-      const val = input.type === 'checkbox' ? input.checked : parseFloat(input.value);
-      if (key.startsWith('w.')) SETTINGS.weights[key.slice(2)] = val;
-      else SETTINGS[key] = val;
+      if (input.type === 'checkbox') {
+        if (key.startsWith('w.')) SETTINGS.weights[key.slice(2)] = input.checked;
+        else SETTINGS[key] = input.checked;
+        return;
+      }
+      const val = parseFloat(input.value);
+      if (!Number.isFinite(val)) {
+        console.warn(`[BVG Scorer] Invalid value for ${key}: "${input.value}", skipping`);
+        return;
+      }
+      // Clamp to the input's own min/max HTML attributes when present
+      const min = input.hasAttribute('min') ? parseFloat(input.min) : -Infinity;
+      const max = input.hasAttribute('max') ? parseFloat(input.max) : Infinity;
+      const clamped = Math.max(min, Math.min(max, val));
+      if (clamped !== val) {
+        console.warn(`[BVG Scorer] Clamped ${key}: ${val} → ${clamped}`);
+        input.value = clamped;
+      }
+      if (key.startsWith('w.')) SETTINGS.weights[key.slice(2)] = clamped;
+      else SETTINGS[key] = clamped;
     });
     saveSettings(SETTINGS);
   }
