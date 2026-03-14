@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      4.4.0
+// @version      4.5.0
 // @description  Per-game scoring with DLC/package handling, side evaluation panel, normalized bundle ratings, all-column sorting, owned detection, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -14,7 +14,8 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  console.log('[BVG Scorer] v4.4.0 loaded on', location.href);
+  const SCRIPT_VERSION = '4.5.0';
+  console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
   // ═══════════════════════════════════════
   // STYLES (GM_addStyle bypasses CSP)
   // ═══════════════════════════════════════
@@ -292,7 +293,7 @@
   // ═══════════════════════════════════════
   const clamp01 = x => Math.max(0, Math.min(1, x));
   // Prevent XSS when interpolating DOM-sourced strings into innerHTML templates
-  const escHtml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const escHtml = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   function confidenceFromReviews(n) {
     if (!n || n <= 0) return 0;
     return clamp01(n / (n + SETTINGS.confidenceAnchor));
@@ -789,7 +790,7 @@
         }).join('')}
       </div>` : '';
     banner.innerHTML = `
-      <div class="bvg-title">Bundle Evaluation v4.4</div>
+      <div class="bvg-title">Bundle Evaluation v${SCRIPT_VERSION}</div>
       <div class="bvg-row">
         ${statBadge('Bundle', bundleRating, `top ${SETTINGS.topNMain}`)}
         ${statBadge('Depth', depthRating, `top ${SETTINGS.topNDepth}`)}
