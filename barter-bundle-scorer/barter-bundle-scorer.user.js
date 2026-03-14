@@ -77,7 +77,7 @@
       min-height: 100vh;
       max-width: 2400px;
       margin: 0 auto;
-      padding: 16px 24px;
+      padding: 16px 48px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
       font-size: 13px;
       line-height: 1.5;
@@ -425,9 +425,32 @@
     .bvg-modal input[type="number"]:focus { outline: none; border-color: #58a6ff; }
     .bvg-modal input[type="checkbox"] { accent-color: #58a6ff; }
 
+    /* ── Floating view toggle (always visible) ── */
+    #bvg-view-fab {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 9999;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      box-shadow: 0 4px 12px rgba(0,0,0,.5);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+    #bvg-view-fab button {
+      background: transparent; border: none; color: #8b949e;
+      padding: 8px 16px; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: all .15s;
+      -webkit-appearance: none; appearance: none;
+    }
+    #bvg-view-fab button.active { background: #21262d; color: #e6edf3; }
+    #bvg-view-fab button:hover:not(.active) { color: #c9d1d9; }
+
     /* ── Responsive ── */
     @media (max-width: 768px) {
-      #bvg-app { padding: 8px 10px; }
+      #bvg-app { padding: 8px 16px; }
       .bvg-cards { grid-template-columns: 1fr; }
       .bvg-card { grid-template-columns: 80px 1fr auto; }
       .bvg-header { flex-direction: column; align-items: flex-start; }
@@ -1118,9 +1141,33 @@
       showOriginalPage();
       if (app) app.style.display = 'none';
     }
-    // Update toggle button states
-    document.querySelectorAll('.bvg-page-toggle button').forEach(btn => {
+    // Update all toggle button states (toolbar + floating FAB)
+    document.querySelectorAll('.bvg-page-toggle button, #bvg-view-fab button').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.page === mode);
+    });
+  }
+
+  // Persistent floating toggle so users can always switch back from classic view
+  function ensureViewFAB() {
+    if (document.getElementById('bvg-view-fab')) return;
+    const fab = document.createElement('div');
+    fab.id = 'bvg-view-fab';
+    fab.innerHTML = `
+      <button type="button" data-page="modern">Modern</button>
+      <button type="button" data-page="classic">Classic</button>
+    `;
+    fab.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setPage(btn.dataset.page);
+      });
+    });
+    document.body.appendChild(fab);
+    // Sync initial state
+    const pref = loadPagePref();
+    fab.querySelectorAll('button').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.page === pref);
     });
   }
 
@@ -1666,6 +1713,7 @@
     // Hide original page and render custom app
     hideOriginalPage();
     renderApp(scored, ownedSet, tiers, bundleScores, metadata);
+    ensureViewFAB();
 
     // Apply page preference (modern by default, classic shows original page)
     const pagePref = loadPagePref();
