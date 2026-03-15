@@ -319,7 +319,8 @@
     .bvg-card-img {
       position: absolute; top: 0; left: 0;
       width: 100%; height: 100%;
-      object-fit: cover; display: block;
+      object-fit: contain; object-position: center;
+      background: #161b22; display: block;
     }
     .bvg-card-img-placeholder { min-height: 56px; background: #161b22; }
     .bvg-card-body {
@@ -341,6 +342,7 @@
       display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
     }
     .bvg-card-meta .bvg-cm-val { color: #c9d1d9; font-weight: 600; }
+    .bvg-card-meta .bvg-cm-rating { font-size: 13px; font-weight: 800; }
     .bvg-card-meta .bvg-cm-wish { color: #58a6ff; font-weight: 600; }
     .bvg-card-meta .bvg-cm-sep { color: #30363d; font-size: 10px; }
     .bvg-card-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 4px; }
@@ -769,15 +771,17 @@
         // Extract a clean label: text before first price/currency indicator
         const labelMatch = text.match(/^(.+?)(?:\s*[:|\-]\s*(?:\d|[$€£₽CA])|$)/);
         const label = labelMatch ? labelMatch[1].replace(/\s*[:|\-–—]\s*$/, '').trim() : text.substring(0, 40);
+        const tierPrice = priceMatch ? parseFloat(priceMatch[1]) : null;
         currentTier = {
           name: text.substring(0, 80),
           label: label || text.substring(0, 40),
-          price: priceMatch ? parseFloat(priceMatch[1]) : null,
+          price: tierPrice,
           prices: prices,
           tr: tr,
           games: [],
         };
         tiers.push(currentTier);
+        console.log(`[BVG Scorer] Tier detected: "${label}" price=$${tierPrice} from text: "${text.substring(0, 120)}"`);
       } else if (type === ROW_GAME && currentTier) {
         currentTier.games.push(tr);
         tr.dataset.bvgTier = currentTier.name;
@@ -1811,7 +1815,7 @@
 
     // Meta items
     const metaParts = [];
-    if (g.ratingPct != null) metaParts.push(`<span>Rating <span class="bvg-cm-val" style="color:${ratingColor(g.ratingPct)}">${g.ratingPct}%</span></span>`);
+    if (g.ratingPct != null) metaParts.push(`<span>Rating <span class="bvg-cm-val bvg-cm-rating" style="color:${ratingColor(g.ratingPct)}">${g.ratingPct}%</span></span>`);
     if (g.reviews != null) metaParts.push(`<span>Reviews <span class="bvg-cm-val">${g.reviews.toLocaleString()}</span></span>`);
     if (g.bundledTimes != null) metaParts.push(`<span>Bundled <span class="bvg-cm-val">${g.bundledTimes}x</span></span>`);
     if (g.wishlistedDOM) metaParts.push('<span class="bvg-cm-wish">Wishlisted</span>');
