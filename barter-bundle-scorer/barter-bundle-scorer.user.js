@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      6.1.0
+// @version      6.2.0
 // @description  Full-page bundle evaluation dashboard with per-game scoring, card grid, stats dashboard, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -16,7 +16,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const SCRIPT_VERSION = '6.1.0';
+  const SCRIPT_VERSION = '6.2.0';
   console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
 
   // ═══════════════════════════════════════
@@ -611,8 +611,32 @@
   let SETTINGS = loadSettings();
   let CURRENT_BUNDLE_COST = null;
 
+  // Settings presets — named configurations stored in localStorage
+  const STORAGE_KEY_PRESETS = 'bvg_scorer_presets_v1';
+  function loadPresets() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_PRESETS);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  }
+  function savePresets(presets) { safeStorageSet(STORAGE_KEY_PRESETS, JSON.stringify(presets)); }
+  function savePreset(name, settings) {
+    const presets = loadPresets();
+    presets[name] = clone(settings);
+    savePresets(presets);
+    console.log(`[BVG Scorer] Saved preset: "${name}"`);
+  }
+  function deletePreset(name) {
+    const presets = loadPresets();
+    delete presets[name];
+    savePresets(presets);
+    console.log(`[BVG Scorer] Deleted preset: "${name}"`);
+  }
+
   // ═══════════════════════════════════════
-  // MATH
+  // PURE FUNCTIONS — START
+  // Math, confidence, and Wilson bound utilities. No DOM dependencies.
+  // Mirrored in scoring.test.js — keep both in sync when modifying.
   // ═══════════════════════════════════════
   const clamp01 = x => Math.max(0, Math.min(1, x));
   // Prevent XSS when interpolating DOM-sourced strings into innerHTML templates
@@ -633,6 +657,9 @@
     const adj = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n);
     return clamp01((centre - adj) / denom);
   }
+  // ═══════════════════════════════════════
+  // PURE FUNCTIONS — END
+  // ═══════════════════════════════════════
 
   // ═══════════════════════════════════════
   // OWNED SET (manual overrides)
@@ -784,7 +811,8 @@
   // DATA EXTRACTION (right-to-left)
   // ═══════════════════════════════════════
   // Detect DLC, soundtracks, artbooks, and package parents
-  // so they can be excluded from bundle score calculations
+  // so they can be excluded from bundle score calculations.
+  // classifyItem() logic mirrored in scoring.test.js — keep in sync.
   const DLC_KEYWORDS = /\b(soundtrack|ost|artbook|art\s*book|wallpaper|skin\s*pack|costume|dlc|season\s*pass|expansion|bonus\s*content|digital\s*deluxe|deluxe\s*edition|collector[''\u2019]?s\s*edition|upgrade)\b/i;
   // Review threshold for distinguishing DLC from standalone games. Items with
   // DLC-like titles or inside packages are classified as DLC only if they have
@@ -888,7 +916,8 @@
   }
 
   // ═══════════════════════════════════════
-  // SCORING
+  // SCORING — scoreGame() and helpers
+  // Mirrored in scoring.test.js — keep both in sync when modifying.
   // ═══════════════════════════════════════
   function scoreGame(g) {
     const isUnrated = g.ratingPct == null && (!g.reviews || g.reviews <= 0);
@@ -1056,6 +1085,19 @@
       <div style="margin-top:8px;display:flex;gap:8px;">
         <button class="bvg-settings-btn" id="bvg-settings-apply">Apply &amp; re-score</button>
         <button class="bvg-settings-btn" id="bvg-settings-reset">Reset defaults</button>
+      </div>
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid #21262d;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#8b949e;font-weight:600;margin-bottom:6px;">Presets</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <select id="bvg-preset-select" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:4px 8px;font-size:12px;min-width:140px;">
+            <option value="">— select preset —</option>
+            ${Object.keys(loadPresets()).map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('')}
+          </select>
+          <button class="bvg-settings-btn" id="bvg-preset-load">Load</button>
+          <button class="bvg-settings-btn" id="bvg-preset-delete" style="color:#f85149;">Delete</button>
+          <input type="text" id="bvg-preset-name" placeholder="Preset name…" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;padding:4px 8px;font-size:12px;width:140px;">
+          <button class="bvg-settings-btn" id="bvg-preset-save">Save</button>
+        </div>
       </div>
     `;
   }
@@ -1509,6 +1551,7 @@
       <button type="button" class="bvg-filter-chip${st.hideDLC ? ' active' : ''}" id="bvg-toggle-dlc">Hide DLC</button>
       <span class="bvg-toolbar-spacer"></span>
       <button class="bvg-settings-btn" id="bvg-export-btn">&#128203; Copy Summary</button>
+      <button class="bvg-settings-btn" id="bvg-export-json-btn">{ } Export JSON</button>
       <button class="bvg-settings-btn" id="bvg-settings-gear">&#9881; Settings</button>
     `;
 
@@ -1589,6 +1632,50 @@
       });
     });
 
+    // JSON Export
+    toolbar.querySelector('#bvg-export-json-btn')?.addEventListener('click', () => {
+      const bs = _appRefs.bundleScores;
+      const s = _appRefs.scored;
+      const os = _appRefs.ownedSet;
+      if (!bs || !s) return;
+      const exportData = {
+        metadata: {
+          url: location.href,
+          title: document.title || '',
+          exportedAt: new Date().toISOString(),
+          scorerVersion: SCRIPT_VERSION,
+        },
+        bundle: {
+          bundleRating: bs.bundleRating,
+          depthRating: bs.depthRating,
+          personalRating: bs.personalRating,
+          dealQuality: bs.dealQuality,
+          bundleCost: CURRENT_BUNDLE_COST,
+          unownedMsrpSum: bs.unownedMsrpSum,
+        },
+        games: s.map(g => ({
+          title: g.title,
+          itemType: g.itemType,
+          score: g.score ?? null,
+          breakdown: g.breakdown ?? null,
+          ratingPct: g.ratingPct,
+          reviews: g.reviews,
+          msrp: g.msrp,
+          bundledTimes: g.bundledTimes,
+          owned: os.has(g.title),
+          wishlisted: g.wishlistedDOM,
+        })),
+      };
+      const json = JSON.stringify(exportData, null, 2);
+      const btn = toolbar.querySelector('#bvg-export-json-btn');
+      navigator.clipboard.writeText(json).then(() => {
+        if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.innerHTML = '{ } Export JSON', 1500); }
+      }).catch(() => {
+        if (btn) { btn.textContent = 'Copy failed'; setTimeout(() => btn.innerHTML = '{ } Export JSON', 2000); }
+        console.warn('[BVG Scorer] Clipboard write denied — page may not be in a secure context');
+      });
+    });
+
     // Settings gear
     toolbar.querySelector('#bvg-settings-gear')?.addEventListener('click', () => {
       openSettingsModal();
@@ -1630,17 +1717,48 @@
     };
     document.addEventListener('keydown', onEsc);
 
-    // Apply & Reset
-    modal.querySelector('#bvg-settings-apply')?.addEventListener('click', () => {
-      readSettingsFromPanel();
-      backdrop.remove();
-      run();
-    });
-    modal.querySelector('#bvg-settings-reset')?.addEventListener('click', () => {
-      SETTINGS = clone(DEFAULT_SETTINGS);
-      saveSettings(SETTINGS);
-      backdrop.remove();
-      run();
+    // Event delegation on modal — survives innerHTML refreshes of the settings panel
+    modal.addEventListener('click', (e) => {
+      const target = e.target.closest('button');
+      if (!target) return;
+      const id = target.id;
+
+      if (id === 'bvg-settings-apply') {
+        readSettingsFromPanel();
+        backdrop.remove();
+        run();
+      } else if (id === 'bvg-settings-reset') {
+        SETTINGS = clone(DEFAULT_SETTINGS);
+        saveSettings(SETTINGS);
+        backdrop.remove();
+        run();
+      } else if (id === 'bvg-preset-load') {
+        const select = modal.querySelector('#bvg-preset-select');
+        const name = select?.value;
+        if (!name) return;
+        const presets = loadPresets();
+        if (!presets[name]) return;
+        SETTINGS = { ...clone(DEFAULT_SETTINGS), ...presets[name], weights: { ...clone(DEFAULT_SETTINGS).weights, ...(presets[name].weights || {}) } };
+        saveSettings(SETTINGS);
+        const panel = modal.querySelector('#bvg-settings-panel');
+        if (panel) panel.innerHTML = buildSettingsHTML();
+        console.log(`[BVG Scorer] Loaded preset: "${name}"`);
+      } else if (id === 'bvg-preset-save') {
+        const nameInput = modal.querySelector('#bvg-preset-name');
+        const name = nameInput?.value.trim();
+        if (!name) { nameInput?.focus(); return; }
+        readSettingsFromPanel();
+        savePreset(name, SETTINGS);
+        const panel = modal.querySelector('#bvg-settings-panel');
+        if (panel) panel.innerHTML = buildSettingsHTML();
+      } else if (id === 'bvg-preset-delete') {
+        const select = modal.querySelector('#bvg-preset-select');
+        const name = select?.value;
+        if (!name) return;
+        deletePreset(name);
+        const panel = modal.querySelector('#bvg-settings-panel');
+        if (panel) panel.innerHTML = buildSettingsHTML();
+      }
     });
   }
 

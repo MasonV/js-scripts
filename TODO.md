@@ -46,25 +46,25 @@ Synced from [Notion: AI Agent TODO Backlog](https://www.notion.so/faceefca3f034f
 
 ### Open
 
-- [ ] **Add JSON export alongside clipboard text export** `feature` SCORE: 2.0
-  - Current export copies formatted text to clipboard. Add structured JSON export for programmatic analysis and cross-tool data flow.
-  - Effort: 4 | Simplicity: 1 | Efficiency: 1 | Safety: 1 | Value: 3
+- [x] **Add JSON export alongside clipboard text export** `feature` SCORE: 2.0
+  - Added "Export JSON" button in toolbar. Exports structured JSON with metadata (URL, date, version), bundle scores, and per-game data (title, type, score, breakdown, rating, reviews, msrp, owned, wishlisted) to clipboard.
+  - Completed: 2026-03-15
 
-- [ ] **Stabilize colspan fixup logic** `debt` SCORE: 2.0
-  - Last 4 commits (v4.3.1–v4.3.2) are all alignment fixes for colspan handling in injectScoreColumn(). Post-injection validation now logs mismatches (via injectColumns()), but root cause fixup logic still fragile.
-  - Effort: 2 | Simplicity: 1 | Efficiency: 1 | Safety: 3 | Value: 3
+- [x] **Stabilize colspan fixup logic** `debt` SCORE: 2.0
+  - Obsolete: Modern UI redesign (v6.0) replaced column injection with a standalone card grid. Classic view shows the original page unmodified — no colspan manipulation needed.
+  - Completed: 2026-03-15 (resolved by prior UI redesign)
 
 - [x] **Fix DLC classification logic inconsistency** `bug` SCORE: 2.0
   - Unified both DLC-keyword and package sub-item classification paths to use a single DLC_REVIEW_THRESHOLD constant (50). Previously used >100 for keywords and <10 for packages, causing items with 10-100 reviews to be classified inconsistently.
   - Completed: 2026-03-15
 
-- [ ] **Unify view state management across classic and modern views** `refactor` SCORE: 2.0
-  - Sort state tracked differently between classic (table.dataset) and modern (_modernPanelState). Switching views shows inconsistent sort/filter state. Multiple sources of truth.
-  - Effort: 2 | Simplicity: 2 | Efficiency: 2 | Safety: 1 | Value: 3
+- [x] **Unify view state management across classic and modern views** `refactor` SCORE: 2.0
+  - Obsolete: Classic view now shows the original page as-is with no custom state. Only _gridState exists for the modern view — no dual-state problem remains.
+  - Completed: 2026-03-15 (resolved by prior UI redesign)
 
-- [ ] **Add settings presets save/load** `feature` SCORE: 1.8
-  - Users can only have one set of scoring weights at a time. Different bundle types benefit from different weight configurations. Add naming/saving/loading/deleting presets via localStorage.
-  - Effort: 2 | Simplicity: 1 | Efficiency: 1 | Safety: 1 | Value: 4
+- [x] **Add settings presets save/load** `feature` SCORE: 1.8
+  - Added preset management to settings modal: save/load/delete named presets via localStorage (bvg_scorer_presets_v1). Dropdown selector with save, load, and delete buttons. Panel refreshes on preset operations.
+  - Completed: 2026-03-15
 
 - [x] **Add unit tests for pure scoring functions** `test` SCORE: 1.8
   - Added scoring.test.js with 28 tests covering clamp01, confidenceFromReviews, wilsonLowerBound, classifyItem, and scoreGame. Uses Node built-in test runner (`node --test`). Functions copied into test file since userscript has no module system.
@@ -74,6 +74,6 @@ Synced from [Notion: AI Agent TODO Backlog](https://www.notion.so/faceefca3f034f
   - Added block comments to DEFAULT_SETTINGS explaining rationale for msrpCap ($40 indie ceiling), bundledPenaltyCap (10 = perma-bundled), confidenceAnchor (800 = conservative Bayesian anchor), each weight, and Wilson lower-bound z-score.
   - Completed: 2026-03-15
 
-- [ ] **Extract pure functions into testable module** `refactor` SCORE: 1.6
-  - scoreGame(), confidenceFromReviews(), classifyItem(), wilsonLowerBound() are pure functions embedded in a 1250-line monolith. Make them isolatable for testing without DOM dependencies.
-  - Effort: 2 | Simplicity: 1 | Efficiency: 1 | Safety: 2 | Value: 2
+- [x] **Extract pure functions into testable module** `refactor` SCORE: 1.6
+  - Added PURE FUNCTIONS — START/END markers around clamp01, escHtml, confidenceFromReviews, wilsonLowerBound. Added sync notes to SCORING and classifyItem sections pointing to scoring.test.js. Full module extraction not viable (single-file userscript, no module system).
+  - Completed: 2026-03-15
