@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LLM Stats Show All Models
 // @namespace    https://tampermonkey.net/
-// @version      1.5.0
+// @version      1.6.0
 // @description  Automatically paginates through all models on the llm-stats.com leaderboard and displays them in a single table.
 // @match        *://llm-stats.com/*
 // @match        *://*.llm-stats.com/*
@@ -278,6 +278,151 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════
+  //  TABLE SORTING
+  // ═══════════════════════════════════════════════════════════════════
+
+  GM_addStyle(`
+    #llm-show-all-static th[data-sortable] {
+      cursor: pointer;
+      user-select: none;
+    }
+    #llm-show-all-static th[data-sortable]:hover {
+      opacity: 0.8;
+    }
+    #llm-show-all-static th .llm-sort-arrow {
+      display: inline-block;
+      margin-left: 4px;
+      font-size: 10px;
+      opacity: 0.4;
+    }
+    #llm-show-all-static th[data-sort-dir] .llm-sort-arrow {
+      opacity: 1;
+    }
+  `);
+
+  /**
+   * Parses a cell's text content into a sortable value.
+   * Returns { num, text } — sort by num first (if valid), text as fallback.
+   */
+  function parseCellValue(cell) {
+    const raw = cell.textContent.trim();
+    if (raw === '' || raw === '—' || raw === '-' || raw === 'N/A') {
+      return { num: -Infinity, text: '' };
+    }
+
+    // Strip currency symbols, commas, percent signs, trailing units
+    const cleaned = raw.replace(/[$,€£%]/g, '').replace(/[KkMmBb]$/, (u) => {
+      const multipliers = { k: 1e3, K: 1e3, m: 1e6, M: 1e6, b: 1e9, B: 1e9 };
+      return '*' + multipliers[u];
+    });
+
+    // Handle multiplier notation (e.g., "1.5*1000000")
+    if (cleaned.includes('*')) {
+      const parts = cleaned.split('*');
+      const val = parseFloat(parts[0]) * parseFloat(parts[1]);
+      if (Number.isFinite(val)) return { num: val, text: raw };
+    }
+
+    const num = parseFloat(cleaned);
+    if (Number.isFinite(num)) return { num, text: raw };
+
+    return { num: NaN, text: raw.toLowerCase() };
+  }
+
+  /**
+   * Attaches click-to-sort handlers to every <th> in the static table.
+   * Tracks sort state (column index + direction) and re-orders tbody rows.
+   */
+  function enableSorting(table) {
+    const thead = table.querySelector('thead');
+    const tbody = table.querySelector('tbody');
+    if (!thead || !tbody) return;
+
+    // Find all header cells in the last header row (handles multi-row headers)
+    const headerRows = thead.querySelectorAll('tr');
+    const headerRow = headerRows[headerRows.length - 1];
+    const ths = headerRow.querySelectorAll('th');
+
+    let currentSortCol = -1;
+    let currentSortDir = 0; // 0 = none, 1 = asc, -1 = desc
+
+    ths.forEach((th, colIndex) => {
+      th.setAttribute('data-sortable', '');
+
+      // Add sort arrow indicator
+      const arrow = document.createElement('span');
+      arrow.className = 'llm-sort-arrow';
+      arrow.textContent = '▲';
+      th.appendChild(arrow);
+
+      th.addEventListener('click', () => {
+        // Cycle direction: none → desc → asc → desc ...
+        // Default to desc first since higher scores are usually better
+        if (currentSortCol === colIndex) {
+          currentSortDir = currentSortDir === -1 ? 1 : -1;
+        } else {
+          currentSortCol = colIndex;
+          currentSortDir = -1;
+        }
+
+        // Update arrow indicators on all headers
+        ths.forEach((h, i) => {
+          const a = h.querySelector('.llm-sort-arrow');
+          if (!a) return;
+          if (i === colIndex) {
+            h.setAttribute('data-sort-dir', currentSortDir === 1 ? 'asc' : 'desc');
+            a.textContent = currentSortDir === 1 ? '▲' : '▼';
+          } else {
+            h.removeAttribute('data-sort-dir');
+            a.textContent = '▲';
+          }
+        });
+
+        // Sort the rows
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const isNumeric = rows.some((r) => {
+          const cells = r.querySelectorAll('td');
+          if (colIndex >= cells.length) return false;
+          return Number.isFinite(parseCellValue(cells[colIndex]).num);
+        });
+
+        rows.sort((a, b) => {
+          const cellsA = a.querySelectorAll('td');
+          const cellsB = b.querySelectorAll('td');
+          if (colIndex >= cellsA.length || colIndex >= cellsB.length) return 0;
+
+          const valA = parseCellValue(cellsA[colIndex]);
+          const valB = parseCellValue(cellsB[colIndex]);
+
+          let cmp = 0;
+          if (isNumeric) {
+            // Push NaN/empty to the bottom regardless of sort direction
+            const aValid = Number.isFinite(valA.num);
+            const bValid = Number.isFinite(valB.num);
+            if (!aValid && !bValid) cmp = 0;
+            else if (!aValid) return 1; // always after valid
+            else if (!bValid) return -1;
+            else cmp = valA.num - valB.num;
+          } else {
+            cmp = valA.text.localeCompare(valB.text);
+          }
+
+          return cmp * currentSortDir;
+        });
+
+        // Re-insert sorted rows
+        for (const row of rows) {
+          tbody.appendChild(row);
+        }
+
+        console.log(LOG, `Sorted by column ${colIndex} (${th.textContent.trim()}), dir=${currentSortDir === 1 ? 'asc' : 'desc'}`);
+      });
+    });
+
+    console.log(LOG, `Sorting enabled on ${ths.length} columns.`);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   //  PAGINATION HELPERS
   // ═══════════════════════════════════════════════════════════════════
 
@@ -392,7 +537,6 @@
 
     // Navigate through remaining pages
     let page = 1;
-    const isLastPage = () => page >= totalPages;
 
     while (page < totalPages && page < MAX_PAGES) {
       const nextBtn = findNextButton();
@@ -501,6 +645,9 @@
     } else {
       staticWrapper.appendChild(staticTable);
     }
+
+    // Enable column sorting on the static table before inserting
+    enableSorting(staticTable);
 
     // Insert our static wrapper and hide the React-controlled container
     reactContainer.parentNode.insertBefore(staticWrapper, reactContainer);
