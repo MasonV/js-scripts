@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         LLM Stats Show All Models
 // @namespace    https://tampermonkey.net/
-// @version      1.0.0
+// @version      1.1.0
 // @description  Automatically paginates through all models on the llm-stats.com leaderboard and displays them in a single table.
-// @match        *://llm-stats.com/leaderboards/*
-// @match        *://*.llm-stats.com/leaderboards/*
+// @match        *://llm-stats.com/*
+// @match        *://*.llm-stats.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.meta.js
@@ -345,10 +345,49 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  INITIALIZATION
+  //  SPA NAVIGATION DETECTION
   // ═══════════════════════════════════════════════════════════════════
 
-  showAllModels().catch((err) => {
-    console.error(LOG, 'Failed to load all models:', err);
-  });
+  let lastRunUrl = null;
+  let running = false;
+
+  function isLeaderboardPage() {
+    return /\/leaderboards\b/.test(location.pathname);
+  }
+
+  async function tryRun() {
+    const url = location.href;
+    if (!isLeaderboardPage() || running || url === lastRunUrl) return;
+    running = true;
+    lastRunUrl = url;
+    try {
+      await showAllModels();
+    } catch (err) {
+      console.error(LOG, 'Failed to load all models:', err);
+    } finally {
+      running = false;
+    }
+  }
+
+  // Run immediately if already on a leaderboard page
+  tryRun();
+
+  // Detect SPA navigation via the Navigation API (modern browsers)
+  if (typeof navigation !== 'undefined' && navigation.addEventListener) {
+    navigation.addEventListener('navigatesuccess', () => tryRun());
+  }
+
+  // Fallback: listen for popstate and detect pushState/replaceState
+  window.addEventListener('popstate', () => tryRun());
+
+  const origPushState = history.pushState;
+  const origReplaceState = history.replaceState;
+  history.pushState = function (...args) {
+    origPushState.apply(this, args);
+    tryRun();
+  };
+  history.replaceState = function (...args) {
+    origReplaceState.apply(this, args);
+    tryRun();
+  };
 })();
