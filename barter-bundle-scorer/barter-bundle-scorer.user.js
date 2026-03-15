@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      6.0.1
+// @version      6.1.0
 // @description  Full-page bundle evaluation dashboard with per-game scoring, card grid, stats dashboard, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -16,7 +16,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const SCRIPT_VERSION = '6.0.1';
+  const SCRIPT_VERSION = '6.1.0';
   console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
 
   // ═══════════════════════════════════════
@@ -300,7 +300,7 @@
     }
     .bvg-card {
       display: grid;
-      grid-template-columns: 120px 1fr auto;
+      grid-template-columns: 160px 1fr auto;
       gap: 0;
       align-items: stretch;
       background: #0d1117;
@@ -370,17 +370,65 @@
     }
     .bvg-card-msrp { font-weight: 600; font-size: 12px; color: #8b949e; }
 
-    /* ── Tier divider in card view ── */
-    .bvg-tier-divider {
-      grid-column: 1 / -1;
-      background: #161b22; border: 1px solid #21262d; border-radius: 8px;
-      padding: 8px 16px; margin: 6px 0 2px;
-      display: flex; align-items: center; justify-content: space-between;
-      font-size: 13px; font-weight: 700; color: #e6edf3;
+    /* ── Tier sections in card view ── */
+    .bvg-tier-section {
+      margin-bottom: 8px;
     }
-    .bvg-tier-divider .bvg-td-left { display: flex; align-items: center; gap: 10px; }
-    .bvg-tier-divider .bvg-td-price { color: #58a6ff; font-weight: 700; }
-    .bvg-tier-divider .bvg-td-stats { font-size: 11px; font-weight: 400; color: #8b949e; }
+    .bvg-tier-section-header {
+      background: #161b22; border: 1px solid #21262d; border-radius: 10px 10px 0 0;
+      padding: 12px 20px;
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 14px; font-weight: 700; color: #e6edf3;
+      border-bottom: 2px solid #58a6ff;
+    }
+    .bvg-tier-section-header .bvg-ts-left {
+      display: flex; align-items: center; gap: 12px;
+    }
+    .bvg-tier-section-header .bvg-ts-price {
+      color: #58a6ff; font-weight: 800; font-size: 16px;
+    }
+    .bvg-tier-section-header .bvg-ts-stats {
+      font-size: 11px; font-weight: 400; color: #8b949e;
+      display: flex; gap: 12px;
+    }
+    .bvg-tier-section-header .bvg-ts-stat-val {
+      color: #c9d1d9; font-weight: 600;
+    }
+    .bvg-tier-section .bvg-cards {
+      border-radius: 0 0 10px 10px;
+    }
+
+    /* ── Tier pricing strip (dashboard) ── */
+    .bvg-tier-strip {
+      background: #0d1117;
+      border: 1px solid #1f2937;
+      border-radius: 10px;
+      padding: 10px 14px;
+      grid-column: 1 / -1;
+    }
+    .bvg-tier-strip .bvg-section-label {
+      font-size: 10px; text-transform: uppercase;
+      letter-spacing: .5px; color: #8b949e; font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .bvg-tier-strip-items {
+      display: flex; gap: 10px; flex-wrap: wrap;
+    }
+    .bvg-tier-strip-item {
+      background: #161b22; border: 1px solid #21262d; border-radius: 8px;
+      padding: 8px 14px; flex: 1; min-width: 160px;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .bvg-tier-strip-item .bvg-tsi-label {
+      font-size: 11px; color: #8b949e; font-weight: 600;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .bvg-tier-strip-item .bvg-tsi-price {
+      font-size: 18px; font-weight: 800; color: #58a6ff;
+    }
+    .bvg-tier-strip-item .bvg-tsi-detail {
+      font-size: 10px; color: #8b949e;
+    }
 
     /* ── Card count footer ── */
     .bvg-cards-footer {
@@ -452,7 +500,7 @@
     @media (max-width: 768px) {
       #bvg-app { padding: 8px 16px; }
       .bvg-cards { grid-template-columns: 1fr; }
-      .bvg-card { grid-template-columns: 80px 1fr auto; }
+      .bvg-card { grid-template-columns: 120px 1fr auto; }
       .bvg-header { flex-direction: column; align-items: flex-start; }
       .bvg-toolbar { flex-direction: column; align-items: stretch; }
       .bvg-toolbar input[type="text"] { width: 100%; }
@@ -1070,19 +1118,32 @@
       'a[href*="steamgifts.com"]',
       'a[href*="reddit.com"]',
     ];
+    // Friendly store name mapping for clearer link labels
+    const STORE_NAMES = {
+      'fanatical.com': 'Fanatical',
+      'humblebundle.com': 'Humble Bundle',
+      'indiegala.com': 'IndieGala',
+      'groupees.com': 'Groupees',
+      'store.steampowered.com': 'Steam Store',
+      'steamgifts.com': 'SteamGifts',
+      'reddit.com': 'Reddit',
+    };
     const seen = new Set();
     for (const sel of storeSelectors) {
       document.querySelectorAll(sel).forEach(a => {
         const href = a.href;
         if (seen.has(href)) return;
         seen.add(href);
-        // Derive a label from the link text or hostname
-        let label = a.textContent.trim();
-        if (!label || label.length > 30) {
-          try { label = new URL(href).hostname.replace('www.', ''); }
-          catch { label = 'Link'; }
+        // Derive a descriptive label: "Buy on StoreName" or "View on StoreName"
+        let storeName = '';
+        try {
+          const host = new URL(href).hostname.replace('www.', '');
+          storeName = STORE_NAMES[host] || host.split('.')[0].charAt(0).toUpperCase() + host.split('.')[0].slice(1);
+        } catch {
+          storeName = a.textContent.trim() || 'Link';
         }
-        meta.buyLinks.push({ href, label });
+        const prefix = storeName === 'Reddit' || storeName === 'SteamGifts' ? 'View on' : 'Buy on';
+        meta.buyLinks.push({ href, label: `${prefix} ${storeName}` });
       });
     }
 
@@ -1257,10 +1318,20 @@
   // ═══════════════════════════════════════
   function renderStatsDashboard(app, bundleScores, scored, tiers) {
     const { bundleRating, depthRating, personalRating, topMain, dealQuality, unownedMsrpSum } = bundleScores;
-    const ownedCount = scored.filter(g => g.itemType === 'game' && _appRefs.ownedSet.has(g.title)).length;
-    const gameCount = scored.filter(g => g.itemType === 'game').length;
+    const ownedSet = _appRefs.ownedSet;
+    const games = scored.filter(g => g.itemType === 'game');
+    const ownedCount = games.filter(g => ownedSet.has(g.title)).length;
+    const gameCount = games.length;
     const dlcCount = scored.filter(g => g.itemType !== 'game').length;
-    const wishCount = scored.filter(g => g.itemType === 'game' && g.wishlistedDOM).length;
+    const wishCount = games.filter(g => g.wishlistedDOM).length;
+
+    // Aggregate stats for new cards
+    const totalMsrp = games.reduce((s, g) => s + (g.msrp || 0), 0);
+    const ratedGames = games.filter(g => g.ratingPct != null);
+    const avgReview = ratedGames.length > 0
+      ? ratedGames.reduce((s, g) => s + g.ratingPct, 0) / ratedGames.length : 0;
+    const pctSaved = totalMsrp > 0 && CURRENT_BUNDLE_COST
+      ? ((totalMsrp - CURRENT_BUNDLE_COST) / totalMsrp) * 100 : null;
 
     const stats = document.createElement('div');
     stats.className = 'bvg-stats';
@@ -1281,22 +1352,30 @@
       .map(p => `<div class="bvg-pick-item"><span class="bvg-pick-name" style="color:${scoreColor(p.score)}">${escHtml(p.title)}</span> <span class="bvg-pick-score">${p.score.toFixed(1)}</span></div>`)
       .join('');
 
-    // Tier scoring
-    let tierHTML = '';
+    // Tier pricing strip — prominent display of each tier's price, games, and price-per-game
+    let tierStripHTML = '';
     if (tiers && tiers.length > 0) {
-      const tierRows = tiers.map(t => {
-        const tierGames = (scored || []).filter(g => g.itemType === 'game' && g.tr && g.tr.dataset.bvgTier === t.name);
+      const currPref = _gridState.currency;
+      const tierItems = tiers.map(t => {
+        const tierGames = games.filter(g => g.tr && g.tr.dataset.bvgTier === t.name);
+        const tierMsrp = tierGames.reduce((s, g) => s + (g.msrp || 0), 0);
         const tierAvg = tierGames.length > 0 ? tierGames.reduce((s, g) => s + g.score, 0) / tierGames.length : 0;
-        const tierTop = tierGames.length > 0 ? Math.max(...tierGames.map(g => g.score)) : 0;
-        const color = ratingColor(tierAvg);
-        return `<div class="bvg-tier-row">
-          <span>${escHtml(t.label || t.name)}</span>
-          <span>${t.price != null ? '<span class="bvg-tier-price">$' + t.price.toFixed(2) + '</span>' : ''} (${tierGames.length}) Avg: <strong style="color:${color}">${tierAvg.toFixed(0)}</strong> Best: ${tierTop.toFixed(0)}</span>
+        const fmtPrice = formatTierPrice(t, currPref);
+        const pricePerGame = t.price != null && tierGames.length > 0
+          ? `$${(t.price / tierGames.length).toFixed(2)}/game` : '';
+        const tierSaved = tierMsrp > 0 && t.price != null
+          ? `${(((tierMsrp - t.price) / tierMsrp) * 100).toFixed(0)}% saved` : '';
+        const avgColor = ratingColor(tierAvg);
+        return `<div class="bvg-tier-strip-item">
+          <div class="bvg-tsi-label">${escHtml(t.label || t.name)}</div>
+          <div class="bvg-tsi-price">${fmtPrice || '—'}</div>
+          <div class="bvg-tsi-detail">${tierGames.length} games${pricePerGame ? ` &middot; ${pricePerGame}` : ''}${tierSaved ? ` &middot; ${tierSaved}` : ''}</div>
+          <div class="bvg-tsi-detail">Avg score: <strong style="color:${avgColor}">${tierAvg.toFixed(0)}</strong> &middot; MSRP: $${tierMsrp.toFixed(2)}</div>
         </div>`;
       }).join('');
-      tierHTML = `<div class="bvg-tiers-card">
-        <div class="bvg-section-label">Tier Scoring</div>
-        ${tierRows}
+      tierStripHTML = `<div class="bvg-tier-strip">
+        <div class="bvg-section-label">Tier Pricing</div>
+        <div class="bvg-tier-strip-items">${tierItems}</div>
       </div>`;
     }
 
@@ -1304,6 +1383,23 @@
       ${statBadge('Bundle', bundleRating, `top ${SETTINGS.topNMain}`)}
       ${statBadge('Depth', depthRating, `top ${SETTINGS.topNDepth}`)}
       ${statBadge('Personal', personalRating, `excl. owned`)}
+      <div class="bvg-stat-card">
+        <div class="bvg-score-label">Total MSRP</div>
+        <div><span class="bvg-score-num" style="color:#58a6ff">$${totalMsrp.toFixed(0)}</span></div>
+        <div class="bvg-score-label">${gameCount} games${dlcCount > 0 ? ` + ${dlcCount} DLC` : ''}</div>
+      </div>
+      <div class="bvg-stat-card">
+        <div class="bvg-score-label">Avg Review</div>
+        <div><span class="bvg-score-num" style="color:${ratingColor(avgReview)}">${avgReview.toFixed(0)}%</span></div>
+        <div class="bvg-score-label">${ratedGames.length} rated</div>
+        <div class="bvg-score-bar" style="width:${avgReview}%;background:${ratingColor(avgReview)}"></div>
+      </div>
+      ${pctSaved != null ? `<div class="bvg-stat-card">
+        <div class="bvg-score-label">% Saved vs MSRP</div>
+        <div><span class="bvg-score-num" style="color:#3fb950">${pctSaved.toFixed(0)}%</span></div>
+        <div class="bvg-score-label">$${CURRENT_BUNDLE_COST.toFixed(2)} bundle</div>
+        <div class="bvg-score-bar" style="width:${Math.min(pctSaved, 100)}%;background:#3fb950"></div>
+      </div>` : ''}
       <div class="bvg-picks-card">
         <div class="bvg-section-label">Top Picks</div>
         ${picksHTML || '<span style="color:#8b949e">n/a</span>'}
@@ -1318,7 +1414,7 @@
         ${dealQuality != null ? `<span><span class="bvg-meta-highlight">Deal: ${dealQuality.toFixed(1)}x</span> ($${unownedMsrpSum.toFixed(0)} unowned MSRP)</span>` : ''}
         <span>Rating: ${SETTINGS.useWilsonAdjustedRating ? 'Wilson-adjusted' : 'Raw % (confidence-weighted)'}</span>
       </div>
-      ${tierHTML}
+      ${tierStripHTML}
     `;
 
     app.appendChild(stats);
@@ -1521,6 +1617,57 @@
     document.querySelector('#bvg-toggle-dlc')?.classList.toggle('active', _gridState.hideDLC);
   }
 
+  // Builds HTML for a single game card
+  function buildCardHTML(g, rank, ownedSet) {
+    const isOwned = ownedSet.has(g.title);
+    const isDLC = g.itemType === 'dlc' || g.itemType === 'package';
+    const isUnrated = g.breakdown.isUnrated;
+
+    // Extract link from original row
+    const titleA = g.tr.querySelector('a[href*="/i/"], a[href*="/game/"]');
+    const href = titleA ? titleA.getAttribute('href') : '#';
+
+    // Game image
+    const imgHTML = g.imgSrc
+      ? `<div class="bvg-card-img-wrap"><img class="bvg-card-img" src="${escHtml(g.imgSrc)}" alt="" loading="lazy"></div>`
+      : '<div class="bvg-card-img-placeholder"></div>';
+
+    // Tags — skip tier tag since tiers are now sections
+    let tags = '';
+    if (isOwned) tags += '<span class="bvg-card-tag tag-owned">Owned</span>';
+    if (isDLC) tags += `<span class="bvg-card-tag tag-dlc">${g.itemType === 'package' ? 'Package' : 'DLC'}</span>`;
+    if (isUnrated) tags += '<span class="bvg-card-tag tag-unrated">Unrated</span>';
+
+    const cardClass = `bvg-card${isOwned ? ' bvg-card-owned' : ''}${isDLC ? ' bvg-card-dlc' : ''}`;
+    const scoreClass = `bvg-card-score${isUnrated ? ' bvg-unrated' : ''}`;
+    const scoreBgStyle = isUnrated ? '' : `background:${scoreBg(g.score)}`;
+    const scoreLabel = isUnrated ? 'N/R' : g.score.toFixed(0);
+
+    // Meta items
+    const metaParts = [];
+    if (g.ratingPct != null) metaParts.push(`<span>Rating <span class="bvg-cm-val" style="color:${ratingColor(g.ratingPct)}">${g.ratingPct}%</span></span>`);
+    if (g.reviews != null) metaParts.push(`<span>Reviews <span class="bvg-cm-val">${g.reviews.toLocaleString()}</span></span>`);
+    if (g.bundledTimes != null) metaParts.push(`<span>Bundled <span class="bvg-cm-val">${g.bundledTimes}x</span></span>`);
+    if (g.wishlistedDOM) metaParts.push('<span class="bvg-cm-wish">Wishlisted</span>');
+    const metaHTML = metaParts.join('<span class="bvg-cm-sep">&middot;</span>');
+
+    return `
+      <div class="${cardClass}" data-bvg-title="${escHtml(g.title)}">
+        ${imgHTML}
+        <div class="bvg-card-body">
+          <div class="bvg-card-title"><span class="bvg-card-rank">#${rank}</span><a href="${escHtml(href)}">${escHtml(g.title)}</a></div>
+          <div class="bvg-card-meta">${metaHTML}</div>
+          ${tags ? `<div class="bvg-card-tags">${tags}</div>` : ''}
+        </div>
+        <div class="bvg-card-right">
+          <div class="${scoreClass}" style="${scoreBgStyle}" title="${escHtml(formatBreakdown(g.breakdown))}">
+            ${scoreLabel}
+          </div>
+          ${g.msrp != null ? `<span class="bvg-card-msrp">$${g.msrp.toFixed(2)}</span>` : ''}
+        </div>
+      </div>`;
+  }
+
   function renderGameGrid(container, scored, ownedSet, tiers) {
     const st = _gridState;
 
@@ -1547,7 +1694,7 @@
       return st.sortDir === 'asc' ? -result : result;
     });
 
-    // Build tier lookup for dividers
+    // Build tier lookup
     const tierMap = new Map();
     for (const t of tiers) {
       for (const gameRow of t.games) {
@@ -1555,98 +1702,91 @@
       }
     }
 
-    // Render cards grouped by tier when sorted by score (default)
-    let cardsHTML = '';
-    const showTierDividers = tiers.length > 0 && st.sortKey === 'score' && !st.search;
-    let currentTierName = null;
-    let rank = 0;
-
-    // Precompute tier stats
-    const tierStats = new Map();
-    if (showTierDividers) {
-      for (const t of tiers) {
-        const tierGames = scored.filter(g => g.itemType === 'game' && g.tr && tierMap.get(g.tr) === t);
-        const avg = tierGames.length ? tierGames.reduce((s, g) => s + g.score, 0) / tierGames.length : 0;
-        tierStats.set(t.name, { avg, count: tierGames.length });
-      }
-    }
-
-    for (const g of filtered) {
-      rank++;
-      const isOwned = ownedSet.has(g.title);
-      const isDLC = g.itemType === 'dlc' || g.itemType === 'package';
-      const isUnrated = g.breakdown.isUnrated;
-
-      // Tier divider
-      if (showTierDividers) {
-        const tier = tierMap.get(g.tr);
-        const tName = tier ? tier.name : null;
-        if (tName && tName !== currentTierName) {
-          currentTierName = tName;
-          const ts = tierStats.get(tName);
-          const fmtPrice = formatTierPrice(tier, st.currency);
-          const priceStr = fmtPrice ? `<span class="bvg-td-price">${escHtml(fmtPrice)}</span>` : '';
-          const statsStr = ts ? `<span class="bvg-td-stats">${ts.count} games &middot; avg ${ts.avg.toFixed(0)}</span>` : '';
-          const tierLabel = tier.label || tName;
-          cardsHTML += `<div class="bvg-tier-divider"><div class="bvg-td-left">${escHtml(tierLabel)} ${priceStr}</div>${statsStr}</div>`;
-        }
-      }
-
-      // Extract link from original row
-      const titleA = g.tr.querySelector('a[href*="/i/"], a[href*="/game/"]');
-      const href = titleA ? titleA.getAttribute('href') : '#';
-
-      // Game image
-      const imgHTML = g.imgSrc
-        ? `<div class="bvg-card-img-wrap"><img class="bvg-card-img" src="${escHtml(g.imgSrc)}" alt="" loading="lazy"></div>`
-        : '<div class="bvg-card-img-placeholder"></div>';
-
-      // Tags
-      let tags = '';
-      if (isOwned) tags += '<span class="bvg-card-tag tag-owned">Owned</span>';
-      if (isDLC) tags += `<span class="bvg-card-tag tag-dlc">${g.itemType === 'package' ? 'Package' : 'DLC'}</span>`;
-      if (isUnrated) tags += '<span class="bvg-card-tag tag-unrated">Unrated</span>';
-      const tierForTag = tierMap.get(g.tr);
-      if (tierForTag) {
-        const tierPriceStr = formatTierPrice(tierForTag, st.currency);
-        if (tierPriceStr) tags += `<span class="bvg-card-tag">${escHtml(tierPriceStr)} tier</span>`;
-      }
-
-      const cardClass = `bvg-card${isOwned ? ' bvg-card-owned' : ''}${isDLC ? ' bvg-card-dlc' : ''}`;
-      const scoreClass = `bvg-card-score${isUnrated ? ' bvg-unrated' : ''}`;
-      const scoreBgStyle = isUnrated ? '' : `background:${scoreBg(g.score)}`;
-      const scoreLabel = isUnrated ? 'N/R' : g.score.toFixed(0);
-
-      // Meta items
-      const metaParts = [];
-      if (g.ratingPct != null) metaParts.push(`<span>Rating <span class="bvg-cm-val" style="color:${ratingColor(g.ratingPct)}">${g.ratingPct}%</span></span>`);
-      if (g.reviews != null) metaParts.push(`<span>Reviews <span class="bvg-cm-val">${g.reviews.toLocaleString()}</span></span>`);
-      if (g.bundledTimes != null) metaParts.push(`<span>Bundled <span class="bvg-cm-val">${g.bundledTimes}x</span></span>`);
-      if (g.wishlistedDOM) metaParts.push('<span class="bvg-cm-wish">Wishlisted</span>');
-      const metaHTML = metaParts.join('<span class="bvg-cm-sep">&middot;</span>');
-
-      cardsHTML += `
-        <div class="${cardClass}" data-bvg-title="${escHtml(g.title)}">
-          ${imgHTML}
-          <div class="bvg-card-body">
-            <div class="bvg-card-title"><span class="bvg-card-rank">#${rank}</span><a href="${escHtml(href)}">${escHtml(g.title)}</a></div>
-            <div class="bvg-card-meta">${metaHTML}</div>
-            ${tags ? `<div class="bvg-card-tags">${tags}</div>` : ''}
-          </div>
-          <div class="bvg-card-right">
-            <div class="${scoreClass}" style="${scoreBgStyle}" title="${escHtml(formatBreakdown(g.breakdown))}">
-              ${scoreLabel}
-            </div>
-            ${g.msrp != null ? `<span class="bvg-card-msrp">$${g.msrp.toFixed(2)}</span>` : ''}
-          </div>
-        </div>`;
-    }
-
     const totalShown = filtered.length;
     const totalGames = scored.filter(g => g.itemType === 'game').length;
 
+    // Tier subsection mode: group by tier when sorted by score (default) and not searching
+    const useTierSections = tiers.length > 0 && st.sortKey === 'score' && !st.search;
+
+    let contentHTML = '';
+    let rank = 0;
+
+    if (useTierSections) {
+      // Group filtered games by tier
+      const tierGroups = new Map();
+      const ungrouped = [];
+      for (const g of filtered) {
+        const tier = tierMap.get(g.tr);
+        if (tier) {
+          if (!tierGroups.has(tier.name)) tierGroups.set(tier.name, { tier, games: [] });
+          tierGroups.get(tier.name).games.push(g);
+        } else {
+          ungrouped.push(g);
+        }
+      }
+
+      // Render each tier as its own section (in original tier order)
+      for (const t of tiers) {
+        const group = tierGroups.get(t.name);
+        if (!group || group.games.length === 0) continue;
+
+        const tierGames = group.games;
+        const tierGamesScorable = tierGames.filter(g => g.itemType === 'game');
+        const tierAvg = tierGamesScorable.length > 0
+          ? tierGamesScorable.reduce((s, g) => s + g.score, 0) / tierGamesScorable.length : 0;
+        const tierMsrp = tierGamesScorable.reduce((s, g) => s + (g.msrp || 0), 0);
+        const fmtPrice = formatTierPrice(t, st.currency);
+        const pricePerGame = t.price != null && tierGamesScorable.length > 0
+          ? `$${(t.price / tierGamesScorable.length).toFixed(2)}/game` : '';
+        const avgColor = ratingColor(tierAvg);
+
+        // Build stat chips for the section header
+        const statChips = [];
+        statChips.push(`<span class="bvg-ts-stat-val">${tierGames.length}</span> games`);
+        statChips.push(`Avg <span class="bvg-ts-stat-val" style="color:${avgColor}">${tierAvg.toFixed(0)}</span>`);
+        if (pricePerGame) statChips.push(`<span class="bvg-ts-stat-val">${pricePerGame}</span>`);
+        statChips.push(`MSRP <span class="bvg-ts-stat-val">$${tierMsrp.toFixed(0)}</span>`);
+
+        let cardsHTML = '';
+        for (const g of tierGames) {
+          rank++;
+          cardsHTML += buildCardHTML(g, rank, ownedSet);
+        }
+
+        const tierLabel = escHtml(t.label || t.name);
+        const priceStr = fmtPrice ? `<span class="bvg-ts-price">${escHtml(fmtPrice)}</span>` : '';
+
+        contentHTML += `
+          <div class="bvg-tier-section">
+            <div class="bvg-tier-section-header">
+              <div class="bvg-ts-left">${tierLabel} ${priceStr}</div>
+              <div class="bvg-ts-stats">${statChips.join('<span style="color:#30363d;margin:0 2px">&middot;</span>')}</div>
+            </div>
+            <div class="bvg-cards">${cardsHTML}</div>
+          </div>`;
+      }
+
+      // Render any ungrouped games
+      if (ungrouped.length > 0) {
+        let cardsHTML = '';
+        for (const g of ungrouped) {
+          rank++;
+          cardsHTML += buildCardHTML(g, rank, ownedSet);
+        }
+        contentHTML += `<div class="bvg-cards">${cardsHTML}</div>`;
+      }
+    } else {
+      // Flat grid (when sorting/searching — no tier grouping)
+      let cardsHTML = '';
+      for (const g of filtered) {
+        rank++;
+        cardsHTML += buildCardHTML(g, rank, ownedSet);
+      }
+      contentHTML = `<div class="bvg-cards">${cardsHTML}</div>`;
+    }
+
     container.innerHTML = `
-      <div class="bvg-cards">${cardsHTML}</div>
+      ${contentHTML}
       <div class="bvg-cards-footer">Showing ${totalShown} of ${scored.length} items (${totalGames} games)</div>
     `;
 
