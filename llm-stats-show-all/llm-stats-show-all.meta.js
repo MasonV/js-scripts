@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LLM Stats Show All Models
 // @namespace    https://tampermonkey.net/
-// @version      1.3.0
+// @version      1.4.0
 // @description  Automatically paginates through all models on the llm-stats.com leaderboard and displays them in a single table.
 // @match        *://llm-stats.com/*
 // @match        *://*.llm-stats.com/*

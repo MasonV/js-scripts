@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LLM Stats Show All Models
 // @namespace    https://tampermonkey.net/
-// @version      1.3.0
+// @version      1.4.0
 // @description  Automatically paginates through all models on the llm-stats.com leaderboard and displays them in a single table.
 // @match        *://llm-stats.com/*
 // @match        *://*.llm-stats.com/*
@@ -168,23 +168,20 @@
   }
 
   /**
-   * Dispatches a realistic click event on an element.
-   * Uses both native DOM events and the element's click() method
-   * to maximize compatibility with React's synthetic event system.
+   * Dispatches a click event that triggers React handlers without
+   * causing browser-native navigation (e.g., <a href> links opening).
+   * React listens for bubbling events at the root, so we dispatch
+   * a synthetic click with bubbles:true. We temporarily block any
+   * default action (like following a link) via a capturing listener.
    */
   function simulateClick(el) {
-    // React attaches listeners at the root — events must bubble
-    const mousedown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
-    const mouseup = new MouseEvent('mouseup', { bubbles: true, cancelable: true });
+    // Temporarily intercept the click at the element to prevent
+    // native navigation while still letting React's root handler fire
+    function blockDefault(e) { e.preventDefault(); }
+    el.addEventListener('click', blockDefault, { capture: true, once: true });
+
     const click = new MouseEvent('click', { bubbles: true, cancelable: true });
-
-    el.dispatchEvent(mousedown);
-    el.dispatchEvent(mouseup);
     el.dispatchEvent(click);
-
-    // Fallback: native .click() in case the above didn't trigger React handlers
-    // bound via onClick prop (some React versions handle this differently)
-    el.click();
   }
 
   /**
@@ -426,30 +423,41 @@
     const uniqueRows = deduplicateRows(allRows);
     console.log(LOG, `Collected ${allRows.length} rows, ${uniqueRows.length} unique after dedup.`);
 
-    // Replace table body with all collected rows
-    const table = document.querySelector('table');
-    if (!table) {
+    // Build a static clone of the table that React cannot re-render.
+    // We clone the existing table (preserving thead/styles), replace its
+    // tbody with our collected rows, then swap it into the DOM in place
+    // of the React-controlled original.
+    const origTable = document.querySelector('table');
+    if (!origTable) {
       console.error(LOG, 'Table not found for row replacement.');
       completeBanner(banner, uniqueRows.length);
       return;
     }
 
-    const tbody = table.querySelector('tbody');
-    if (!tbody) {
-      console.error(LOG, 'Table body not found.');
-      completeBanner(banner, uniqueRows.length);
-      return;
+    // Clone the table structure (thead, colgroups, etc.) without tbody rows
+    const staticTable = origTable.cloneNode(false);
+    for (const child of origTable.children) {
+      if (child.tagName === 'TBODY') {
+        // Build a fresh tbody with all collected rows
+        const newTbody = document.createElement('tbody');
+        for (const row of uniqueRows) {
+          newTbody.appendChild(row);
+        }
+        staticTable.appendChild(newTbody);
+      } else {
+        // Clone thead, colgroup, etc. as-is
+        staticTable.appendChild(child.cloneNode(true));
+      }
     }
 
-    // Clear existing rows and insert all collected ones
-    tbody.innerHTML = '';
-    for (const row of uniqueRows) {
-      tbody.appendChild(row);
-    }
+    // Swap: replace the React-controlled table with our static one.
+    // This severs React's reference so it can't wipe our content.
+    origTable.parentNode.replaceChild(staticTable, origTable);
 
     // Update the pagination text
-    if (paginationInfo.element) {
-      paginationInfo.element.textContent = `Showing 1–${uniqueRows.length} of ${totalModels} models`;
+    const freshPagination = findPaginationInfo();
+    if (freshPagination && freshPagination.element) {
+      freshPagination.element.textContent = `Showing all ${uniqueRows.length} of ${totalModels} models`;
     }
 
     // Hide pagination buttons since all rows are now visible
