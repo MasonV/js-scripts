@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LLM Stats Show All Models
 // @namespace    https://tampermonkey.net/
-// @version      1.1.0
+// @version      1.2.0
 // @description  Automatically paginates through all models on the llm-stats.com leaderboard and displays them in a single table.
 // @match        *://llm-stats.com/*
 // @match        *://*.llm-stats.com/*
@@ -18,7 +18,7 @@
 
   const LOG = '[LLM Show All]';
   const PAGE_SIZE = 30;
-  const CLICK_DELAY_MS = 600;
+  const SETTLE_DELAY_MS = 800;
   const MAX_PAGES = 20; // safety cap: 20 * 30 = 600 models max
 
   // ═══════════════════════════════════════════════════════════════════
@@ -88,32 +88,63 @@
   }
 
   /**
-   * Finds the Next pagination button.
-   * Looks for a button/anchor containing "Next" text near pagination controls.
+   * Finds a pagination button by matching its text content.
+   * Searches broadly: buttons, anchors, and any clickable element near
+   * the "Showing X of Y" text. Handles text nested in child spans/SVGs.
    */
-  function findNextButton() {
-    const buttons = document.querySelectorAll('button, a[role="button"], a');
-    for (const btn of buttons) {
-      const text = btn.textContent.trim();
-      if (text === 'Next' || text === 'Next →' || text === 'Next ›') {
-        return btn;
+  function findPaginationButton(label) {
+    // Strategy 1: find by exact or partial text match on button-like elements
+    const candidates = document.querySelectorAll('button, a, [role="button"], [tabindex="0"]');
+    for (const el of candidates) {
+      const text = el.textContent.trim();
+      if (text === label || text.includes(label)) {
+        // Avoid matching if this element contains BOTH "Previous" and "Next"
+        // (i.e., a parent container wrapping both buttons)
+        if (text.includes('Previous') && text.includes('Next') && label !== text) {
+          continue;
+        }
+        return el;
       }
     }
+
+    // Strategy 2: walk all elements looking for innerText match
+    // (catches custom components that render as <div> etc.)
+    const all = document.querySelectorAll('*');
+    for (const el of all) {
+      if (el.children.length > 5) continue; // skip large containers
+      const text = el.textContent.trim();
+      if (text === label) return el;
+    }
+
     return null;
   }
 
-  /**
-   * Finds the Previous pagination button.
-   */
+  function findNextButton() {
+    return findPaginationButton('Next');
+  }
+
   function findPrevButton() {
-    const buttons = document.querySelectorAll('button, a[role="button"], a');
-    for (const btn of buttons) {
-      const text = btn.textContent.trim();
-      if (text === 'Previous' || text === '← Previous' || text === '‹ Previous') {
-        return btn;
-      }
-    }
-    return null;
+    return findPaginationButton('Previous');
+  }
+
+  /**
+   * Dispatches a realistic click event on an element.
+   * Uses both native DOM events and the element's click() method
+   * to maximize compatibility with React's synthetic event system.
+   */
+  function simulateClick(el) {
+    // React attaches listeners at the root — events must bubble
+    const mousedown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    const mouseup = new MouseEvent('mouseup', { bubbles: true, cancelable: true });
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+
+    el.dispatchEvent(mousedown);
+    el.dispatchEvent(mouseup);
+    el.dispatchEvent(click);
+
+    // Fallback: native .click() in case the above didn't trigger React handlers
+    // bound via onClick prop (some React versions handle this differently)
+    el.click();
   }
 
   /**
@@ -214,30 +245,52 @@
 
   /**
    * Waits for the table content to change after a navigation click.
-   * Compares the first row's text before and after to detect update.
+   * Uses MutationObserver on the tbody for reliable detection,
+   * with a rAF poll fallback.
    */
-  function waitForTableUpdate(previousFirstRowText, timeoutMs = 5000) {
-    return new Promise((resolve, reject) => {
+  function waitForTableUpdate(previousFirstRowText, timeoutMs = 8000) {
+    return new Promise((resolve) => {
       const start = Date.now();
+      let resolved = false;
 
-      function check() {
+      function done() {
+        if (resolved) return;
+        resolved = true;
+        if (observer) observer.disconnect();
+        resolve();
+      }
+
+      function hasChanged() {
         const rows = extractTableRows();
         if (rows.length > 0) {
           const newFirstText = rowFingerprint(rows[0]);
-          if (newFirstText !== previousFirstRowText) {
-            resolve();
-            return;
-          }
+          if (newFirstText !== previousFirstRowText) return true;
         }
-        if (Date.now() - start > timeoutMs) {
-          // Timeout — table may not have changed (could be last page re-render)
-          resolve();
-          return;
-        }
-        requestAnimationFrame(check);
+        return false;
       }
 
-      check();
+      // MutationObserver on the table body for fast detection
+      let observer = null;
+      const table = document.querySelector('table');
+      const tbody = table ? table.querySelector('tbody') : null;
+      if (tbody) {
+        observer = new MutationObserver(() => {
+          if (hasChanged()) done();
+        });
+        observer.observe(tbody, { childList: true, subtree: true, characterData: true });
+      }
+
+      // rAF poll fallback
+      function poll() {
+        if (resolved) return;
+        if (hasChanged()) { done(); return; }
+        if (Date.now() - start > timeoutMs) { done(); return; }
+        requestAnimationFrame(poll);
+      }
+      requestAnimationFrame(poll);
+
+      // Hard timeout safety net
+      setTimeout(done, timeoutMs);
     });
   }
 
@@ -249,11 +302,29 @@
     // Wait a beat for React hydration
     await new Promise((r) => setTimeout(r, 1000));
 
+    // Diagnostic: log what we can find on the page
+    {
+      const tbl = document.querySelector('table');
+      const nBtn = findNextButton();
+      const pBtn = findPrevButton();
+      console.log(LOG, 'Diagnostics:', {
+        tableFound: !!tbl,
+        tbodyFound: !!(tbl && tbl.querySelector('tbody')),
+        rowCount: tbl ? (tbl.querySelector('tbody')?.querySelectorAll('tr').length ?? 0) : 0,
+        nextBtnFound: !!nBtn,
+        nextBtnTag: nBtn?.tagName,
+        nextBtnText: nBtn?.textContent?.trim(),
+        nextBtnDisabled: nBtn ? isNextDisabled(nBtn) : 'N/A',
+        prevBtnFound: !!pBtn,
+      });
+    }
+
     const paginationInfo = findPaginationInfo();
     if (!paginationInfo) {
       console.warn(LOG, 'Could not find pagination info. Page structure may have changed.');
       return;
     }
+    console.log(LOG, 'Pagination info:', paginationInfo);
 
     const totalModels = paginationInfo.total;
     const totalPages = Math.ceil(totalModels / PAGE_SIZE);
@@ -287,15 +358,15 @@
       const currentRows = extractTableRows();
       const currentFirstRow = currentRows.length > 0 ? rowFingerprint(currentRows[0]) : '';
 
-      // Click Next
-      nextBtn.click();
+      // Click Next — use simulated events for React compatibility
+      console.log(LOG, `Clicking Next for page ${page + 1}...`);
+      simulateClick(nextBtn);
       page++;
-      console.log(LOG, `Navigating to page ${page}...`);
 
       // Wait for table content to update
       await waitForTableUpdate(currentFirstRow);
       // Extra settle time for React rendering
-      await new Promise((r) => setTimeout(r, CLICK_DELAY_MS));
+      await new Promise((r) => setTimeout(r, SETTLE_DELAY_MS));
 
       // Collect rows from this page
       const pageRows = extractTableRows();
