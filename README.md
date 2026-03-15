@@ -31,6 +31,26 @@ A userscript for [Barter.vg](https://barter.vg) bundle pages that scores each ga
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/barter-bundle-scorer/barter-bundle-scorer.meta.js`
 
+### `llm-stats-show-all/`
+
+A userscript for [llm-stats.com](https://llm-stats.com) leaderboard pages that auto-paginates through all models and displays them in a single table.
+
+**Features:**
+
+- Automatically clicks through all pagination pages, collecting every model row
+- Replaces the paginated table with a single view of all models
+- Progress banner with percentage indicator during loading
+- Deduplicates rows to handle any overlap between pages
+- Hides pagination controls once all models are loaded
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.meta.js`
+
 ## Update workflow
 
 1. Edit `barter-bundle-scorer/barter-bundle-scorer.user.js`.
