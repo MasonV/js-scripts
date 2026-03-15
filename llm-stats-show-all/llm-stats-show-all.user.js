@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LLM Stats Show All Models
 // @namespace    https://tampermonkey.net/
-// @version      1.4.0
+// @version      1.5.0
 // @description  Automatically paginates through all models on the llm-stats.com leaderboard and displays them in a single table.
 // @match        *://llm-stats.com/*
 // @match        *://*.llm-stats.com/*
@@ -18,7 +18,8 @@
 
   const LOG = '[LLM Show All]';
   const PAGE_SIZE = 30;
-  const SETTLE_DELAY_MS = 800;
+  const SETTLE_DELAY_MS = 150; // short pause after MutationObserver confirms change
+  const WAIT_TIMEOUT_MS = 3000; // max wait for a page transition
   const MAX_PAGES = 20; // safety cap: 20 * 30 = 600 models max
 
   // ═══════════════════════════════════════════════════════════════════
@@ -285,9 +286,8 @@
    * Uses MutationObserver on the tbody for reliable detection,
    * with a rAF poll fallback.
    */
-  function waitForTableUpdate(previousFirstRowText, timeoutMs = 8000) {
+  function waitForTableUpdate(previousFirstRowText) {
     return new Promise((resolve) => {
-      const start = Date.now();
       let resolved = false;
 
       function done() {
@@ -318,16 +318,17 @@
       }
 
       // rAF poll fallback
+      const start = Date.now();
       function poll() {
         if (resolved) return;
         if (hasChanged()) { done(); return; }
-        if (Date.now() - start > timeoutMs) { done(); return; }
+        if (Date.now() - start > WAIT_TIMEOUT_MS) { done(); return; }
         requestAnimationFrame(poll);
       }
       requestAnimationFrame(poll);
 
       // Hard timeout safety net
-      setTimeout(done, timeoutMs);
+      setTimeout(done, WAIT_TIMEOUT_MS);
     });
   }
 
@@ -391,6 +392,8 @@
 
     // Navigate through remaining pages
     let page = 1;
+    const isLastPage = () => page >= totalPages;
+
     while (page < totalPages && page < MAX_PAGES) {
       const nextBtn = findNextButton();
       if (!nextBtn || isNextDisabled(nextBtn)) {
@@ -407,9 +410,8 @@
       simulateClick(nextBtn);
       page++;
 
-      // Wait for table content to update
+      // Wait for table content to update, then a short settle for React
       await waitForTableUpdate(currentFirstRow);
-      // Extra settle time for React rendering
       await new Promise((r) => setTimeout(r, SETTLE_DELAY_MS));
 
       // Collect rows from this page
@@ -417,16 +419,23 @@
       allRows.push(...pageRows);
       console.log(LOG, `Page ${page}: collected ${pageRows.length} rows (total: ${allRows.length}).`);
       updateBanner(banner, Math.min(allRows.length, totalModels), totalModels);
+
+      // If we've collected enough rows, stop early without waiting for
+      // the next iteration's button check (avoids the slow last-page timeout)
+      if (allRows.length >= totalModels) {
+        console.log(LOG, 'Collected enough rows, stopping early.');
+        break;
+      }
     }
 
     // Deduplicate in case of overlap
     const uniqueRows = deduplicateRows(allRows);
     console.log(LOG, `Collected ${allRows.length} rows, ${uniqueRows.length} unique after dedup.`);
 
-    // Build a static clone of the table that React cannot re-render.
-    // We clone the existing table (preserving thead/styles), replace its
-    // tbody with our collected rows, then swap it into the DOM in place
-    // of the React-controlled original.
+    // Inject all rows into the DOM while preventing React from blanking
+    // the page. Strategy: find the nearest React-controlled ancestor of
+    // the table, hide it, and insert our static content as a sibling.
+    // React can re-render all it wants inside the hidden container.
     const origTable = document.querySelector('table');
     if (!origTable) {
       console.error(LOG, 'Table not found for row replacement.');
@@ -434,37 +443,79 @@
       return;
     }
 
-    // Clone the table structure (thead, colgroups, etc.) without tbody rows
+    // Walk up to find the scrollable/overflow container that wraps the table.
+    // This is typically the element React controls for the whole data-table
+    // component (table + pagination + chrome).
+    let reactContainer = origTable.parentElement;
+    while (reactContainer && reactContainer !== document.body) {
+      const style = window.getComputedStyle(reactContainer);
+      // Stop at the first element that looks like a self-contained section
+      // (has overflow handling or is a direct child of main/body-level wrapper)
+      if (
+        style.overflow !== 'visible' ||
+        style.overflowX !== 'visible' ||
+        reactContainer.parentElement === document.body ||
+        reactContainer.parentElement?.tagName === 'MAIN'
+      ) {
+        break;
+      }
+      reactContainer = reactContainer.parentElement;
+    }
+
+    console.log(LOG, 'React container to hide:', reactContainer?.tagName, reactContainer?.className);
+
+    // Build our static table: clone the header, insert all collected rows
     const staticTable = origTable.cloneNode(false);
     for (const child of origTable.children) {
       if (child.tagName === 'TBODY') {
-        // Build a fresh tbody with all collected rows
         const newTbody = document.createElement('tbody');
         for (const row of uniqueRows) {
           newTbody.appendChild(row);
         }
         staticTable.appendChild(newTbody);
       } else {
-        // Clone thead, colgroup, etc. as-is
         staticTable.appendChild(child.cloneNode(true));
       }
     }
 
-    // Swap: replace the React-controlled table with our static one.
-    // This severs React's reference so it can't wipe our content.
-    origTable.parentNode.replaceChild(staticTable, origTable);
+    // Create a wrapper for our static content
+    const staticWrapper = document.createElement('div');
+    staticWrapper.id = 'llm-show-all-static';
 
-    // Update the pagination text
-    const freshPagination = findPaginationInfo();
-    if (freshPagination && freshPagination.element) {
-      freshPagination.element.textContent = `Showing all ${uniqueRows.length} of ${totalModels} models`;
+    // Add a summary line above the table
+    const summary = document.createElement('p');
+    summary.style.cssText = 'padding: 8px 0; font-size: 14px; opacity: 0.7;';
+    summary.textContent = `Showing all ${uniqueRows.length} of ${totalModels} models`;
+    staticWrapper.appendChild(summary);
+
+    // Copy the scrollable wrapper styling from the original table's parent
+    const tableParent = origTable.parentElement;
+    if (tableParent) {
+      const scrollWrap = document.createElement('div');
+      scrollWrap.style.cssText = window.getComputedStyle(tableParent).cssText;
+      // Ensure it scrolls horizontally like the original
+      scrollWrap.style.overflowX = 'auto';
+      scrollWrap.style.maxWidth = '100%';
+      scrollWrap.appendChild(staticTable);
+      staticWrapper.appendChild(scrollWrap);
+    } else {
+      staticWrapper.appendChild(staticTable);
     }
 
-    // Hide pagination buttons since all rows are now visible
-    const nextBtn = findNextButton();
-    const prevBtn = findPrevButton();
-    if (nextBtn) nextBtn.style.display = 'none';
-    if (prevBtn) prevBtn.style.display = 'none';
+    // Insert our static wrapper and hide the React-controlled container
+    reactContainer.parentNode.insertBefore(staticWrapper, reactContainer);
+    reactContainer.style.display = 'none';
+
+    // Disconnect React's ability to re-render by removing its internal
+    // fiber key from the root. This is a best-effort safeguard.
+    const reactRoot = document.getElementById('__next') || document.getElementById('root');
+    if (reactRoot) {
+      const fiberKey = Object.keys(reactRoot).find((k) => k.startsWith('__reactFiber$'));
+      if (fiberKey) {
+        console.log(LOG, 'Disconnecting React fiber to prevent re-renders.');
+        delete reactRoot[fiberKey];
+      }
+    }
 
     console.log(LOG, `Done. Displaying ${uniqueRows.length} models in a single table.`);
     completeBanner(banner, uniqueRows.length);
