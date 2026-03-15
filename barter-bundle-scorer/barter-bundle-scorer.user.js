@@ -558,10 +558,44 @@
   const STORAGE_KEY_OWNED    = 'bvg_scorer_owned_v2';
   const STORAGE_KEY_SETTINGS = 'bvg_scorer_settings_v2';
   const DEFAULT_SETTINGS = {
+    // Wilson lower-bound adjusts rating downward for low-review games, penalizing
+    // uncertainty. Off by default because most bundle games have few reviews, and
+    // Wilson would flatten nearly all scores toward 50%.
     useWilsonAdjustedRating: false,
     topNMain: 5, topNDepth: 10,
-    msrpCap: 39.99, bundledPenaltyCap: 10, confidenceAnchor: 800,
-    weights: { rating: 0.55, confidence: 0.20, value: 0.20, bundleValue: 0.15, wishlist: 0.08, rebundlePenalty: 0.20 },
+    // msrpCap: Games above this price get value=1.0. Set to ~$40 because that's the
+    // typical "full price indie" ceiling; AAA titles ($60+) shouldn't score higher
+    // just for being expensive — value above $40 has diminishing informational return.
+    msrpCap: 39.99,
+    // bundledPenaltyCap: A game bundled this many times gets the maximum rebundle
+    // penalty. 10 is the point where a game is "perma-bundled" and likely valueless
+    // as trade fodder — most traders already own it.
+    bundledPenaltyCap: 10,
+    // confidenceAnchor: The review count where confidence reaches 50% (Bayesian
+    // anchor). At 800, a game with 800 reviews has 50% confidence, 4000 reviews ~83%.
+    // This is deliberately high to avoid over-trusting niche games with 20-50 reviews
+    // that often have inflated ratings from fans.
+    confidenceAnchor: 800,
+    weights: {
+      // Rating dominates because it's the strongest signal of game quality.
+      rating: 0.55,
+      // Confidence rewards well-reviewed games — 20% ensures obscure titles with
+      // perfect ratings don't outrank popular games with slightly lower scores.
+      confidence: 0.20,
+      // Value (MSRP/cap) gives credit for higher-priced games — you're getting
+      // more dollar value per bundle dollar. 20% keeps it meaningful but secondary.
+      value: 0.20,
+      // BundleValue (MSRP/bundle cost) measures deal quality for this specific
+      // bundle. 15% because it overlaps with value but adds bundle-price context.
+      bundleValue: 0.15,
+      // Wishlist is a personal relevance signal — small weight (8%) because it's
+      // binary and shouldn't override quality metrics, just break ties.
+      wishlist: 0.08,
+      // RebundlePenalty subtracts from the score (not normalized with positives).
+      // 20% at max penalty (bundled 10+ times) is enough to push perma-bundled
+      // games noticeably down without completely zeroing otherwise-good games.
+      rebundlePenalty: 0.20,
+    },
   };
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function loadSettings() {
@@ -587,9 +621,13 @@
     if (!n || n <= 0) return 0;
     return clamp01(n / (n + SETTINGS.confidenceAnchor));
   }
+  // Wilson lower-bound of a binomial proportion at 95% confidence (z=1.96).
+  // Returns the pessimistic estimate of true rating given observed proportion p
+  // and sample size n. With few reviews, the bound drops well below p, penalizing
+  // uncertainty. Useful when comparing a 95% game with 8 reviews vs 85% with 2000.
   function wilsonLowerBound(p, n) {
     if (!n || n <= 0) return 0;
-    const z = 1.96, z2 = z * z;
+    const z = 1.96, z2 = z * z; // 95% confidence interval
     const denom = 1 + z2 / n;
     const centre = p + z2 / (2 * n);
     const adj = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n);
@@ -748,18 +786,28 @@
   // Detect DLC, soundtracks, artbooks, and package parents
   // so they can be excluded from bundle score calculations
   const DLC_KEYWORDS = /\b(soundtrack|ost|artbook|art\s*book|wallpaper|skin\s*pack|costume|dlc|season\s*pass|expansion|bonus\s*content|digital\s*deluxe|deluxe\s*edition|collector[''\u2019]?s\s*edition|upgrade)\b/i;
+  // Review threshold for distinguishing DLC from standalone games. Items with
+  // DLC-like titles or inside packages are classified as DLC only if they have
+  // fewer reviews than this. Above this count, the item is popular enough to be
+  // a real game that happens to have a DLC-ish name (e.g., "Expansion" in the
+  // title of a standalone game). 50 balances: too low catches real DLC with a
+  // small fanbase, too high lets actual standalone expansions slip through.
+  const DLC_REVIEW_THRESHOLD = 50;
   function classifyItem(title, tr, ratingPct, reviews) {
     const titleLower = title.toLowerCase();
     if (DLC_KEYWORDS.test(titleLower)) {
-      if (reviews && reviews > 100) return 'game';
+      if (reviews && reviews >= DLC_REVIEW_THRESHOLD) return 'game';
       return 'dlc';
     }
+    // Walk up to 5 preceding rows to detect if this item is inside a multi-item
+    // package (e.g., "3 item package"). Package sub-items with few reviews are
+    // likely DLC/extras bundled with the main game.
     let prev = tr.previousElementSibling;
     let depth = 0;
     while (prev && depth < 5) {
       const text = prev.textContent.trim().toLowerCase();
       if (/\d+\s*item\s*package/.test(text)) {
-        if (!reviews || reviews < 10) return 'dlc';
+        if (!reviews || reviews < DLC_REVIEW_THRESHOLD) return 'dlc';
         return 'game';
       }
       if (prev.querySelector('td.bargraphs') || prev.querySelector('td.tierLine')) break;

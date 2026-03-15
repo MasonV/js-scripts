@@ -54,9 +54,9 @@ Synced from [Notion: AI Agent TODO Backlog](https://www.notion.so/faceefca3f034f
   - Last 4 commits (v4.3.1–v4.3.2) are all alignment fixes for colspan handling in injectScoreColumn(). Post-injection validation now logs mismatches (via injectColumns()), but root cause fixup logic still fragile.
   - Effort: 2 | Simplicity: 1 | Efficiency: 1 | Safety: 3 | Value: 3
 
-- [ ] **Fix DLC classification logic inconsistency** `bug` SCORE: 2.0
-  - classifyItem() has contradictory logic: games with DLC keywords but >100 reviews classified as 'game' (line 872), but package sub-items with <10 reviews marked as DLC (line 886). Games with 50 reviews inside a package get double-counted, inflating bundle scores.
-  - Effort: 2 | Simplicity: 2 | Efficiency: 2 | Safety: 1 | Value: 3
+- [x] **Fix DLC classification logic inconsistency** `bug` SCORE: 2.0
+  - Unified both DLC-keyword and package sub-item classification paths to use a single DLC_REVIEW_THRESHOLD constant (50). Previously used >100 for keywords and <10 for packages, causing items with 10-100 reviews to be classified inconsistently.
+  - Completed: 2026-03-15
 
 - [ ] **Unify view state management across classic and modern views** `refactor` SCORE: 2.0
   - Sort state tracked differently between classic (table.dataset) and modern (_modernPanelState). Switching views shows inconsistent sort/filter state. Multiple sources of truth.
@@ -66,13 +66,13 @@ Synced from [Notion: AI Agent TODO Backlog](https://www.notion.so/faceefca3f034f
   - Users can only have one set of scoring weights at a time. Different bundle types benefit from different weight configurations. Add naming/saving/loading/deleting presets via localStorage.
   - Effort: 2 | Simplicity: 1 | Efficiency: 1 | Safety: 1 | Value: 4
 
-- [ ] **Add unit tests for pure scoring functions** `test` SCORE: 1.8
-  - No test framework exists. Pure functions (scoring, confidence, Wilson bound, DLC classification) have zero test coverage. Add test file covering edge cases.
-  - Effort: 2 | Simplicity: 1 | Efficiency: 1 | Safety: 3 | Value: 2
+- [x] **Add unit tests for pure scoring functions** `test` SCORE: 1.8
+  - Added scoring.test.js with 28 tests covering clamp01, confidenceFromReviews, wilsonLowerBound, classifyItem, and scoreGame. Uses Node built-in test runner (`node --test`). Functions copied into test file since userscript has no module system.
+  - Completed: 2026-03-15
 
-- [ ] **Add 'why' comments to scoring weights and thresholds** `docs` SCORE: 1.8
-  - Default settings (confidenceAnchor=800, bundledPenaltyCap=10, weight defaults) lack rationale. Add block comments explaining motivation and tradeoffs for each magic number.
-  - Effort: 4 | Simplicity: 1 | Efficiency: 1 | Safety: 1 | Value: 2
+- [x] **Add 'why' comments to scoring weights and thresholds** `docs` SCORE: 1.8
+  - Added block comments to DEFAULT_SETTINGS explaining rationale for msrpCap ($40 indie ceiling), bundledPenaltyCap (10 = perma-bundled), confidenceAnchor (800 = conservative Bayesian anchor), each weight, and Wilson lower-bound z-score.
+  - Completed: 2026-03-15
 
 - [ ] **Extract pure functions into testable module** `refactor` SCORE: 1.6
   - scoreGame(), confidenceFromReviews(), classifyItem(), wilsonLowerBound() are pure functions embedded in a 1250-line monolith. Make them isolatable for testing without DOM dependencies.
