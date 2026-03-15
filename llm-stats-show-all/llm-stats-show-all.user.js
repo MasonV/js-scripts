@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LLM Stats Show All Models
 // @namespace    https://tampermonkey.net/
-// @version      1.6.0
+// @version      1.7.0
 // @description  Automatically paginates through all models on the llm-stats.com leaderboard and displays them in a single table.
 // @match        *://llm-stats.com/*
 // @match        *://*.llm-stats.com/*
@@ -423,6 +423,159 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════
+  //  EXPORT (CSV + CLIPBOARD)
+  // ═══════════════════════════════════════════════════════════════════
+
+  GM_addStyle(`
+    .llm-export-toolbar {
+      display: flex;
+      gap: 8px;
+      padding: 8px 0;
+    }
+    .llm-export-toolbar button {
+      padding: 6px 14px;
+      border: 1px solid #555;
+      border-radius: 6px;
+      background: #2a2a3e;
+      color: #e0e0e0;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .llm-export-toolbar button:hover {
+      background: #3a3a52;
+    }
+    .llm-export-toolbar .llm-export-feedback {
+      align-self: center;
+      font-size: 12px;
+      opacity: 0.7;
+      transition: opacity 0.3s;
+    }
+  `);
+
+  /**
+   * Escapes a value for safe CSV embedding.
+   * Wraps in quotes if it contains commas, quotes, or newlines.
+   */
+  function csvEscape(val) {
+    if (val.includes('"') || val.includes(',') || val.includes('\n')) {
+      return '"' + val.replace(/"/g, '""') + '"';
+    }
+    return val;
+  }
+
+  /**
+   * Extracts table data as a 2D string array (headers + body rows).
+   * Reads from the current DOM order (respects active sort).
+   */
+  function tableToGrid(table) {
+    const grid = [];
+
+    // Headers — use last header row (skips grouped header rows)
+    const thead = table.querySelector('thead');
+    if (thead) {
+      const headerRows = thead.querySelectorAll('tr');
+      const headerRow = headerRows[headerRows.length - 1];
+      const headerCells = headerRow.querySelectorAll('th');
+      const headers = Array.from(headerCells).map((th) => {
+        // Strip the sort arrow we injected
+        let text = th.textContent.trim();
+        text = text.replace(/[▲▼]$/, '').trim();
+        return text;
+      });
+      grid.push(headers);
+    }
+
+    // Body rows in current DOM order
+    const tbody = table.querySelector('tbody');
+    if (tbody) {
+      for (const row of tbody.querySelectorAll('tr')) {
+        const cells = Array.from(row.querySelectorAll('td'))
+          .map((td) => td.textContent.trim());
+        grid.push(cells);
+      }
+    }
+
+    return grid;
+  }
+
+  /**
+   * Converts a 2D grid to a CSV string.
+   */
+  function gridToCsv(grid) {
+    return grid.map((row) => row.map(csvEscape).join(',')).join('\n');
+  }
+
+  /**
+   * Converts a 2D grid to a TSV string (for pasting into spreadsheets).
+   */
+  function gridToTsv(grid) {
+    return grid.map((row) => row.join('\t')).join('\n');
+  }
+
+  /**
+   * Shows brief feedback text next to the export buttons.
+   */
+  function flashFeedback(toolbar, message) {
+    let feedback = toolbar.querySelector('.llm-export-feedback');
+    if (!feedback) {
+      feedback = document.createElement('span');
+      feedback.className = 'llm-export-feedback';
+      toolbar.appendChild(feedback);
+    }
+    feedback.textContent = message;
+    feedback.style.opacity = '1';
+    setTimeout(() => { feedback.style.opacity = '0'; }, 2000);
+  }
+
+  /**
+   * Creates the export toolbar with CSV download and copy buttons.
+   * Returns the toolbar element to insert into the DOM.
+   */
+  function createExportToolbar(table) {
+    const toolbar = document.createElement('div');
+    toolbar.className = 'llm-export-toolbar';
+
+    // CSV download button
+    const csvBtn = document.createElement('button');
+    csvBtn.textContent = 'Export CSV';
+    csvBtn.addEventListener('click', () => {
+      const grid = tableToGrid(table);
+      const csv = gridToCsv(grid);
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `llm-leaderboard-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      flashFeedback(toolbar, `Exported ${grid.length - 1} rows`);
+      console.log(LOG, `CSV exported: ${grid.length - 1} rows.`);
+    });
+
+    // Copy to clipboard button (TSV for spreadsheet paste compatibility)
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = 'Copy Table';
+    copyBtn.addEventListener('click', async () => {
+      const grid = tableToGrid(table);
+      const tsv = gridToTsv(grid);
+      try {
+        await navigator.clipboard.writeText(tsv);
+        flashFeedback(toolbar, `Copied ${grid.length - 1} rows`);
+        console.log(LOG, `Table copied to clipboard: ${grid.length - 1} rows.`);
+      } catch (err) {
+        // Fallback for contexts where clipboard API is blocked
+        console.error(LOG, 'Clipboard write failed:', err);
+        flashFeedback(toolbar, 'Copy failed — check console');
+      }
+    });
+
+    toolbar.appendChild(csvBtn);
+    toolbar.appendChild(copyBtn);
+    return toolbar;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   //  PAGINATION HELPERS
   // ═══════════════════════════════════════════════════════════════════
 
@@ -628,9 +781,12 @@
 
     // Add a summary line above the table
     const summary = document.createElement('p');
-    summary.style.cssText = 'padding: 8px 0; font-size: 14px; opacity: 0.7;';
+    summary.style.cssText = 'padding: 4px 0 0; font-size: 14px; opacity: 0.7;';
     summary.textContent = `Showing all ${uniqueRows.length} of ${totalModels} models`;
     staticWrapper.appendChild(summary);
+
+    // Add export toolbar (CSV download + copy to clipboard)
+    staticWrapper.appendChild(createExportToolbar(staticTable));
 
     // Copy the scrollable wrapper styling from the original table's parent
     const tableParent = origTable.parentElement;
