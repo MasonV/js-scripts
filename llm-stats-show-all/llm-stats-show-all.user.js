@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LLM Stats Show All Models
 // @namespace    https://tampermonkey.net/
-// @version      1.2.0
+// @version      1.3.0
 // @description  Automatically paginates through all models on the llm-stats.com leaderboard and displays them in a single table.
 // @match        *://llm-stats.com/*
 // @match        *://*.llm-stats.com/*
@@ -62,19 +62,21 @@
 
   /**
    * Finds the "Showing X–Y of Z models" text element.
+   * Checks both individual text nodes and element innerText to handle
+   * cases where React splits the string across multiple child elements.
    * Returns { element, total } or null if not found.
    */
   function findPaginationInfo() {
-    // Look for text matching "Showing X–Y of Z models" (uses en-dash or hyphen)
+    const PAGINATION_RE = /Showing\s+(\d+)\s*[–\-]\s*(\d+)\s+of\s+(\d+)/i;
+
+    // Strategy 1: check individual text nodes (fastest if text is in one node)
     const walker = document.createTreeWalker(
       document.body,
       NodeFilter.SHOW_TEXT,
       null
     );
-
     while (walker.nextNode()) {
-      const text = walker.currentNode.textContent.trim();
-      const match = text.match(/Showing\s+(\d+)\s*[–\-]\s*(\d+)\s+of\s+(\d+)/i);
+      const match = walker.currentNode.textContent.trim().match(PAGINATION_RE);
       if (match) {
         return {
           element: walker.currentNode.parentElement,
@@ -84,6 +86,44 @@
         };
       }
     }
+
+    // Strategy 2: check composed innerText of small container elements
+    // (handles React splitting "Showing 1–30 of 272 models" across spans)
+    const candidates = document.querySelectorAll('p, div, span, nav, footer, section');
+    for (const el of candidates) {
+      // Skip large containers to avoid false matches on the whole page
+      if (el.children.length > 10) continue;
+      const text = (el.innerText || el.textContent || '').trim();
+      const match = text.match(PAGINATION_RE);
+      if (match) {
+        return {
+          element: el,
+          start: parseInt(match[1], 10),
+          end: parseInt(match[2], 10),
+          total: parseInt(match[3], 10),
+        };
+      }
+    }
+
+    // Strategy 3: look for just "of N models" as a weaker signal
+    const weakRe = /of\s+(\d+)\s+models/i;
+    for (const el of candidates) {
+      if (el.children.length > 10) continue;
+      const text = (el.innerText || el.textContent || '').trim();
+      const match = text.match(weakRe);
+      if (match) {
+        console.log(LOG, 'Weak pagination match found:', text);
+        // Try to extract start-end from the same text
+        const rangeMatch = text.match(/(\d+)\s*[–\-]\s*(\d+)/);
+        return {
+          element: el,
+          start: rangeMatch ? parseInt(rangeMatch[1], 10) : 1,
+          end: rangeMatch ? parseInt(rangeMatch[2], 10) : PAGE_SIZE,
+          total: parseInt(match[1], 10),
+        };
+      }
+    }
+
     return null;
   }
 
@@ -299,29 +339,36 @@
   // ═══════════════════════════════════════════════════════════════════
 
   async function showAllModels() {
-    // Wait a beat for React hydration
-    await new Promise((r) => setTimeout(r, 1000));
+    // Wait for React hydration with retries — the table and pagination
+    // may not render immediately on slow connections or heavy pages
+    let paginationInfo = null;
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      await new Promise((r) => setTimeout(r, 1000));
 
-    // Diagnostic: log what we can find on the page
-    {
-      const tbl = document.querySelector('table');
-      const nBtn = findNextButton();
-      const pBtn = findPrevButton();
-      console.log(LOG, 'Diagnostics:', {
-        tableFound: !!tbl,
-        tbodyFound: !!(tbl && tbl.querySelector('tbody')),
-        rowCount: tbl ? (tbl.querySelector('tbody')?.querySelectorAll('tr').length ?? 0) : 0,
-        nextBtnFound: !!nBtn,
-        nextBtnTag: nBtn?.tagName,
-        nextBtnText: nBtn?.textContent?.trim(),
-        nextBtnDisabled: nBtn ? isNextDisabled(nBtn) : 'N/A',
-        prevBtnFound: !!pBtn,
-      });
+      // Diagnostic: log what we can find on each attempt
+      {
+        const tbl = document.querySelector('table');
+        const nBtn = findNextButton();
+        const pBtn = findPrevButton();
+        console.log(LOG, `Attempt ${attempt}/10 diagnostics:`, {
+          tableFound: !!tbl,
+          tbodyFound: !!(tbl && tbl.querySelector('tbody')),
+          rowCount: tbl ? (tbl.querySelector('tbody')?.querySelectorAll('tr').length ?? 0) : 0,
+          nextBtnFound: !!nBtn,
+          nextBtnTag: nBtn?.tagName,
+          nextBtnText: nBtn?.textContent?.trim(),
+          nextBtnDisabled: nBtn ? isNextDisabled(nBtn) : 'N/A',
+          prevBtnFound: !!pBtn,
+        });
+      }
+
+      paginationInfo = findPaginationInfo();
+      if (paginationInfo) break;
+      console.log(LOG, `Attempt ${attempt}/10: pagination info not found yet, retrying...`);
     }
 
-    const paginationInfo = findPaginationInfo();
     if (!paginationInfo) {
-      console.warn(LOG, 'Could not find pagination info. Page structure may have changed.');
+      console.warn(LOG, 'Could not find pagination info after 10 attempts. Page structure may have changed.');
       return;
     }
     console.log(LOG, 'Pagination info:', paginationInfo);
