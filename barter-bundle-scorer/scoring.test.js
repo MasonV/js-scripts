@@ -63,7 +63,7 @@ function scoreGame(g, settings, bundleCost) {
   const w = settings.weights;
   const posSum = w.rating + w.confidence + w.value + w.bundleValue + w.wishlist;
   const n = posSum > 0 ? posSum : 1;
-  const raw = (w.rating / n) * rating + (w.confidence / n) * conf + (w.value / n) * val + (w.bundleValue / n) * bundleValue + (w.wishlist / n) * wishlistBonus - w.rebundlePenalty * pen;
+  const raw = (w.rating / n) * rating + (w.confidence / n) * conf + (w.value / n) * val + (w.bundleValue / n) * bundleValue + (w.wishlist / n) * wishlistBonus - (w.rebundlePenalty / n) * pen;
   return {
     score: Math.max(0, raw * 100),
     breakdown: { rating, ratingRaw, conf, val, bundleValue, wishlistBonus, pen, isUnrated },

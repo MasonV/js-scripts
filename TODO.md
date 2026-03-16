@@ -1,6 +1,6 @@
 # TODO — js-scripts
 
-Synced from [Notion: AI Agent TODO Backlog](https://www.notion.so/faceefca3f034fd0b3177f9ef91e7ab7) on 2026-03-14.
+Synced from [Notion: AI Agent TODO Backlog](https://www.notion.so/faceefca3f034fd0b3177f9ef91e7ab7) on 2026-03-15.
 
 ---
 
@@ -77,3 +77,35 @@ Synced from [Notion: AI Agent TODO Backlog](https://www.notion.so/faceefca3f034f
 - [x] **Extract pure functions into testable module** `refactor` SCORE: 1.6
   - Added PURE FUNCTIONS — START/END markers around clamp01, escHtml, confidenceFromReviews, wilsonLowerBound. Added sync notes to SCORING and classifyItem sections pointing to scoring.test.js. Full module extraction not viable (single-file userscript, no module system).
   - Completed: 2026-03-15
+
+- [x] **Fix rebundle penalty normalization in scoreGame** `bug`
+  - Normalized rebundlePenalty by dividing by posSum (same as positive terms), preventing penalty from dominating when weights are low.
+  - Completed: 2026-03-15
+
+- [x] **Fix tier price fallback for non-USD bundles** `bug`
+  - Added fallback: when USD regex doesn't match, uses first detected currency from t.prices (EUR, GBP, etc.).
+  - Completed: 2026-03-15
+
+- [ ] **Expand unit test coverage for pure functions** `test`
+  - scoring.test.js missing coverage for scoreColor, scoreBg, ratingColor, formatBreakdown, formatTierPrice. Missing edge cases for existing tests.
+  - Effort: 3 | Simplicity: 4 | Efficiency: 2 | Safety: 3 | Value: 3
+
+- [x] **Add focus-visible styles to all interactive elements** `debt`
+  - Added :focus-visible { outline: 2px solid #58a6ff } to all buttons, chips, score badges, inputs, selects, and modal controls.
+  - Completed: 2026-03-15
+
+- [x] **Add aria-labels to icon and emoji buttons** `debt`
+  - Added aria-label to export, settings gear, and modal close buttons for screen reader accessibility.
+  - Completed: 2026-03-15
+
+- [x] **Add score tier labels alongside colors** `feature`
+  - Added scoreTierLabel() function and small text labels (Great/Good/Fair/Poor) below score numbers on cards. Non-color differentiation for colorblind accessibility.
+  - Completed: 2026-03-15
+
+- [x] **Include settings in JSON export** `feature`
+  - Added settings: clone(SETTINGS) to JSON export for scoring reproducibility.
+  - Completed: 2026-03-15
+
+- [ ] **Optimize re-render for large bundles** `performance`
+  - Full innerHTML rebuild on every filter/sort/search. Causes jank on 200+ game bundles.
+  - Effort: 2 | Simplicity: 2 | Efficiency: 4 | Safety: 2 | Value: 3

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      6.3.0
+// @version      6.4.0
 // @description  Full-page bundle evaluation dashboard with per-game scoring, card grid, stats dashboard, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -16,7 +16,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const SCRIPT_VERSION = '6.3.0';
+  const SCRIPT_VERSION = '6.4.0';
   console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
 
   // ═══════════════════════════════════════
@@ -357,12 +357,12 @@
       justify-content: center; gap: 4px; padding: 8px 16px; white-space: nowrap;
     }
     .bvg-card-score {
-      width: 44px; height: 44px; border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
+      width: 48px; min-height: 48px; border-radius: 10px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
       font-weight: 800; font-size: 20px; color: #fff;
       text-shadow: 0 1px 3px rgba(0,0,0,.5);
       cursor: pointer; user-select: none; transition: transform .1s;
-      flex-shrink: 0; letter-spacing: -0.5px;
+      flex-shrink: 0; letter-spacing: -0.5px; padding: 4px 2px;
     }
     .bvg-card-score:hover { transform: scale(1.08); }
     .bvg-card-score.bvg-unrated {
@@ -503,6 +503,27 @@
     }
     #bvg-view-fab button.active { background: #21262d; color: #e6edf3; }
     #bvg-view-fab button:hover:not(.active) { color: #c9d1d9; }
+
+    /* ── Focus indicators for keyboard navigation ── */
+    .bvg-page-toggle button:focus-visible,
+    .bvg-filter-chip:focus-visible,
+    .bvg-settings-btn:focus-visible,
+    .bvg-card-steam:focus-visible,
+    .bvg-card-score:focus-visible,
+    #bvg-view-fab button:focus-visible,
+    .bvg-modal-close:focus-visible,
+    #bvg-app select:focus-visible,
+    #bvg-app input:focus-visible {
+      outline: 2px solid #58a6ff;
+      outline-offset: -2px;
+    }
+
+    /* ── Score tier label ── */
+    .bvg-card-score .bvg-score-tier {
+      font-size: 8px; font-weight: 600; letter-spacing: .3px;
+      text-transform: uppercase; opacity: .85;
+      text-shadow: none; margin-top: 1px;
+    }
 
     /* ── Responsive ── */
     @media (max-width: 768px) {
@@ -777,7 +798,11 @@
         // Extract a clean label: text before first price/currency indicator
         const labelMatch = text.match(/^(.+?)(?:\s*[:|\-]\s*(?:\d|[$€£₽CA])|$)/);
         const label = labelMatch ? labelMatch[1].replace(/\s*[:|\-–—]\s*$/, '').trim() : text.substring(0, 40);
-        const tierPrice = priceMatch ? parseFloat(priceMatch[1]) : null;
+        // Prefer USD price; fall back to first detected currency if USD absent
+        let tierPrice = priceMatch ? parseFloat(priceMatch[1]) : null;
+        if (tierPrice == null && Object.keys(prices).length > 0) {
+          tierPrice = prices[Object.keys(prices)[0]];
+        }
         currentTier = {
           name: text.substring(0, 80),
           label: label || text.substring(0, 40),
@@ -948,7 +973,10 @@
     const w = SETTINGS.weights;
     const posSum = w.rating + w.confidence + w.value + w.bundleValue + w.wishlist;
     const n = posSum > 0 ? posSum : 1;
-    const raw = (w.rating / n) * rating + (w.confidence / n) * conf + (w.value / n) * val + (w.bundleValue / n) * bundleValue + (w.wishlist / n) * wishlistBonus - w.rebundlePenalty * pen;
+    // Penalty is normalized by the same divisor as positive terms so it scales
+    // proportionally when users adjust weights — prevents penalty from dominating
+    // when positive weights are set low.
+    const raw = (w.rating / n) * rating + (w.confidence / n) * conf + (w.value / n) * val + (w.bundleValue / n) * bundleValue + (w.wishlist / n) * wishlistBonus - (w.rebundlePenalty / n) * pen;
     return {
       score: Math.max(0, raw * 100),
       breakdown: { rating, ratingRaw, conf, val, bundleValue, wishlistBonus, pen, isUnrated },
@@ -965,6 +993,14 @@
     if (s >= 70) return 'linear-gradient(135deg, #5c5410 0%, #7a6d12 100%)';
     if (s >= 50) return 'linear-gradient(135deg, #6b3a14 0%, #8a4f1f 100%)';
     return 'linear-gradient(135deg, #611919 0%, #8a1f1f 100%)';
+  }
+  // Text label for score tier — provides non-color differentiation for
+  // colorblind accessibility (~10% of males can't distinguish red/green)
+  function scoreTierLabel(s) {
+    if (s >= 85) return 'Great';
+    if (s >= 70) return 'Good';
+    if (s >= 50) return 'Fair';
+    return 'Poor';
   }
   function ratingColor(r) {
     if (r >= 80) return '#22863a';
@@ -1563,9 +1599,9 @@
       <button type="button" class="bvg-filter-chip${st.hideOwned ? ' active' : ''}" id="bvg-toggle-owned">Hide owned</button>
       <button type="button" class="bvg-filter-chip${st.hideDLC ? ' active' : ''}" id="bvg-toggle-dlc">Hide DLC</button>
       <span class="bvg-toolbar-spacer"></span>
-      <button class="bvg-settings-btn" id="bvg-export-btn">&#128203; Copy Summary</button>
-      <button class="bvg-settings-btn" id="bvg-export-json-btn">{ } Export JSON</button>
-      <button class="bvg-settings-btn" id="bvg-settings-gear">&#9881; Settings</button>
+      <button class="bvg-settings-btn" id="bvg-export-btn" aria-label="Copy summary to clipboard">&#128203; Copy Summary</button>
+      <button class="bvg-settings-btn" id="bvg-export-json-btn" aria-label="Export JSON to clipboard">{ } Export JSON</button>
+      <button class="bvg-settings-btn" id="bvg-settings-gear" aria-label="Open scoring settings">&#9881; Settings</button>
     `;
 
     // Page toggle
@@ -1658,6 +1694,7 @@
           exportedAt: new Date().toISOString(),
           scorerVersion: SCRIPT_VERSION,
         },
+        settings: clone(SETTINGS),
         bundle: {
           bundleRating: bs.bundleRating,
           depthRating: bs.depthRating,
@@ -1712,7 +1749,7 @@
     modal.innerHTML = `
       <div class="bvg-modal-header">
         <h3>Scoring Settings</h3>
-        <button class="bvg-modal-close" title="Close">&times;</button>
+        <button class="bvg-modal-close" title="Close" aria-label="Close settings modal">&times;</button>
       </div>
       <div id="bvg-settings-panel">${buildSettingsHTML()}</div>
     `;
@@ -1841,8 +1878,9 @@
         </div>
         <div class="bvg-card-right">
           ${g.steamUrl ? `<a class="bvg-card-steam" href="${escHtml(g.steamUrl)}" target="_blank" title="View on Steam">Steam</a>` : ''}
-          <div class="${scoreClass}" style="${scoreBgStyle}" title="${escHtml(formatBreakdown(g.breakdown))}">
+          <div class="${scoreClass}" style="${scoreBgStyle}" title="${escHtml(formatBreakdown(g.breakdown))}" role="img" aria-label="Score: ${scoreLabel}${isUnrated ? '' : ` (${scoreTierLabel(g.score)})`}">
             ${scoreLabel}
+            ${isUnrated ? '' : `<div class="bvg-score-tier">${scoreTierLabel(g.score)}</div>`}
           </div>
           ${g.msrp != null ? `<span class="bvg-card-msrp">$${g.msrp.toFixed(2)}</span>` : ''}
         </div>
