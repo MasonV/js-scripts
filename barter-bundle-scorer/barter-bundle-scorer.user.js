@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      6.2.1
+// @version      6.3.0
 // @description  Full-page bundle evaluation dashboard with per-game scoring, card grid, stats dashboard, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -16,7 +16,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const SCRIPT_VERSION = '6.2.1';
+  const SCRIPT_VERSION = '6.3.0';
   console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
 
   // ═══════════════════════════════════════
@@ -313,14 +313,13 @@
     .bvg-card.bvg-card-owned { opacity: .5; }
     .bvg-card.bvg-card-dlc { opacity: .45; border-style: dashed; }
     .bvg-card-img-wrap {
-      position: relative; overflow: hidden;
+      overflow: hidden;
       background: #161b22; min-height: 56px;
     }
     .bvg-card-img {
-      position: absolute; top: 0; left: 0;
       width: 100%; height: 100%;
-      object-fit: contain; object-position: center;
-      background: #161b22; display: block;
+      object-fit: cover; object-position: center;
+      display: block;
     }
     .bvg-card-img-placeholder { min-height: 56px; background: #161b22; }
     .bvg-card-body {
@@ -371,6 +370,13 @@
       font-weight: 600; letter-spacing: 0; text-shadow: none; color: #8b949e;
     }
     .bvg-card-msrp { font-weight: 600; font-size: 12px; color: #8b949e; }
+    .bvg-card-steam {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 10px; font-weight: 600; color: #8b949e;
+      background: #161b22; border: 1px solid #30363d; border-radius: 4px;
+      padding: 2px 6px; text-decoration: none; transition: all .15s;
+    }
+    .bvg-card-steam:hover { color: #c9d1d9; border-color: #58a6ff; text-decoration: none; }
 
     /* ── Tier sections in card view ── */
     .bvg-tier-section {
@@ -915,8 +921,11 @@
     const imgEl = tr.querySelector('img[src*="steam"], img[src*="cdn"], img[src*="capsule"], img[src*="header"]')
       || tr.querySelector('img');
     const imgSrc = imgEl ? imgEl.src : null;
+    // Extract Steam store link if available (for per-card Steam button)
+    const steamA = tr.querySelector('a[href*="store.steampowered.com/app/"]');
+    const steamUrl = steamA ? steamA.href : null;
     console.log(`[BVG] ${title}: type=${itemType} wish=${wishlistedDOM} rating=${ratingPct}% reviews=${reviews} msrp=${msrp} bundled=${bundledTimes}`);
-    return { title, ratingPct, reviews, msrp, bundledTimes, ownedDOM, wishlistedDOM, itemType, tr, reviewCell, imgSrc };
+    return { title, ratingPct, reviews, msrp, bundledTimes, ownedDOM, wishlistedDOM, itemType, tr, reviewCell, imgSrc, steamUrl };
   }
 
   // ═══════════════════════════════════════
@@ -1203,12 +1212,13 @@
     if (wishMatch) meta.wishlistInfo = wishMatch[1].trim();
 
     // Buy links: anchors that point to known stores or external bundle pages
+    // Per-game Steam links are now on individual cards, so exclude
+    // store.steampowered.com from the header buy links
     const storeSelectors = [
       'a[href*="fanatical.com"]',
       'a[href*="humblebundle.com"]',
       'a[href*="indiegala.com"]',
       'a[href*="groupees.com"]',
-      'a[href*="store.steampowered.com"]',
       'a[href*="steamgifts.com"]',
       'a[href*="reddit.com"]',
     ];
@@ -1218,7 +1228,6 @@
       'humblebundle.com': 'Humble Bundle',
       'indiegala.com': 'IndieGala',
       'groupees.com': 'Groupees',
-      'store.steampowered.com': 'Steam Store',
       'steamgifts.com': 'SteamGifts',
       'reddit.com': 'Reddit',
     };
@@ -1668,6 +1677,7 @@
           bundledTimes: g.bundledTimes,
           owned: os.has(g.title),
           wishlisted: g.wishlistedDOM,
+          steamUrl: g.steamUrl || null,
         })),
       };
       const json = JSON.stringify(exportData, null, 2);
@@ -1830,6 +1840,7 @@
           ${tags ? `<div class="bvg-card-tags">${tags}</div>` : ''}
         </div>
         <div class="bvg-card-right">
+          ${g.steamUrl ? `<a class="bvg-card-steam" href="${escHtml(g.steamUrl)}" target="_blank" title="View on Steam">Steam</a>` : ''}
           <div class="${scoreClass}" style="${scoreBgStyle}" title="${escHtml(formatBreakdown(g.breakdown))}">
             ${scoreLabel}
           </div>
