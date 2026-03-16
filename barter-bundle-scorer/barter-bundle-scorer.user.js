@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      6.4.0
+// @version      6.4.1
 // @description  Full-page bundle evaluation dashboard with per-game scoring, card grid, stats dashboard, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -16,7 +16,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const SCRIPT_VERSION = '6.4.0';
+  const SCRIPT_VERSION = '6.4.1';
   console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
 
   // ═══════════════════════════════════════
@@ -318,7 +318,7 @@
     }
     .bvg-card-img {
       width: 100%; height: 100%;
-      object-fit: cover; object-position: center;
+      object-fit: cover; object-position: left center;
       display: block;
     }
     .bvg-card-img-placeholder { min-height: 56px; background: #161b22; }
@@ -1508,7 +1508,7 @@
         return `<div class="bvg-tier-strip-item">
           <div class="bvg-tsi-label">${escHtml(t.label || t.name)}</div>
           <div class="bvg-tsi-price">${fmtPrice || '—'}</div>
-          <div class="bvg-tsi-detail">${tierGames.length} games${pricePerGame ? ` &middot; ${pricePerGame}` : ''}${tierSaved ? ` &middot; ${tierSaved}` : ''}</div>
+          <div class="bvg-tsi-detail">${tierGames.length} game${tierGames.length !== 1 ? 's' : ''}${pricePerGame ? ` &middot; ${pricePerGame}` : ''}${tierSaved ? ` &middot; ${tierSaved}` : ''}</div>
           <div class="bvg-tsi-detail">Avg score: <strong style="color:${avgColor}">${tierAvg.toFixed(0)}</strong> &middot; MSRP: $${tierMsrp.toFixed(2)}</div>
         </div>`;
       }).join('');
@@ -1961,7 +1961,7 @@
 
         // Build stat chips for the section header
         const statChips = [];
-        statChips.push(`<span class="bvg-ts-stat-val">${tierGames.length}</span> games`);
+        statChips.push(`<span class="bvg-ts-stat-val">${tierGames.length}</span> game${tierGames.length !== 1 ? 's' : ''}`);
         statChips.push(`Avg <span class="bvg-ts-stat-val" style="color:${avgColor}">${tierAvg.toFixed(0)}</span>`);
         if (pricePerGame) statChips.push(`<span class="bvg-ts-stat-val">${pricePerGame}</span>`);
         statChips.push(`MSRP <span class="bvg-ts-stat-val">$${tierMsrp.toFixed(0)}</span>`);
