@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      6.4.1
+// @version      6.5.0
 // @description  Full-page bundle evaluation dashboard with per-game scoring, card grid, stats dashboard, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -16,7 +16,7 @@
 // ==/UserScript==
 (function () {
   'use strict';
-  const SCRIPT_VERSION = '6.4.1';
+  const SCRIPT_VERSION = '6.5.0';
   console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
 
   // ═══════════════════════════════════════
@@ -300,7 +300,7 @@
     }
     .bvg-card {
       display: grid;
-      grid-template-columns: 160px 1fr auto;
+      grid-template-columns: minmax(180px, 280px) 1fr auto;
       gap: 0;
       align-items: stretch;
       background: #0d1117;
@@ -327,7 +327,7 @@
       display: flex; flex-direction: column; justify-content: center;
     }
     .bvg-card-title {
-      font-size: 14px; font-weight: 600; color: #e6edf3;
+      font-size: 16px; font-weight: 700; color: #e6edf3;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .bvg-card-title a { color: inherit; text-decoration: none; }
@@ -371,12 +371,13 @@
     }
     .bvg-card-msrp { font-weight: 600; font-size: 12px; color: #8b949e; }
     .bvg-card-steam {
-      display: inline-flex; align-items: center; gap: 3px;
-      font-size: 10px; font-weight: 600; color: #8b949e;
+      display: inline-flex; align-items: center; justify-content: center;
+      color: #8b949e;
       background: #161b22; border: 1px solid #30363d; border-radius: 4px;
-      padding: 2px 6px; text-decoration: none; transition: all .15s;
+      padding: 3px 5px; text-decoration: none; transition: all .15s;
     }
     .bvg-card-steam:hover { color: #c9d1d9; border-color: #58a6ff; text-decoration: none; }
+    .bvg-card-steam svg { width: 16px; height: 16px; fill: currentColor; }
 
     /* ── Tier sections in card view ── */
     .bvg-tier-section {
@@ -529,7 +530,7 @@
     @media (max-width: 768px) {
       #bvg-app { padding: 8px 16px; }
       .bvg-cards { grid-template-columns: 1fr; }
-      .bvg-card { grid-template-columns: 120px 1fr auto; }
+      .bvg-card { grid-template-columns: minmax(100px, 160px) 1fr auto; }
       .bvg-header { flex-direction: column; align-items: flex-start; }
       .bvg-toolbar { flex-direction: column; align-items: stretch; }
       .bvg-toolbar input[type="text"] { width: 100%; }
@@ -1877,7 +1878,7 @@
           ${tags ? `<div class="bvg-card-tags">${tags}</div>` : ''}
         </div>
         <div class="bvg-card-right">
-          ${g.steamUrl ? `<a class="bvg-card-steam" href="${escHtml(g.steamUrl)}" target="_blank" title="View on Steam">Steam</a>` : ''}
+          ${g.steamUrl ? `<a class="bvg-card-steam" href="${escHtml(g.steamUrl)}" target="_blank" title="View on Steam" aria-label="View on Steam"><svg viewBox="0 0 256 259"><path d="M127.8 0C58.5 0 1.6 52.9.1 121.1l68.9 28.5c5.8-4 12.8-6.3 20.4-6.3.7 0 1.3 0 2 0l30.5-44.2v-.6c0-27.4 22.3-49.7 49.7-49.7s49.7 22.3 49.7 49.7-22.3 49.7-49.7 49.7h-1.2l-43.5 31c0 .8.1 1.6.1 2.4 0 20.6-16.7 37.3-37.3 37.3-18 0-33-12.8-36.5-29.8L2.7 164.6C17.7 218 68 258.2 127.8 258.2c70.6 0 127.8-57.2 127.8-127.8V129C255.6 57.8 198.4 0 127.8 0zM80.4 209.4l-15.7-6.5c2.8 5.8 7.5 10.7 13.8 13.5 13.7 5.7 29.4-.8 35.1-14.5 2.7-6.6 2.8-13.9.1-20.6-2.7-6.6-7.8-11.8-14.4-14.5-6.5-2.7-13.4-2.5-19.5-.3l16.2 6.7c10.1 4.2 14.9 15.8 10.7 26-4.2 10.1-15.8 14.9-26 10.7l-.3-.5zm141.2-60.8c0-18.3-14.9-33.1-33.1-33.1-18.3 0-33.1 14.9-33.1 33.1 0 18.3 14.9 33.1 33.1 33.1 18.2 0 33.1-14.8 33.1-33.1zm-57.9.1c0-13.7 11.1-24.8 24.8-24.8s24.8 11.1 24.8 24.8-11.1 24.8-24.8 24.8-24.8-11.2-24.8-24.8z"/></svg></a>` : ''}
           <div class="${scoreClass}" style="${scoreBgStyle}" title="${escHtml(formatBreakdown(g.breakdown))}" role="img" aria-label="Score: ${scoreLabel}${isUnrated ? '' : ` (${scoreTierLabel(g.score)})`}">
             ${scoreLabel}
             ${isUnrated ? '' : `<div class="bvg-score-tier">${scoreTierLabel(g.score)}</div>`}

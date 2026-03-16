@@ -106,6 +106,30 @@ Synced from [Notion: AI Agent TODO Backlog](https://www.notion.so/faceefca3f034f
   - Added settings: clone(SETTINGS) to JSON export for scoring reproducibility.
   - Completed: 2026-03-15
 
+- [ ] **Add $/savings stat card to header dashboard** `feature`
+  - Add a stat card showing dollar savings and % saved (unowned MSRP vs bundle cost) prominently in the stats row.
+  - Effort: 4 | Simplicity: 4 | Efficiency: 1 | Safety: 5 | Value: 4
+
+- [ ] **Fix tier pricing extraction from classic view** `bug`
+  - Tier prices not correctly detected. Barter uses "N for X USD" format in tier headers (e.g., "1 for 1 USD", "5 for 2.99 USD"). Current regex only matches "$X.XX". Need to parse the "N for X USD" pattern.
+  - Effort: 3 | Simplicity: 3 | Efficiency: 3 | Safety: 3 | Value: 4
+
+- [ ] **Add collapsible/hideable stat cards in header** `feature`
+  - Allow users to hide individual stat cards in the header dashboard to reduce visual noise and focus on what matters to them.
+  - Effort: 3 | Simplicity: 3 | Efficiency: 1 | Safety: 5 | Value: 3
+
+- [ ] **Simplify tier pricing strip — remove unnamed tiers** `debt`
+  - Tier strip shows confusing cards for tiers without prices (just dashes and game counts). Only show tiers that have detected pricing. Add a "View all tiers" toggle if needed.
+  - Effort: 4 | Simplicity: 4 | Efficiency: 1 | Safety: 5 | Value: 3
+
+- [ ] **Add spider/radar chart for score breakdown** `feature`
+  - Show a visual breakdown of how each scoring dimension contributes (rating, confidence, value, bundle value, wishlist, rebundle penalty). Helps users understand why a game scored the way it did.
+  - Effort: 2 | Simplicity: 2 | Efficiency: 1 | Safety: 5 | Value: 4
+
+- [ ] **Expand unit test coverage for pure functions** `test`
+  - scoring.test.js missing coverage for scoreColor, scoreBg, ratingColor, formatBreakdown, formatTierPrice. Missing edge cases for existing tests.
+  - Effort: 3 | Simplicity: 4 | Efficiency: 2 | Safety: 3 | Value: 3
+
 - [ ] **Optimize re-render for large bundles** `performance`
   - Full innerHTML rebuild on every filter/sort/search. Causes jank on 200+ game bundles.
   - Effort: 2 | Simplicity: 2 | Efficiency: 4 | Safety: 2 | Value: 3
