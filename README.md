@@ -70,6 +70,25 @@ A userscript for [Bonjourr](https://bonjourr.fr) new tab pages that provides a q
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/bonjourr-quick-add/bonjourr-quick-add.meta.js`
 
+### `yt-music-redirect/`
+
+A userscript for [YouTube](https://www.youtube.com) that automatically redirects music videos to [YouTube Music](https://music.youtube.com).
+
+**Features:**
+
+- Detects videos categorized as "Music" via YouTube's embedded player response
+- Redirects to the equivalent YouTube Music URL (`music.youtube.com/watch?v=...`)
+- Handles both initial page loads and YouTube's SPA client-side navigation
+- Fallback fetch for cases where the player response is stale after navigation
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js`
+
 ## Update workflow
 
 1. Edit `barter-bundle-scorer/barter-bundle-scorer.user.js`.
