@@ -51,24 +51,9 @@ A userscript for [llm-stats.com](https://llm-stats.com) leaderboard pages that a
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.meta.js`
 
-### `bonjourr-quick-add/`
+### `bonjourr-quick-add/` *(abandoned)*
 
-A userscript for [Bonjourr](https://bonjourr.fr) new tab pages that provides a quick interface for adding shortcuts with automatic page title fetching.
-
-**Features:**
-
-- Floating "+" button and Alt+A keyboard shortcut to open the add-link modal
-- Automatic page title detection (og:title, then `<title>`, then hostname fallback)
-- Submits through Bonjourr's native add-link form for full compatibility
-- Works on Chrome/Firefox extensions and the online web version
-
-**Install / download:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/bonjourr-quick-add/bonjourr-quick-add.user.js`
-
-**Metadata update checks:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/bonjourr-quick-add/bonjourr-quick-add.meta.js`
+A userscript for [Bonjourr](https://bonjourr.fr) new tab pages that provides a quick interface for adding shortcuts with automatic page title fetching. **Not functional** — Firefox's extension security model blocks userscript injection into `moz-extension://` pages. Kept in the repo in case browser APIs or Bonjourr change to make this viable. See [`REPORT.md`](bonjourr-quick-add/REPORT.md) for the full post-mortem.
 
 ### `yt-music-redirect/`
 
