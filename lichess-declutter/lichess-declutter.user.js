@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Lichess Declutter
 // @namespace    lichess-declutter
-// @version      1.0.0
-// @description  Strips the lichess homepage down to essentials: one bullet, one blitz, puzzle, and articles
+// @version      1.1.0
+// @description  Strips the lichess homepage down to essentials: quick play, puzzle, and articles in a single screen
 // @match        *://lichess.org/
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
@@ -21,8 +21,8 @@
 
 	const LOG_PREFIX = '[Lichess Declutter]'
 
-	// Only these two time controls survive the cull
-	const KEEP_POOLS = new Set(['2+1', '3+2'])
+	// One per speed category — nudges toward longer thinking
+	const KEEP_POOLS = new Set(['2+1', '10+0', '30+0'])
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  LOGGING
@@ -37,11 +37,13 @@
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
-	//  CSS — HIDE UNWANTED SECTIONS
+	//  CSS — HIDE UNWANTED SECTIONS & COMPRESS LAYOUT
 	// ═══════════════════════════════════════════════════════════════════
 
 	// Injected at document-start so elements never paint
 	GM_addStyle(`
+		/* ─── Hidden sections ─── */
+
 		/* Streamers */
 		.lobby__streams { display: none !important; }
 
@@ -51,11 +53,14 @@
 		/* "About Lichess" blurb in sidebar */
 		.about-side { display: none !important; }
 
-		/* Lobby / Correspondence tabs — keep only Quick pairing visible */
+		/* Lobby / Correspondence tabs — Quick pairing is the default */
 		.lobby__app .tabs-horiz { display: none !important; }
 
 		/* Create lobby game / Challenge a friend / Play against computer */
 		.lobby__start { display: none !important; }
+
+		/* Seekers table (the lobby hook list beneath pools) */
+		.lobby__table { display: none !important; }
 
 		/* Live game preview */
 		.lobby__tv { display: none !important; }
@@ -66,59 +71,77 @@
 		/* Announcement feed */
 		.lobby__feed { display: none !important; }
 
-		/* Open tournaments table */
+		/* Open tournaments + simuls table */
+		.lobby__tournaments-simuls { display: none !important; }
+
+		/* Fallback: also catch the individual containers */
+		.lobby__tournaments { display: none !important; }
 		.lobby__timeline { display: none !important; }
 
-		/* ─── Layout adjustments ─── */
+		/* ─── Collapse the now-empty sidebar ─── */
+		.lobby__side { display: none !important; }
 
-		/* Collapse the now-empty sidebar so content can breathe */
-		.lobby__side {
-			display: none !important;
-		}
+		/* ─── Single-column compressed layout ─── */
 
-		/* Let the main lobby fill width without the sidebar */
 		main.lobby {
 			display: flex !important;
 			flex-direction: column !important;
 			align-items: center !important;
-			max-width: 900px !important;
+			max-width: 800px !important;
 			margin: 0 auto !important;
+			padding: 0.5em 1em !important;
+			/* Override lichess grid so our flex takes over */
+			grid-template-columns: 1fr !important;
 		}
 
-		/* Pool buttons — center them and give them room */
+		/* Pool buttons — compact row */
 		.lobby__app {
 			width: 100% !important;
 			max-width: 600px !important;
 			order: 1 !important;
+			margin-bottom: 0 !important;
 		}
 
 		.lpools {
 			display: flex !important;
 			justify-content: center !important;
-			gap: 1em !important;
+			gap: 0.75em !important;
 			flex-wrap: wrap !important;
+			padding: 0.5em 0 !important;
 		}
 
-		/* Puzzle of the day — bring it up right after the pool buttons */
+		/* Puzzle of the day — compact, right after pools */
 		.lobby__puzzle {
 			order: 2 !important;
 			width: 100% !important;
 			max-width: 600px !important;
-			margin-top: 1.5em !important;
+			margin: 0.75em 0 !important;
 		}
 
-		/* Blog / articles — prominent placement below puzzle */
+		/* Shrink the puzzle board slightly to save vertical space */
+		.lobby__puzzle .mini-board {
+			max-height: 200px !important;
+		}
+
+		/* Blog / articles — full width below puzzle */
 		.lobby__blog {
 			order: 3 !important;
 			width: 100% !important;
-			max-width: 900px !important;
-			margin-top: 1.5em !important;
+			max-width: 800px !important;
+			margin: 0.5em 0 !important;
+		}
+
+		/* Compress article card heights */
+		.lobby__blog .ublog-post-card__image {
+			max-height: 150px !important;
+			object-fit: cover !important;
 		}
 
 		/* Footer links */
 		.lobby__about {
 			order: 4 !important;
 			width: 100% !important;
+			margin-top: 0.5em !important;
 		}
 
 		/* Player counter injected into the header */
@@ -138,9 +161,24 @@
 	 * Hides pool buttons that aren't in KEEP_POOLS.
 	 * Pool buttons are rendered async by the lobby JS module,
 	 * so we observe the container and filter when children appear.
+	 *
+	 * Tries two selector strategies:
+	 *  1. [data-id] attributes (lichess's pool button format)
+	 *  2. Text content matching "X+Y" patterns as fallback
 	 */
 	function filterPools(container) {
-		const pools = container.querySelectorAll('[data-id]')
+		let pools = container.querySelectorAll('[data-id]')
+
+		if (pools.length > 0) {
+			filterByDataId(pools)
+			return
+		}
+
+		// Fallback: lichess may render pools as divs/buttons without data-id
+		filterByTextContent(container)
+	}
+
+	function filterByDataId(pools) {
 		let kept = 0
 		let hidden = 0
 
@@ -150,12 +188,41 @@
 				pool.style.display = 'none'
 				hidden++
 			} else {
+				pool.style.display = ''
 				kept++
 			}
 		})
 
 		if (kept > 0 || hidden > 0) {
-			log(`Pool filter: kept ${kept}, hidden ${hidden}`)
+			log(`Pool filter (data-id): kept ${kept}, hidden ${hidden}`)
+		}
+	}
+
+	function filterByTextContent(container) {
+		// Each pool button shows text like "2+1\nBullet" — match the time control part
+		const timePattern = /^(\d+\+\d+)$/
+		const children = container.children
+		let kept = 0
+		let hidden = 0
+
+		for (const child of children) {
+			const text = child.textContent.trim()
+			const lines = text.split('\n').map((l) => l.trim())
+			const timeControl = lines.find((l) => timePattern.test(l))
+
+			if (timeControl) {
+				if (!KEEP_POOLS.has(timeControl)) {
+					child.style.display = 'none'
+					hidden++
+				} else {
+					child.style.display = ''
+					kept++
+				}
+			}
+		}
+
+		if (kept > 0 || hidden > 0) {
+			log(`Pool filter (text): kept ${kept}, hidden ${hidden}`)
 		}
 	}
 
