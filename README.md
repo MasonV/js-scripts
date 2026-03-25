@@ -55,6 +55,26 @@ A userscript for [llm-stats.com](https://llm-stats.com) leaderboard pages that a
 
 A userscript for [Bonjourr](https://bonjourr.fr) new tab pages that provides a quick interface for adding shortcuts with automatic page title fetching. **Not functional** — Firefox's extension security model blocks userscript injection into `moz-extension://` pages. Kept in the repo in case browser APIs or Bonjourr change to make this viable. See [`REPORT.md`](bonjourr-quick-add/REPORT.md) for the full post-mortem.
 
+### `lichess-declutter/`
+
+A userscript for [lichess.org](https://lichess.org) that strips the homepage down to essentials for casual play.
+
+**Features:**
+
+- Removes streamers, tournaments, live game preview, donate/swag, and announcement feed
+- Filters time controls to only 2+1 Bullet and 3+2 Blitz
+- Removes lobby/correspondence tabs and game creation buttons (lobby, challenge, computer)
+- Moves live player counter into the header bar
+- Reflows layout to prioritize puzzle of the day and blog articles
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/lichess-declutter/lichess-declutter.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/lichess-declutter/lichess-declutter.meta.js`
+
 ### `yt-music-redirect/`
 
 A userscript for [YouTube](https://www.youtube.com) that automatically redirects music videos to [YouTube Music](https://music.youtube.com).
