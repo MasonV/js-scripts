@@ -9,6 +9,8 @@
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/lichess-declutter/lichess-declutter.meta.js
 // @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/lichess-declutter/lichess-declutter.user.js
 // @grant        GM_addStyle
+// @grant        GM_xmlhttpRequest
+// @connect      raw.githubusercontent.com
 // @run-at       document-start
 // ==/UserScript==
 
@@ -20,6 +22,11 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[Lichess Declutter]'
+	const SCRIPT_VERSION = '1.2.0'
+	const META_URL =
+		'https://raw.githubusercontent.com/MasonV/js-scripts/main/lichess-declutter/lichess-declutter.meta.js'
+	const DOWNLOAD_URL =
+		'https://raw.githubusercontent.com/MasonV/js-scripts/main/lichess-declutter/lichess-declutter.user.js'
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  LOGGING
@@ -138,6 +145,24 @@
 			margin-right: 1em;
 			white-space: nowrap;
 		}
+
+		/* Update banner */
+		#declutter-update-banner {
+			position: fixed;
+			top: 0;
+			left: 0;
+			right: 0;
+			z-index: 9999;
+			background: #3b82f6;
+			color: #fff;
+			text-align: center;
+			padding: 0.5em 1em;
+			font-size: 0.9em;
+			cursor: pointer;
+		}
+		#declutter-update-banner:hover {
+			background: #2563eb;
+		}
 	`)
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -183,11 +208,52 @@
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
+	//  UPDATE CHECK
+	// ═══════════════════════════════════════════════════════════════════
+
+	function checkForUpdate() {
+		try {
+			GM_xmlhttpRequest({
+				method: 'GET',
+				url: META_URL + '?_=' + Date.now(),
+				onload(resp) {
+					if (resp.status !== 200) return
+					const match = resp.responseText.match(/@version\s+(\S+)/)
+					if (!match) return
+					const remote = match[1]
+					if (remote !== SCRIPT_VERSION) {
+						log(`Update available: v${SCRIPT_VERSION} → v${remote}`)
+						showUpdateBanner(remote)
+					} else {
+						log(`Up to date (v${SCRIPT_VERSION})`)
+					}
+				},
+				onerror() {
+					warn('Update check failed (network error)')
+				},
+			})
+		} catch (e) {
+			warn('Update check unavailable:', e)
+		}
+	}
+
+	function showUpdateBanner(remote) {
+		const banner = document.createElement('div')
+		banner.id = 'declutter-update-banner'
+		banner.textContent = `Lichess Declutter v${remote} available (current: v${SCRIPT_VERSION}) — click to update`
+		banner.addEventListener('click', () => {
+			window.open(DOWNLOAD_URL, '_blank')
+		})
+		document.body.prepend(banner)
+	}
+
+	// ═══════════════════════════════════════════════════════════════════
 	//  INIT
 	// ═══════════════════════════════════════════════════════════════════
 
 	function init() {
 		moveCounterToHeader()
+		checkForUpdate()
 		log('Initialized — pool filtering via CSS, layout via grid')
 	}
 
