@@ -62,7 +62,7 @@ A userscript for [lichess.org](https://lichess.org) that strips the homepage dow
 **Features:**
 
 - Removes streamers, tournaments, live game preview, donate/swag, and announcement feed
-- Filters time controls to only 2+1 Bullet and 3+2 Blitz
+- Filters time controls to only 2+1 Bullet, 10+0 Rapid, and 30+0 Classical
 - Removes lobby/correspondence tabs and game creation buttons (lobby, challenge, computer)
 - Moves live player counter into the header bar
 - Reflows layout to prioritize puzzle of the day and blog articles

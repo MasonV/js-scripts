@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Lichess Declutter
 // @namespace    lichess-declutter
-// @version      1.0.0
-// @description  Strips the lichess homepage down to essentials: one bullet, one blitz, puzzle, and articles
+// @version      1.1.0
+// @description  Strips the lichess homepage down to essentials: quick play, puzzle, and articles in a single screen
 // @match        *://lichess.org/
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
