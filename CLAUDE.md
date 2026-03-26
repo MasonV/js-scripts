@@ -45,6 +45,53 @@ Use `localStorage` with versioned key names (e.g., `bvg_scorer_settings_v2`). Wh
 - **Paired row groups** — Barter uses `rowspan=2` (game row + bargraph row). Always move these as a unit during sorting or DOM manipulation.
 - **Colspan fixup** — when inserting a new column (e.g., Score), decrement `colspan` on spanning header cells rather than adding new `<td>`s.
 
+### In-Page Update Check
+
+All scripts should include an in-page update check that runs on load. This uses `GM_xmlhttpRequest` to fetch the `.meta.js` from GitHub, compares `@version`, and shows a clickable banner if an update is available. Required metadata grants:
+
+```
+// @grant        GM_xmlhttpRequest
+// @connect      raw.githubusercontent.com
+```
+
+**Sandbox caveat:** Any `@grant` other than `none` puts the script in Tampermonkey's sandbox. If the script also accesses page-context globals (e.g., YouTube's `ytInitialPlayerResponse`), add `// @grant unsafeWindow` and use `unsafeWindow` instead of `window` for those accesses.
+
+Standard implementation pattern:
+
+```js
+const SCRIPT_VERSION = '1.0.0'
+const META_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/<name>/<name>.meta.js'
+const DOWNLOAD_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/<name>/<name>.user.js'
+
+function checkForUpdate() {
+    try {
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: META_URL + '?_=' + Date.now(),
+            onload(resp) {
+                if (resp.status !== 200) return
+                const match = resp.responseText.match(/@version\s+(\S+)/)
+                if (!match) return
+                const remote = match[1]
+                if (remote !== SCRIPT_VERSION) {
+                    log(`Update available: v${SCRIPT_VERSION} → v${remote}`)
+                    showUpdateBanner(remote)
+                } else {
+                    log(`Up to date (v${SCRIPT_VERSION})`)
+                }
+            },
+            onerror() {
+                warn('Update check failed (network error)')
+            },
+        })
+    } catch (e) {
+        warn('Update check unavailable:', e)
+    }
+}
+```
+
+Call `checkForUpdate()` at the top of the initialization block. The banner should be a fixed-position element at the top of the page that opens `DOWNLOAD_URL` on click. Cache-bust the meta fetch with `?_=` + timestamp.
+
 ## Version & Deployment
 
 1. Edit the `.user.js` file.
@@ -62,7 +109,8 @@ When writing **pure functions** (math, scoring, data transformation), keep them 
 ## Adding a New Script
 
 1. Create a folder: `<script-name>/`
-2. Add `<script-name>.user.js` with a complete Tampermonkey metadata block (`@name`, `@version`, `@match`, `@grant`, `@updateURL`, `@downloadURL`).
+2. Add `<script-name>.user.js` with a complete Tampermonkey metadata block (`@name`, `@version`, `@match`, `@grant GM_xmlhttpRequest`, `@connect raw.githubusercontent.com`, `@updateURL`, `@downloadURL`).
 3. Add `<script-name>.meta.js` with matching metadata (no script body).
-4. Update `README.md` with install/update URLs and a brief description.
-5. Use the section divider and logging prefix conventions documented above.
+4. Include the in-page update check pattern (see above).
+5. Update `README.md` with install/update URLs and a brief description.
+6. Use the section divider and logging prefix conventions documented above.
