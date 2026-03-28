@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.2.0
+// @version      1.3.0
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.2.0'
+	const SCRIPT_VERSION = '1.3.0'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =
@@ -32,9 +32,7 @@
 	const POLL_INTERVAL_MS = 200
 	const CHANNEL_LIST_KEY = 'yt_music_redirect_channels_v1'
 	const CHANNEL_BLOCKLIST_KEY = 'yt_music_redirect_blocklist_v1'
-	const CONTAINER_ID = 'ytmr-redirect-bar'
 	const UPDATE_BANNER_ID = 'ytmr-update-banner'
-	const COLLAPSE_DELAY_MS = 5000
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  LOGGING
@@ -280,7 +278,8 @@
 	//  UI
 	// ═══════════════════════════════════════════════════════════════════
 
-	let collapseTimer = null
+	const MENU_BTN_ID = 'ytmr-menu-btn'
+	const DROPDOWN_ID = 'ytmr-dropdown'
 
 	function injectStyles() {
 		if (document.getElementById('ytmr-styles')) return
@@ -306,232 +305,233 @@
 				background: #1976d2;
 			}
 
-			/* ── Expanded bar ── */
-			#${CONTAINER_ID} {
-				z-index: 9999;
+			/* ── Masthead icon button ── */
+			#${MENU_BTN_ID} {
+				position: relative;
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				width: 40px;
+				height: 40px;
+				border: none;
+				border-radius: 50%;
+				background: transparent;
+				color: #fff;
+				font-size: 20px;
+				cursor: pointer;
+				transition: background 0.15s;
+				vertical-align: middle;
+			}
+			#${MENU_BTN_ID}:hover {
+				background: rgba(255, 255, 255, 0.1);
+			}
+			#${MENU_BTN_ID}.ytmr-open {
+				background: rgba(255, 255, 255, 0.15);
+			}
+
+			/* ── Dropdown menu ── */
+			#${DROPDOWN_ID} {
+				display: none;
+				position: absolute;
+				top: 100%;
+				right: 0;
+				margin-top: 8px;
+				min-width: 240px;
+				background: #282828;
+				border: 1px solid #444;
+				border-radius: 12px;
+				padding: 8px 0;
+				box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+				font-family: 'YouTube Sans', 'Roboto', sans-serif;
+				font-size: 14px;
+				color: #e0e0e0;
+				z-index: 10001;
+			}
+			#${DROPDOWN_ID}.ytmr-visible {
+				display: block;
+			}
+			#${DROPDOWN_ID} .ytmr-menu-item {
 				display: flex;
 				align-items: center;
-				gap: 8px;
-				padding: 6px 12px;
-				background: #1a1a2e;
-				border: 1px solid #333;
-				border-radius: 8px;
-				font-family: 'YouTube Sans', 'Roboto', sans-serif;
-				font-size: 13px;
-				color: #e0e0e0;
-				box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-				transition: opacity 0.2s, transform 0.2s;
-				margin-top: 8px;
-				margin-bottom: 4px;
-			}
-			#${CONTAINER_ID}.ytmr-collapsed {
-				display: none;
-			}
-			#${CONTAINER_ID} button {
+				gap: 12px;
+				width: 100%;
+				padding: 10px 16px;
 				border: none;
-				border-radius: 6px;
-				padding: 6px 12px;
-				font-size: 13px;
-				cursor: pointer;
-				font-family: inherit;
-				transition: background 0.15s;
-			}
-			.ytmr-redirect-btn {
-				background: #ff0050;
-				color: white;
-			}
-			.ytmr-redirect-btn:hover {
-				background: #e00048;
-			}
-			.ytmr-channel-btn {
-				background: #333;
+				background: transparent;
 				color: #e0e0e0;
+				font-size: 14px;
+				font-family: inherit;
+				cursor: pointer;
+				text-align: left;
+				transition: background 0.1s;
+				box-sizing: border-box;
 			}
-			.ytmr-channel-btn:hover {
-				background: #444;
+			#${DROPDOWN_ID} .ytmr-menu-item:hover {
+				background: rgba(255, 255, 255, 0.1);
 			}
-			.ytmr-channel-btn.ytmr-active {
-				background: #2d5a27;
+			#${DROPDOWN_ID} .ytmr-menu-item .ytmr-icon {
+				flex-shrink: 0;
+				width: 20px;
+				text-align: center;
+				font-size: 16px;
+			}
+			#${DROPDOWN_ID} .ytmr-menu-item.ytmr-redirect-item {
+				color: #ff4e7a;
+			}
+			#${DROPDOWN_ID} .ytmr-menu-item.ytmr-active {
 				color: #90ee90;
 			}
-			.ytmr-channel-btn.ytmr-active:hover {
-				background: #3a6a33;
-			}
-			.ytmr-block-btn {
-				background: #555;
-				color: #e0e0e0;
-			}
-			.ytmr-block-btn:hover {
-				background: #666;
-			}
-			.ytmr-close-btn {
-				background: transparent;
-				color: #888;
-				padding: 4px 6px;
-				font-size: 16px;
-				line-height: 1;
-			}
-			.ytmr-close-btn:hover {
-				color: #fff;
-			}
-
-			/* ── Collapsed pill ── */
-			#ytmr-pill {
-				display: none;
-				z-index: 9999;
-				padding: 6px 10px;
-				background: #1a1a2e;
-				border: 1px solid #333;
-				border-radius: 8px;
-				font-size: 16px;
-				cursor: pointer;
-				box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-				transition: background 0.15s;
-				margin-top: 8px;
-				margin-bottom: 4px;
-			}
-			#ytmr-pill:hover {
-				background: #2a2a4e;
-			}
-			#ytmr-pill.ytmr-visible {
-				display: inline-block;
-			}
-
-			/* ── Wrapper anchored below player ── */
-			#ytmr-wrapper {
-				display: flex;
-				align-items: center;
-				gap: 8px;
+			#${DROPDOWN_ID} .ytmr-divider {
+				height: 1px;
+				background: #444;
+				margin: 4px 0;
 			}
 		`
 		document.head.appendChild(style)
 	}
 
 	/**
-	 * Finds a suitable anchor point below the video player and inserts
-	 * the wrapper there. Falls back to fixed positioning if the anchor
-	 * element isn't found.
+	 * Injects the ♫ icon button into the YouTube masthead, right before
+	 * the Create button / avatar area.
 	 */
-	function getOrCreateWrapper() {
-		let wrapper = document.getElementById('ytmr-wrapper')
-		if (wrapper) return wrapper
+	function getOrCreateMenuBtn() {
+		let btn = document.getElementById(MENU_BTN_ID)
+		if (btn) return btn
 
-		wrapper = document.createElement('div')
-		wrapper.id = 'ytmr-wrapper'
+		btn = document.createElement('button')
+		btn.id = MENU_BTN_ID
+		btn.textContent = '\u266B'
+		btn.title = 'YT Music Redirect'
+		btn.setAttribute('aria-label', 'YT Music Redirect menu')
 
-		// Insert above the #below element (info/comments) so it sits
-		// between the player and the video metadata
-		const below = document.querySelector('#below')
-		if (below && below.parentNode) {
-			below.parentNode.insertBefore(wrapper, below)
+		// Insert into the masthead end buttons (where Create + avatar live)
+		const buttonsContainer =
+			document.querySelector('ytd-masthead #end #buttons') ||
+			document.querySelector('ytd-masthead #end')
+		if (buttonsContainer) {
+			buttonsContainer.insertBefore(btn, buttonsContainer.firstChild)
 		} else {
-			// Fallback: fixed position if page structure isn't as expected
-			wrapper.style.cssText = 'position:fixed;top:56px;right:16px;'
-			document.body.appendChild(wrapper)
+			// Fallback: fixed position in top-right
+			btn.style.cssText = 'position:fixed;top:8px;right:60px;z-index:9999;'
+			document.body.appendChild(btn)
 		}
 
-		return wrapper
+		// Toggle dropdown on click
+		btn.addEventListener('click', (e) => {
+			e.stopPropagation()
+			const dropdown = document.getElementById(DROPDOWN_ID)
+			if (!dropdown) return
+			const isOpen = dropdown.classList.toggle('ytmr-visible')
+			btn.classList.toggle('ytmr-open', isOpen)
+		})
+
+		// Close dropdown when clicking outside
+		document.addEventListener('click', () => {
+			const dropdown = document.getElementById(DROPDOWN_ID)
+			if (dropdown) dropdown.classList.remove('ytmr-visible')
+			btn.classList.remove('ytmr-open')
+		})
+
+		return btn
 	}
 
 	function injectRedirectButton(videoId, channelId, channelName) {
-		removeRedirectButton()
+		removeDropdown()
 		injectStyles()
 
-		const wrapper = getOrCreateWrapper()
+		const menuBtn = getOrCreateMenuBtn()
 
-		// ── Expanded bar ──
-		const container = document.createElement('div')
-		container.id = CONTAINER_ID
+		// ── Build dropdown ──
+		const dropdown = document.createElement('div')
+		dropdown.id = DROPDOWN_ID
 
-		const redirectBtn = document.createElement('button')
-		redirectBtn.className = 'ytmr-redirect-btn'
-		redirectBtn.textContent = '\u266B Open in YT Music'
-		redirectBtn.addEventListener('click', () => redirectToMusic(videoId))
-		container.appendChild(redirectBtn)
+		// Prevent clicks inside dropdown from closing it
+		dropdown.addEventListener('click', (e) => e.stopPropagation())
 
-		// Channel auto-redirect toggle
+		// Open in YT Music
+		const redirectItem = document.createElement('button')
+		redirectItem.className = 'ytmr-menu-item ytmr-redirect-item'
+		redirectItem.innerHTML = '<span class="ytmr-icon">\u266B</span> Open in YT Music'
+		redirectItem.addEventListener('click', () => redirectToMusic(videoId))
+		dropdown.appendChild(redirectItem)
+
 		if (channelId) {
+			dropdown.appendChild(createDivider())
+
+			// Auto-redirect toggle
 			const displayName = channelName || 'this channel'
-			const channelBtn = document.createElement('button')
+			const channelItem = document.createElement('button')
 			const inList = isChannelInList(channelId)
 
-			function updateChannelBtn(active) {
-				channelBtn.className = `ytmr-channel-btn${active ? ' ytmr-active' : ''}`
-				channelBtn.textContent = active
-					? `\u2713 Auto-redirecting ${displayName}`
-					: `Auto-redirect ${displayName}`
+			function updateChannelItem(active) {
+				channelItem.className = `ytmr-menu-item${active ? ' ytmr-active' : ''}`
+				channelItem.innerHTML = active
+					? `<span class="ytmr-icon">\u2713</span> Auto-redirecting ${esc(displayName)}`
+					: `<span class="ytmr-icon">\u21BB</span> Auto-redirect ${esc(displayName)}`
 			}
 
-			updateChannelBtn(inList)
-
-			channelBtn.addEventListener('click', () => {
+			updateChannelItem(inList)
+			channelItem.addEventListener('click', () => {
 				if (isChannelInList(channelId)) {
 					removeChannel(channelId)
-					updateChannelBtn(false)
+					updateChannelItem(false)
 				} else {
 					addChannel(channelId, channelName)
-					updateChannelBtn(true)
+					updateChannelItem(true)
 				}
 			})
+			dropdown.appendChild(channelItem)
 
-			container.appendChild(channelBtn)
-		}
-
-		// "Not music" blocklist button
-		if (channelId) {
-			const displayName = channelName || 'this channel'
-			const blockBtn = document.createElement('button')
-			blockBtn.className = 'ytmr-block-btn'
-			blockBtn.textContent = `\u2715 Not music`
-			blockBtn.title = `Never show redirect for ${displayName}`
-			blockBtn.addEventListener('click', () => {
+			// Not music — blocklist
+			const blockItem = document.createElement('button')
+			blockItem.className = 'ytmr-menu-item'
+			blockItem.innerHTML = `<span class="ytmr-icon">\u2715</span> Not a music channel`
+			blockItem.title = `Never show redirect for ${displayName}`
+			blockItem.addEventListener('click', () => {
 				blockChannel(channelId, channelName)
 				removeRedirectButton()
 				log(`Blocked "${displayName}" — redirect UI removed`)
 			})
-			container.appendChild(blockBtn)
+			dropdown.appendChild(blockItem)
 		}
 
-		// Close / dismiss button (current video only)
-		const closeBtn = document.createElement('button')
-		closeBtn.className = 'ytmr-close-btn'
-		closeBtn.textContent = '\u00D7'
-		closeBtn.title = 'Dismiss for this video'
-		closeBtn.addEventListener('click', () => removeRedirectButton())
-		container.appendChild(closeBtn)
+		dropdown.appendChild(createDivider())
 
-		wrapper.appendChild(container)
+		// Dismiss for this video
+		const dismissItem = document.createElement('button')
+		dismissItem.className = 'ytmr-menu-item'
+		dismissItem.innerHTML = '<span class="ytmr-icon">\u00D7</span> Dismiss'
+		dismissItem.addEventListener('click', () => removeRedirectButton())
+		dropdown.appendChild(dismissItem)
 
-		// ── Collapsed pill ──
-		const pill = document.createElement('div')
-		pill.id = 'ytmr-pill'
-		pill.textContent = '\u266B'
-		pill.title = 'YT Music Redirect'
-		pill.addEventListener('click', () => {
-			container.classList.remove('ytmr-collapsed')
-			pill.classList.remove('ytmr-visible')
-			resetCollapseTimer(container, pill)
-		})
-		wrapper.appendChild(pill)
+		// Attach dropdown relative to the button
+		menuBtn.style.position = 'relative'
+		menuBtn.appendChild(dropdown)
 
-		// Start collapse timer
-		resetCollapseTimer(container, pill)
-
-		log('Redirect button injected')
+		log('Redirect menu injected into masthead')
 	}
 
-	function resetCollapseTimer(container, pill) {
-		if (collapseTimer) clearTimeout(collapseTimer)
-		collapseTimer = setTimeout(() => {
-			container.classList.add('ytmr-collapsed')
-			pill.classList.add('ytmr-visible')
-		}, COLLAPSE_DELAY_MS)
+	function createDivider() {
+		const d = document.createElement('div')
+		d.className = 'ytmr-divider'
+		return d
+	}
+
+	/** Escapes HTML entities in user-supplied text */
+	function esc(str) {
+		const el = document.createElement('span')
+		el.textContent = str
+		return el.innerHTML
+	}
+
+	function removeDropdown() {
+		document.getElementById(DROPDOWN_ID)?.remove()
 	}
 
 	function removeRedirectButton() {
-		if (collapseTimer) clearTimeout(collapseTimer)
-		collapseTimer = null
-		document.getElementById('ytmr-wrapper')?.remove()
+		removeDropdown()
+		const btn = document.getElementById(MENU_BTN_ID)
+		if (btn) btn.remove()
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
