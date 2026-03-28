@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess Declutter
 // @namespace    lichess-declutter
-// @version      1.2.0
+// @version      1.3.0
 // @description  Strips the lichess homepage down to essentials: quick play, puzzle, and articles in a single screen
 // @match        *://lichess.org/
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,8 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[Lichess Declutter]'
-	const SCRIPT_VERSION = '1.2.0'
+	const SCRIPT_VERSION = '1.3.0'
+	const STORAGE_KEY = 'lichess_declutter_hidden_pools_v1'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/lichess-declutter/lichess-declutter.meta.js'
 	const DOWNLOAD_URL =
@@ -64,14 +65,8 @@
 		.lobby__side { display: none !important; }
 
 		/* ─── Pool button filter ─── */
-		/* Lichess renders pools as div.lpool[data-id="X+Y"] via snabbdom.
-		   CSS attribute selectors survive virtual DOM patches; JS won't. */
-
-		/* Hide every pool by default, then whitelist the keepers */
-		.lpool { display: none !important; }
-		.lpool[data-id="2+1"]  { display: flex !important; }
-		.lpool[data-id="10+0"] { display: flex !important; }
-		.lpool[data-id="30+0"] { display: flex !important; }
+		/* Pool visibility is controlled dynamically via #declutter-pool-styles.
+		   Hidden pools are injected as CSS rules from localStorage prefs. */
 
 		/* ─── Two-column layout: pools+news left, puzzle right ─── */
 
@@ -103,13 +98,61 @@
 			padding: 0.5em 0 !important;
 		}
 
-		/* Make the 3 kept pool buttons larger and more prominent */
-		.lpool[data-id="2+1"],
-		.lpool[data-id="10+0"],
-		.lpool[data-id="30+0"] {
+		/* Make visible pool buttons larger and more prominent */
+		.lpool {
 			font-size: 1.3em !important;
 			padding: 0.75em 1em !important;
 			justify-content: center !important;
+		}
+
+		/* ─── Pool config gear ─── */
+
+		.lobby__app {
+			position: relative !important;
+		}
+
+		#declutter-pool-config-btn {
+			position: absolute;
+			top: 0.25em;
+			right: 0.25em;
+			background: none;
+			border: none;
+			color: #999;
+			cursor: pointer;
+			font-size: 1.1em;
+			padding: 0.2em 0.4em;
+			z-index: 10;
+			line-height: 1;
+		}
+		#declutter-pool-config-btn:hover {
+			color: #fff;
+		}
+
+		#declutter-pool-config {
+			position: absolute;
+			top: 2em;
+			right: 0;
+			background: #262421;
+			border: 1px solid #444;
+			border-radius: 4px;
+			padding: 0.6em 0.8em;
+			z-index: 100;
+			min-width: 140px;
+			box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+		}
+
+		#declutter-pool-config label {
+			display: flex;
+			align-items: center;
+			gap: 0.4em;
+			padding: 0.25em 0;
+			color: #bababa;
+			font-size: 0.85em;
+			cursor: pointer;
+			white-space: nowrap;
+		}
+		#declutter-pool-config label:hover {
+			color: #fff;
 		}
 
 		/* Puzzle of the day — right column */
@@ -248,13 +291,131 @@
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
+	//  POOL VISIBILITY CONFIG
+	// ═══════════════════════════════════════════════════════════════════
+
+	/**
+	 * Reads hidden pool IDs from localStorage.
+	 * Returns a Set of data-id values (e.g. "1+0", "5+3") to hide.
+	 */
+	function getHiddenPools() {
+		try {
+			const raw = localStorage.getItem(STORAGE_KEY)
+			if (!raw) return new Set()
+			return new Set(JSON.parse(raw))
+		} catch {
+			return new Set()
+		}
+	}
+
+	function saveHiddenPools(hiddenSet) {
+		localStorage.setItem(STORAGE_KEY, JSON.stringify([...hiddenSet]))
+	}
+
+	/**
+	 * Injects or updates a <style> element that hides pools the user
+	 * has toggled off. CSS attribute selectors survive snabbdom patches.
+	 */
+	function applyPoolStyles(hiddenSet) {
+		let styleEl = document.getElementById('declutter-pool-styles')
+		if (!styleEl) {
+			styleEl = document.createElement('style')
+			styleEl.id = 'declutter-pool-styles'
+			document.head.appendChild(styleEl)
+		}
+
+		const rules = [...hiddenSet]
+			.map((id) => `.lpool[data-id="${id}"] { display: none !important; }`)
+			.join('\n')
+		styleEl.textContent = rules
+
+		log('Pool visibility updated, hidden:', [...hiddenSet])
+	}
+
+	/**
+	 * Builds the gear button and config dropdown for toggling pool
+	 * visibility. Reads available pools directly from the DOM so it
+	 * adapts if lichess adds or removes time controls.
+	 */
+	function setupPoolConfig() {
+		const poolContainer = document.querySelector('.lpools')
+		const appEl = document.querySelector('.lobby__app')
+		if (!poolContainer || !appEl) {
+			warn('Pool container not found, skipping config UI')
+			return
+		}
+
+		const hiddenSet = getHiddenPools()
+		applyPoolStyles(hiddenSet)
+
+		// Discover available pools from the DOM
+		const poolEls = poolContainer.querySelectorAll('.lpool[data-id]')
+		if (poolEls.length === 0) {
+			warn('No pool elements found in DOM')
+			return
+		}
+
+		// Gear button
+		const gearBtn = document.createElement('button')
+		gearBtn.id = 'declutter-pool-config-btn'
+		gearBtn.textContent = '\u2699'
+		gearBtn.title = 'Configure visible time controls'
+		appEl.appendChild(gearBtn)
+
+		// Config panel (hidden by default)
+		const panel = document.createElement('div')
+		panel.id = 'declutter-pool-config'
+		panel.style.display = 'none'
+		appEl.appendChild(panel)
+
+		poolEls.forEach((el) => {
+			const poolId = el.getAttribute('data-id')
+			const label = document.createElement('label')
+			const checkbox = document.createElement('input')
+			checkbox.type = 'checkbox'
+			checkbox.checked = !hiddenSet.has(poolId)
+
+			checkbox.addEventListener('change', () => {
+				if (checkbox.checked) {
+					hiddenSet.delete(poolId)
+				} else {
+					hiddenSet.add(poolId)
+				}
+				saveHiddenPools(hiddenSet)
+				applyPoolStyles(hiddenSet)
+			})
+
+			label.appendChild(checkbox)
+			label.appendChild(document.createTextNode(poolId))
+			panel.appendChild(label)
+		})
+
+		// Toggle panel on gear click
+		gearBtn.addEventListener('click', (e) => {
+			e.stopPropagation()
+			const open = panel.style.display !== 'none'
+			panel.style.display = open ? 'none' : 'block'
+		})
+
+		// Close panel when clicking outside
+		document.addEventListener('click', (e) => {
+			if (!panel.contains(e.target) && e.target !== gearBtn) {
+				panel.style.display = 'none'
+			}
+		})
+
+		log(`Pool config ready, ${poolEls.length} pools discovered`)
+	}
+
+	// ═══════════════════════════════════════════════════════════════════
 	//  INIT
 	// ═══════════════════════════════════════════════════════════════════
 
 	function init() {
 		moveCounterToHeader()
+		setupPoolConfig()
 		checkForUpdate()
-		log('Initialized — pool filtering via CSS, layout via grid')
+		log('Initialized — configurable pool filtering, layout via grid')
 	}
 
 	if (document.readyState === 'loading') {
