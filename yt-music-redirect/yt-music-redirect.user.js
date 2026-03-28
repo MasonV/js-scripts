@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.1.0
+// @version      1.2.0
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.1.0'
+	const SCRIPT_VERSION = '1.2.0'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =
@@ -31,8 +31,10 @@
 	const MAX_POLL_ATTEMPTS = 30
 	const POLL_INTERVAL_MS = 200
 	const CHANNEL_LIST_KEY = 'yt_music_redirect_channels_v1'
+	const CHANNEL_BLOCKLIST_KEY = 'yt_music_redirect_blocklist_v1'
 	const CONTAINER_ID = 'ytmr-redirect-bar'
 	const UPDATE_BANNER_ID = 'ytmr-update-banner'
+	const COLLAPSE_DELAY_MS = 5000
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  LOGGING
@@ -123,6 +125,33 @@
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
+	//  CHANNEL BLOCKLIST (not-music channels)
+	// ═══════════════════════════════════════════════════════════════════
+
+	function getBlocklist() {
+		try {
+			return JSON.parse(localStorage.getItem(CHANNEL_BLOCKLIST_KEY)) || {}
+		} catch {
+			return {}
+		}
+	}
+
+	function saveBlocklist(list) {
+		localStorage.setItem(CHANNEL_BLOCKLIST_KEY, JSON.stringify(list))
+	}
+
+	function isChannelBlocked(channelId) {
+		return channelId in getBlocklist()
+	}
+
+	function blockChannel(channelId, channelName) {
+		const list = getBlocklist()
+		list[channelId] = { name: channelName, addedAt: Date.now() }
+		saveBlocklist(list)
+		log(`Blocked channel "${channelName}" (${channelId}) — will not show redirect`)
+	}
+
+	// ═══════════════════════════════════════════════════════════════════
 	//  VIDEO DETECTION
 	// ═══════════════════════════════════════════════════════════════════
 
@@ -194,6 +223,11 @@
 
 		log(`${videoId} — category: "${category}", channel: "${channelName}"`)
 
+		if (channelId && isChannelBlocked(channelId)) {
+			log(`Channel "${channelName}" is blocked — skipping redirect UI`)
+			return
+		}
+
 		if (channelId && isChannelInList(channelId)) {
 			log(`Channel "${channelName}" is in auto-redirect list`)
 			redirectToMusic(videoId)
@@ -246,6 +280,8 @@
 	//  UI
 	// ═══════════════════════════════════════════════════════════════════
 
+	let collapseTimer = null
+
 	function injectStyles() {
 		if (document.getElementById('ytmr-styles')) return
 
@@ -269,10 +305,9 @@
 			#${UPDATE_BANNER_ID}:hover {
 				background: #1976d2;
 			}
+
+			/* ── Expanded bar ── */
 			#${CONTAINER_ID} {
-				position: fixed;
-				top: 56px;
-				right: 16px;
 				z-index: 9999;
 				display: flex;
 				align-items: center;
@@ -285,6 +320,12 @@
 				font-size: 13px;
 				color: #e0e0e0;
 				box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+				transition: opacity 0.2s, transform 0.2s;
+				margin-top: 8px;
+				margin-bottom: 4px;
+			}
+			#${CONTAINER_ID}.ytmr-collapsed {
+				display: none;
 			}
 			#${CONTAINER_ID} button {
 				border: none;
@@ -316,14 +357,89 @@
 			.ytmr-channel-btn.ytmr-active:hover {
 				background: #3a6a33;
 			}
+			.ytmr-block-btn {
+				background: #555;
+				color: #e0e0e0;
+			}
+			.ytmr-block-btn:hover {
+				background: #666;
+			}
+			.ytmr-close-btn {
+				background: transparent;
+				color: #888;
+				padding: 4px 6px;
+				font-size: 16px;
+				line-height: 1;
+			}
+			.ytmr-close-btn:hover {
+				color: #fff;
+			}
+
+			/* ── Collapsed pill ── */
+			#ytmr-pill {
+				display: none;
+				z-index: 9999;
+				padding: 6px 10px;
+				background: #1a1a2e;
+				border: 1px solid #333;
+				border-radius: 8px;
+				font-size: 16px;
+				cursor: pointer;
+				box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+				transition: background 0.15s;
+				margin-top: 8px;
+				margin-bottom: 4px;
+			}
+			#ytmr-pill:hover {
+				background: #2a2a4e;
+			}
+			#ytmr-pill.ytmr-visible {
+				display: inline-block;
+			}
+
+			/* ── Wrapper anchored below player ── */
+			#ytmr-wrapper {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+			}
 		`
 		document.head.appendChild(style)
+	}
+
+	/**
+	 * Finds a suitable anchor point below the video player and inserts
+	 * the wrapper there. Falls back to fixed positioning if the anchor
+	 * element isn't found.
+	 */
+	function getOrCreateWrapper() {
+		let wrapper = document.getElementById('ytmr-wrapper')
+		if (wrapper) return wrapper
+
+		wrapper = document.createElement('div')
+		wrapper.id = 'ytmr-wrapper'
+
+		// Insert above the #below element (info/comments) so it sits
+		// between the player and the video metadata
+		const below = document.querySelector('#below')
+		if (below && below.parentNode) {
+			below.parentNode.insertBefore(wrapper, below)
+		} else {
+			// Fallback: fixed position if page structure isn't as expected
+			wrapper.style.cssText = 'position:fixed;top:56px;right:16px;'
+			document.body.appendChild(wrapper)
+		}
+
+		return wrapper
 	}
 
 	function injectRedirectButton(videoId, channelId, channelName) {
 		removeRedirectButton()
 		injectStyles()
 
+		const wrapper = getOrCreateWrapper()
+
+		// ── Expanded bar ──
 		const container = document.createElement('div')
 		container.id = CONTAINER_ID
 
@@ -333,7 +449,7 @@
 		redirectBtn.addEventListener('click', () => redirectToMusic(videoId))
 		container.appendChild(redirectBtn)
 
-		// Channel auto-redirect toggle — only shown when channel info is available
+		// Channel auto-redirect toggle
 		if (channelId) {
 			const displayName = channelName || 'this channel'
 			const channelBtn = document.createElement('button')
@@ -361,12 +477,61 @@
 			container.appendChild(channelBtn)
 		}
 
-		document.body.appendChild(container)
+		// "Not music" blocklist button
+		if (channelId) {
+			const displayName = channelName || 'this channel'
+			const blockBtn = document.createElement('button')
+			blockBtn.className = 'ytmr-block-btn'
+			blockBtn.textContent = `\u2715 Not music`
+			blockBtn.title = `Never show redirect for ${displayName}`
+			blockBtn.addEventListener('click', () => {
+				blockChannel(channelId, channelName)
+				removeRedirectButton()
+				log(`Blocked "${displayName}" — redirect UI removed`)
+			})
+			container.appendChild(blockBtn)
+		}
+
+		// Close / dismiss button (current video only)
+		const closeBtn = document.createElement('button')
+		closeBtn.className = 'ytmr-close-btn'
+		closeBtn.textContent = '\u00D7'
+		closeBtn.title = 'Dismiss for this video'
+		closeBtn.addEventListener('click', () => removeRedirectButton())
+		container.appendChild(closeBtn)
+
+		wrapper.appendChild(container)
+
+		// ── Collapsed pill ──
+		const pill = document.createElement('div')
+		pill.id = 'ytmr-pill'
+		pill.textContent = '\u266B'
+		pill.title = 'YT Music Redirect'
+		pill.addEventListener('click', () => {
+			container.classList.remove('ytmr-collapsed')
+			pill.classList.remove('ytmr-visible')
+			resetCollapseTimer(container, pill)
+		})
+		wrapper.appendChild(pill)
+
+		// Start collapse timer
+		resetCollapseTimer(container, pill)
+
 		log('Redirect button injected')
 	}
 
+	function resetCollapseTimer(container, pill) {
+		if (collapseTimer) clearTimeout(collapseTimer)
+		collapseTimer = setTimeout(() => {
+			container.classList.add('ytmr-collapsed')
+			pill.classList.add('ytmr-visible')
+		}, COLLAPSE_DELAY_MS)
+	}
+
 	function removeRedirectButton() {
-		document.getElementById(CONTAINER_ID)?.remove()
+		if (collapseTimer) clearTimeout(collapseTimer)
+		collapseTimer = null
+		document.getElementById('ytmr-wrapper')?.remove()
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
