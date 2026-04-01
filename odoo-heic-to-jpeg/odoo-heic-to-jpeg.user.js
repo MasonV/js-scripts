@@ -247,10 +247,12 @@
 				const dt = new DataTransfer()
 				files.forEach((f) => dt.items.add(f))
 
-				const syntheticDrop = new DragEvent('drop', {
+				const syntheticDrop = new Event('drop', {
 					bubbles: true,
 					cancelable: true,
-					dataTransfer: dt,
+				})
+				Object.defineProperty(syntheticDrop, 'dataTransfer', {
+					value: dt,
 				})
 
 				processing = true
