@@ -75,6 +75,25 @@ A userscript for [lichess.org](https://lichess.org) that strips the homepage dow
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/lichess-declutter/lichess-declutter.meta.js`
 
+### `odoo-heic-to-jpeg/`
+
+A userscript for [Odoo](https://www.odoo.com) that converts HEIC/HEIF images to JPEG client-side before upload. Solves the browser HEIC rendering gap on Odoo SaaS where server-side conversion is blocked by sandbox restrictions.
+
+**Features:**
+
+- Automatically detects HEIC/HEIF files in file picker and drag-and-drop uploads
+- Converts to JPEG client-side using heic2any before Odoo processes the upload
+- Toast notification confirms conversion count
+- Graceful fallback — if conversion fails, the original file is uploaded rather than silently lost
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.meta.js`
+
 ### `yt-music-redirect/`
 
 A userscript for [YouTube](https://www.youtube.com) that automatically redirects music videos to [YouTube Music](https://music.youtube.com).
