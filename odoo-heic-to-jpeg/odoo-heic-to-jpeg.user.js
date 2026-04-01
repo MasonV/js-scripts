@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Odoo HEIC to JPEG
 // @namespace    odoo-heic-to-jpeg
-// @version      1.2.2
+// @version      1.3.0
 // @description  Converts HEIC/HEIF images to JPEG client-side before Odoo uploads them
 // @match        *://*.odoo.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -21,7 +21,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[Odoo HEIC→JPEG]'
-	const SCRIPT_VERSION = '1.2.2'
+	const SCRIPT_VERSION = '1.3.0'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.meta.js'
 	const DOWNLOAD_URL =
@@ -135,13 +135,9 @@
 		})
 
 		// ── Detection ──────────────────────────────────────────────────
-		var BROWSER_READABLE = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml']
-
 		function isHeic(blob) {
 			if (!blob) return false
 			var type = (blob.type || '').toLowerCase()
-			// Already browser-readable (e.g. converted by FileReader patch) — skip
-			if (BROWSER_READABLE.indexOf(type) !== -1) return false
 			if (HEIC_MIME_TYPES.indexOf(type) !== -1) return true
 			if (blob.name) {
 				var name = blob.name.toLowerCase()
@@ -153,7 +149,13 @@
 		}
 
 		// ── Conversion ─────────────────────────────────────────────────
+		//  converting flag guards against re-entrancy: heic2any uses
+		//  FileReader internally, which would trigger our FileReader patch
+		//  and create an infinite loop without this guard.
+		var converting = false
+
 		function convertBlob(blob) {
+			converting = true
 			return heic2anyReady.then(function (heic2any) {
 				var name = blob.name || 'image.heic'
 				console.log(LOG, 'Converting ' + name + ' (' + (blob.size / 1024).toFixed(1) + ' KB)')
@@ -163,6 +165,7 @@
 					toType: 'image/jpeg',
 					quality: JPEG_QUALITY,
 				}).then(function (result) {
+					converting = false
 					var outputBlob = Array.isArray(result) ? result[0] : result
 					var newName = name.replace(/\.hei[cf]$/i, '.jpg')
 					var converted = new File([outputBlob], newName, {
@@ -172,6 +175,7 @@
 					console.log(LOG, 'Done → ' + converted.name + ' (' + (converted.size / 1024).toFixed(1) + ' KB)')
 					return converted
 				}).catch(function (err) {
+					converting = false
 					// heic2any code 1 = "already browser readable" — pass through
 					if (err && err.code === 1) {
 						console.log(LOG, 'File already browser-readable, skipping conversion')
@@ -198,21 +202,16 @@
 		}
 
 		// ── Patch FileReader ───────────────────────────────────────────
-		var converting = false
-
 		function patchReader(methodName) {
 			var original = FileReader.prototype[methodName]
 			if (!original) return
 			FileReader.prototype[methodName] = function (blob) {
 				if (!converting && isHeic(blob)) {
 					var self = this
-					converting = true
 					convertBlob(blob).then(function (jpeg) {
-						converting = false
 						showToast('Converted HEIC image to JPEG')
 						original.call(self, jpeg)
 					}).catch(function (err) {
-						converting = false
 						console.error(LOG, 'Conversion failed, passing through original:', err)
 						original.call(self, blob)
 					})
