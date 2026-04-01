@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Odoo HEIC to JPEG
 // @namespace    odoo-heic-to-jpeg
-// @version      1.0.0
+// @version      1.1.0
 // @description  Converts HEIC/HEIF images to JPEG client-side before Odoo uploads them
 // @match        *://*.odoo.com/*
 // @require      https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js
@@ -10,8 +10,9 @@
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.meta.js
 // @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.user.js
 // @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
-// @run-at       document-idle
+// @run-at       document-start
 // ==/UserScript==
 
 ;(function () {
@@ -22,7 +23,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[Odoo HEIC→JPEG]'
-	const SCRIPT_VERSION = '1.0.0'
+	const SCRIPT_VERSION = '1.1.0'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.meta.js'
 	const DOWNLOAD_URL =
@@ -99,57 +100,54 @@
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
+	//  HEIC DETECTION
+	// ═══════════════════════════════════════════════════════════════════
+
+	function isHeicBlob(blob) {
+		if (!blob || !blob.type) return false
+		if (HEIC_MIME_TYPES.includes(blob.type.toLowerCase())) return true
+		if (blob.name) {
+			const name = blob.name.toLowerCase()
+			return HEIC_EXTENSIONS.some((ext) => name.endsWith(ext))
+		}
+		return false
+	}
+
+	// ═══════════════════════════════════════════════════════════════════
 	//  CONVERSION
 	// ═══════════════════════════════════════════════════════════════════
 
-	function isHeicFile(file) {
-		if (HEIC_MIME_TYPES.includes(file.type.toLowerCase())) return true
-		const name = file.name.toLowerCase()
-		return HEIC_EXTENSIONS.some((ext) => name.endsWith(ext))
-	}
+	async function convertHeicToJpeg(blob) {
+		const name = blob.name || 'image.heic'
+		log(`Converting ${name} (${(blob.size / 1024).toFixed(1)} KB)`)
 
-	async function convertHeicToJpeg(file) {
-		log(`Converting ${file.name} (${(file.size / 1024).toFixed(1)} KB)`)
-
-		const blob = await heic2any({
-			blob: file,
+		const result = await heic2any({
+			blob: blob,
 			toType: 'image/jpeg',
 			quality: JPEG_QUALITY,
 		})
 
 		// heic2any may return an array for multi-image HEIC; take the first
-		const outputBlob = Array.isArray(blob) ? blob[0] : blob
+		const outputBlob = Array.isArray(result) ? result[0] : result
 
-		const newName = file.name.replace(/\.hei[cf]$/i, '.jpg')
+		const newName = name.replace(/\.hei[cf]$/i, '.jpg')
 		const converted = new File([outputBlob], newName, {
 			type: 'image/jpeg',
-			lastModified: file.lastModified || Date.now(),
+			lastModified: blob.lastModified || Date.now(),
 		})
 
 		log(`Done → ${converted.name} (${(converted.size / 1024).toFixed(1)} KB)`)
 		return converted
 	}
 
-	async function processFileList(fileList) {
-		const files = Array.from(fileList)
-		const processed = await Promise.all(
-			files.map(async (file) => {
-				if (!isHeicFile(file)) return file
-				try {
-					return await convertHeicToJpeg(file)
-				} catch (err) {
-					console.error(`${LOG_PREFIX} Conversion failed for ${file.name}:`, err)
-					return file
-				}
-			}),
-		)
-		return processed
-	}
-
-	function toFileList(filesArray) {
-		const dt = new DataTransfer()
-		filesArray.forEach((f) => dt.items.add(f))
-		return dt.files
+	async function convertOrPassthrough(blob) {
+		if (!isHeicBlob(blob)) return blob
+		try {
+			return await convertHeicToJpeg(blob)
+		} catch (err) {
+			warn(`Conversion failed for ${blob.name || 'blob'}, passing through original:`, err)
+			return blob
+		}
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -157,6 +155,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	function showToast(message) {
+		if (!document.body) return
 		const el = document.createElement('div')
 		Object.assign(el.style, {
 			position: 'fixed',
@@ -182,96 +181,98 @@
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
-	//  FILE INPUT INTERCEPTION
+	//  FILEREADER PATCH
 	// ═══════════════════════════════════════════════════════════════════
+	//
+	//  Odoo reads uploaded files via FileReader (readAsDataURL for base64
+	//  encoding, readAsArrayBuffer for binary). We intercept these calls
+	//  and convert HEIC blobs to JPEG before the original read executes.
+	//  This is async-safe because FileReader is inherently asynchronous.
+	//
 
-	let processing = false
+	const pageWindow = unsafeWindow
+	const OrigFileReader = pageWindow.FileReader
 
-	document.addEventListener(
-		'change',
-		async (event) => {
-			if (processing) return
-
-			const input = event.target
-			if (!(input instanceof HTMLInputElement) || input.type !== 'file') return
-			if (!input.files || input.files.length === 0) return
-
-			const hasHeic = Array.from(input.files).some(isHeicFile)
-			if (!hasHeic) return
-
-			event.stopImmediatePropagation()
-
-			const count = Array.from(input.files).filter(isHeicFile).length
-			log(`Intercepted upload with ${count} HEIC file(s)`)
-
-			try {
-				const files = await processFileList(input.files)
-
-				processing = true
-				input.files = toFileList(files)
-				processing = false
-
-				input.dispatchEvent(new Event('change', { bubbles: true }))
-				showToast(`Converted ${count} HEIC image${count > 1 ? 's' : ''} to JPEG`)
-			} catch (err) {
-				processing = false
-				console.error(`${LOG_PREFIX} Fatal error during conversion:`, err)
-				input.dispatchEvent(new Event('change', { bubbles: true }))
-			}
-		},
-		true,
-	)
-
-	// ═══════════════════════════════════════════════════════════════════
-	//  DRAG-AND-DROP
-	// ═══════════════════════════════════════════════════════════════════
-
-	document.addEventListener(
-		'drop',
-		async (event) => {
-			if (processing) return
-			if (!event.dataTransfer || !event.dataTransfer.files || event.dataTransfer.files.length === 0) return
-
-			const hasHeic = Array.from(event.dataTransfer.files).some(isHeicFile)
-			if (!hasHeic) return
-
-			event.stopImmediatePropagation()
-			event.preventDefault()
-
-			const count = Array.from(event.dataTransfer.files).filter(isHeicFile).length
-			log(`Intercepted drop with ${count} HEIC file(s)`)
-
-			try {
-				const files = await processFileList(event.dataTransfer.files)
-
-				const dt = new DataTransfer()
-				files.forEach((f) => dt.items.add(f))
-
-				const syntheticDrop = new Event('drop', {
-					bubbles: true,
-					cancelable: true,
+	function patchFileReaderMethod(methodName) {
+		const original = OrigFileReader.prototype[methodName]
+		OrigFileReader.prototype[methodName] = function (blob) {
+			if (isHeicBlob(blob)) {
+				convertOrPassthrough(blob).then((converted) => {
+					if (converted !== blob) {
+						showToast('Converted HEIC image to JPEG')
+					}
+					original.call(this, converted)
 				})
-				Object.defineProperty(syntheticDrop, 'dataTransfer', {
-					value: dt,
-				})
-
-				processing = true
-				event.target.dispatchEvent(syntheticDrop)
-				processing = false
-
-				showToast(`Converted ${count} HEIC image${count > 1 ? 's' : ''} to JPEG`)
-			} catch (err) {
-				processing = false
-				console.error(`${LOG_PREFIX} Fatal error during drop conversion:`, err)
+				return
 			}
-		},
-		true,
-	)
+			return original.call(this, blob)
+		}
+	}
+
+	patchFileReaderMethod('readAsDataURL')
+	patchFileReaderMethod('readAsArrayBuffer')
+	patchFileReaderMethod('readAsBinaryString')
+
+	// ═══════════════════════════════════════════════════════════════════
+	//  FETCH / XHR PATCH
+	// ═══════════════════════════════════════════════════════════════════
+	//
+	//  Belt-and-suspenders: also intercept network requests that send
+	//  FormData containing HEIC files. This covers upload paths that
+	//  append File objects directly to FormData without reading first.
+	//
+
+	async function convertFormDataHeicFiles(formData) {
+		const entries = []
+		for (const pair of formData.entries()) {
+			entries.push(pair)
+		}
+
+		let converted = 0
+		for (const [key, value] of entries) {
+			if (value instanceof Blob && isHeicBlob(value)) {
+				const jpeg = await convertOrPassthrough(value)
+				if (jpeg !== value) {
+					formData.delete(key)
+					formData.append(key, jpeg, jpeg.name)
+					converted++
+				}
+			}
+		}
+
+		if (converted > 0) {
+			showToast(`Converted ${converted} HEIC image${converted > 1 ? 's' : ''} to JPEG`)
+		}
+	}
+
+	// Patch fetch
+	const originalFetch = pageWindow.fetch
+	pageWindow.fetch = function (...args) {
+		const [resource, config] = args
+		if (config && config.body instanceof pageWindow.FormData) {
+			return convertFormDataHeicFiles(config.body).then(() =>
+				originalFetch.apply(this, args),
+			)
+		}
+		return originalFetch.apply(this, args)
+	}
+
+	// Patch XMLHttpRequest.send
+	const originalXHRSend = pageWindow.XMLHttpRequest.prototype.send
+	pageWindow.XMLHttpRequest.prototype.send = function (data) {
+		if (data instanceof pageWindow.FormData) {
+			convertFormDataHeicFiles(data).then(() => {
+				originalXHRSend.call(this, data)
+			})
+			return
+		}
+		return originalXHRSend.call(this, data)
+	}
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  INIT
 	// ═══════════════════════════════════════════════════════════════════
 
 	checkForUpdate()
-	log('Initialized')
+	log('Initialized — patched FileReader, fetch, and XMLHttpRequest')
 })()
