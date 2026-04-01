@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Odoo HEIC to JPEG
 // @namespace    odoo-heic-to-jpeg
-// @version      1.2.1
+// @version      1.2.2
 // @description  Converts HEIC/HEIF images to JPEG client-side before Odoo uploads them
 // @match        *://*.odoo.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -21,7 +21,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[Odoo HEIC→JPEG]'
-	const SCRIPT_VERSION = '1.2.1'
+	const SCRIPT_VERSION = '1.2.2'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.meta.js'
 	const DOWNLOAD_URL =
@@ -135,9 +135,14 @@
 		})
 
 		// ── Detection ──────────────────────────────────────────────────
+		var BROWSER_READABLE = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml']
+
 		function isHeic(blob) {
 			if (!blob) return false
-			if (blob.type && HEIC_MIME_TYPES.indexOf(blob.type.toLowerCase()) !== -1) return true
+			var type = (blob.type || '').toLowerCase()
+			// Already browser-readable (e.g. converted by FileReader patch) — skip
+			if (BROWSER_READABLE.indexOf(type) !== -1) return false
+			if (HEIC_MIME_TYPES.indexOf(type) !== -1) return true
 			if (blob.name) {
 				var name = blob.name.toLowerCase()
 				for (var i = 0; i < HEIC_EXTENSIONS.length; i++) {
@@ -166,6 +171,13 @@
 					})
 					console.log(LOG, 'Done → ' + converted.name + ' (' + (converted.size / 1024).toFixed(1) + ' KB)')
 					return converted
+				}).catch(function (err) {
+					// heic2any code 1 = "already browser readable" — pass through
+					if (err && err.code === 1) {
+						console.log(LOG, 'File already browser-readable, skipping conversion')
+						return blob
+					}
+					throw err
 				})
 			})
 		}
