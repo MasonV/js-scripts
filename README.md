@@ -94,6 +94,25 @@ A userscript for [Odoo](https://www.odoo.com) that converts HEIC/HEIF images to 
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.meta.js`
 
+### `google-address-autocomplete-ca/`
+
+A userscript for [Odoo](https://www.odoo.com) SaaS instances that restricts Google Places Autocomplete results to Canada with a location bias toward Southern Ontario.
+
+**Features:**
+
+- Wraps `google.maps.places.Autocomplete` constructor to inject `componentRestrictions: { country: "ca" }`
+- Wraps `AutocompleteService.getPlacePredictions` with the same restriction plus a circular location bias (centered on Southern Ontario, 150 km radius)
+- Non-destructive — does not override restrictions if already present
+- Polls until `google.maps.places` is loaded before patching
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/google-address-autocomplete-ca/google-address-autocomplete-ca.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/google-address-autocomplete-ca/google-address-autocomplete-ca.meta.js`
+
 ### `yt-music-redirect/`
 
 A userscript for [YouTube](https://www.youtube.com) that automatically redirects music videos to [YouTube Music](https://music.youtube.com).
