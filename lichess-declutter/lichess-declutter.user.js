@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess Declutter
 // @namespace    lichess-declutter
-// @version      1.3.0
+// @version      1.4.0
 // @description  Strips the lichess homepage down to essentials: quick play, puzzle, and articles in a single screen
 // @match        *://lichess.org/
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[Lichess Declutter]'
-	const SCRIPT_VERSION = '1.3.0'
+	const SCRIPT_VERSION = '1.4.0'
 	const STORAGE_KEY = 'lichess_declutter_hidden_pools_v1'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/lichess-declutter/lichess-declutter.meta.js'
@@ -42,12 +42,49 @@
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
+	//  DOM HELPERS
+	// ═══════════════════════════════════════════════════════════════════
+
+	/**
+	 * Waits for an element matching `selector` to appear in the DOM.
+	 * Uses MutationObserver so it works regardless of render timing
+	 * (fixes Brave / Chromium MV3 where DOMContentLoaded fires before
+	 * Lichess's Snabbdom has rendered the lobby).
+	 */
+	function waitForElement(selector, timeoutMs = 10000) {
+		return new Promise((resolve, reject) => {
+			const existing = document.querySelector(selector)
+			if (existing) return resolve(existing)
+
+			const observer = new MutationObserver(() => {
+				const el = document.querySelector(selector)
+				if (el) {
+					observer.disconnect()
+					clearTimeout(timer)
+					resolve(el)
+				}
+			})
+
+			observer.observe(document.documentElement, {
+				childList: true,
+				subtree: true,
+			})
+
+			const timer = setTimeout(() => {
+				observer.disconnect()
+				reject(new Error(`Timed out waiting for ${selector}`))
+			}, timeoutMs)
+		})
+	}
+
+	// ═══════════════════════════════════════════════════════════════════
 	//  CSS — HIDE, FILTER, AND RELAYOUT
 	// ═══════════════════════════════════════════════════════════════════
 
 	// All hiding and layout done via CSS so it survives lichess's
 	// virtual DOM redraws (snabbdom patches wipe inline styles).
-	GM_addStyle(`
+
+	const DECLUTTER_CSS = `
 		/* ─── Hidden sections ─── */
 
 		.lobby__streams { display: none !important; }
@@ -206,7 +243,56 @@
 		#declutter-update-banner:hover {
 			background: #2563eb;
 		}
-	`)
+	`
+
+	/**
+	 * Injects the main stylesheet. Uses GM_addStyle when available,
+	 * falls back to a <style> element for Chromium MV3 environments
+	 * where GM_addStyle may silently fail at document-start.
+	 */
+	function injectCSS() {
+		try {
+			GM_addStyle(DECLUTTER_CSS)
+			log('CSS injected via GM_addStyle')
+		} catch (e) {
+			warn('GM_addStyle failed, using fallback:', e)
+			injectCSSFallback()
+		}
+
+		// Verify CSS actually applied — Brave/Chromium MV3 can silently
+		// swallow GM_addStyle if <head> doesn't exist yet at document-start.
+		function verify() {
+			const el = document.querySelector('.lobby__streams')
+			if (!el) return // element not in DOM yet, CSS will apply when it arrives
+			const style = getComputedStyle(el)
+			if (style.display !== 'none') {
+				warn('CSS did not apply, re-injecting via fallback')
+				injectCSSFallback()
+			}
+		}
+
+		if (document.readyState === 'loading') {
+			document.addEventListener('DOMContentLoaded', verify)
+		} else {
+			verify()
+		}
+	}
+
+	function injectCSSFallback() {
+		const waitForHead = () => {
+			if (document.head) {
+				const style = document.createElement('style')
+				style.textContent = DECLUTTER_CSS
+				document.head.appendChild(style)
+				log('CSS injected via fallback <style> element')
+			} else {
+				requestAnimationFrame(waitForHead)
+			}
+		}
+		waitForHead()
+	}
+
+	injectCSS()
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  PLAYER COUNTER IN HEADER
@@ -411,10 +497,24 @@
 	//  INIT
 	// ═══════════════════════════════════════════════════════════════════
 
-	function init() {
+	/**
+	 * Waits for Lichess's lobby to be rendered before wiring up the
+	 * interactive parts. On Brave/Chromium MV3 the Snabbdom render can
+	 * finish well after DOMContentLoaded, so we use MutationObserver.
+	 */
+	async function init() {
+		checkForUpdate()
+
+		try {
+			await waitForElement('main.lobby')
+			log('Lobby element found, initializing UI')
+		} catch {
+			warn('Lobby element never appeared — is this the Lichess homepage?')
+			return
+		}
+
 		moveCounterToHeader()
 		setupPoolConfig()
-		checkForUpdate()
 		log('Initialized — configurable pool filtering, layout via grid')
 	}
 
