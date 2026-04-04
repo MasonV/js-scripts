@@ -132,6 +132,26 @@ A userscript for [YouTube](https://www.youtube.com) that automatically redirects
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js`
 
+### `fanatical-autoclaim/`
+
+A userscript for [Fanatical](https://www.fanatical.com) order pages that bulk-reveals and bulk-redeems Steam keys.
+
+**Features:**
+
+- Floating control panel on order pages with Reveal All, Redeem All, and combined Reveal + Redeem buttons
+- Sequential key reveal with delays to avoid API rate limits
+- Redeems keys via existing "Redeem on Steam" buttons, with fallback to `steam://registerkey/` URLs
+- Status display showing current progress and game names
+- Waits for React SPA to render before activating
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.meta.js`
+
 ## Update workflow
 
 1. Edit `barter-bundle-scorer/barter-bundle-scorer.user.js`.
