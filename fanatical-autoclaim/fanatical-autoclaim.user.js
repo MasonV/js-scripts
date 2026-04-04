@@ -10,6 +10,7 @@
 // @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
+// @grant        GM_openInTab
 // @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
@@ -23,10 +24,12 @@
     const LOG_PREFIX = '[Fanatical Autoclaim]'
     const SHORT_PREFIX = '[FAC]'
 
-    // Delay between sequential button clicks to avoid hammering the API
-    const REVEAL_DELAY_MS = 1500
-    // Delay between opening Steam redeem URLs to let Steam client process each
-    const REDEEM_DELAY_MS = 2000
+    const DEFAULT_REVEAL_DELAY_MS = 500
+    const DEFAULT_REDEEM_DELAY_MS = 800
+
+    // Mutable — updated by the UI input
+    let revealDelayMs = DEFAULT_REVEAL_DELAY_MS
+    let redeemDelayMs = DEFAULT_REDEEM_DELAY_MS
 
     // ═══════════════════════════════════════════════════════════════════
     //  LOGGING
@@ -177,77 +180,75 @@
 
             // Wait for the reveal to process before clicking the next one
             if (i < revealButtons.length - 1) {
-                await sleep(REVEAL_DELAY_MS)
+                await sleep(revealDelayMs)
             }
         }
 
         // Wait a moment for the last reveal to render
-        await sleep(REVEAL_DELAY_MS)
+        await sleep(revealDelayMs)
         log('All keys revealed')
         updateStatus(`Revealed ${revealButtons.length} key(s)`)
         setButtonsEnabled(true)
     }
 
-    async function redeemAllOnSteam() {
+    /**
+     * Collect redeem URLs from the page. Extracts hrefs from "REDEEM ON STEAM"
+     * links/buttons, falling back to building steam://registerkey/ URLs from
+     * revealed keys if no redeem links exist.
+     */
+    function collectRedeemUrls() {
+        const urls = []
         const redeemButtons = findButtonsByText('Redeem on Steam')
-        const keys = findRevealedKeys()
 
-        if (redeemButtons.length === 0 && keys.length === 0) {
+        for (const btn of redeemButtons) {
+            const href = btn.href || btn.closest('a')?.href
+            if (href) {
+                urls.push({ url: href, name: getGameName(btn) })
+            }
+        }
+
+        if (urls.length > 0) return urls
+
+        // Fallback: build steam:// URLs from extracted keys
+        const keys = findRevealedKeys()
+        for (const { key, element } of keys) {
+            urls.push({
+                url: `steam://registerkey/${key}`,
+                name: getGameName(element),
+            })
+        }
+
+        return urls
+    }
+
+    async function redeemAllOnSteam() {
+        const urls = collectRedeemUrls()
+
+        if (urls.length === 0) {
             log('No revealed keys or redeem buttons found — reveal keys first')
             updateStatus('No keys to redeem — reveal first')
             return
         }
 
-        // Prefer using the existing "REDEEM ON STEAM" buttons/links
-        if (redeemButtons.length > 0) {
-            log(`Found ${redeemButtons.length} "Redeem on Steam" button(s)`)
-            updateStatus(`Redeeming 0/${redeemButtons.length}...`)
-            setButtonsEnabled(false)
-
-            for (let i = 0; i < redeemButtons.length; i++) {
-                const btn = redeemButtons[i]
-                const gameName = getGameName(btn)
-                logItem(`Redeeming ${i + 1}/${redeemButtons.length}: ${gameName}`)
-                updateStatus(`Redeeming ${i + 1}/${redeemButtons.length}: ${gameName}`)
-
-                // If it's a link with an href, open it; otherwise click it
-                if (btn.href && btn.href.startsWith('steam://')) {
-                    window.open(btn.href, '_self')
-                } else {
-                    btn.click()
-                }
-
-                if (i < redeemButtons.length - 1) {
-                    await sleep(REDEEM_DELAY_MS)
-                }
-            }
-
-            log('All redeem actions triggered')
-            updateStatus(`Redeemed ${redeemButtons.length} key(s)`)
-            setButtonsEnabled(true)
-            return
-        }
-
-        // Fallback: open steam://registerkey/ URLs directly from extracted keys
-        log(`No redeem buttons found, using ${keys.length} extracted key(s) directly`)
-        updateStatus(`Redeeming 0/${keys.length}...`)
+        log(`Opening ${urls.length} redeem URL(s) in background tabs`)
+        updateStatus(`Redeeming 0/${urls.length}...`)
         setButtonsEnabled(false)
 
-        for (let i = 0; i < keys.length; i++) {
-            const { key } = keys[i]
-            const gameName = getGameName(keys[i].element)
-            logItem(`Redeeming ${i + 1}/${keys.length}: ${gameName} (${key})`)
-            updateStatus(`Redeeming ${i + 1}/${keys.length}: ${gameName}`)
+        for (let i = 0; i < urls.length; i++) {
+            const { url, name } = urls[i]
+            logItem(`Redeeming ${i + 1}/${urls.length}: ${name}`)
+            updateStatus(`Redeeming ${i + 1}/${urls.length}: ${name}`)
 
-            window.open(`steam://registerkey/${key}`, '_self')
+            // Open in a background tab so the script keeps running on this page
+            GM_openInTab(url, { active: false, insert: true, setParent: true })
 
-            if (i < keys.length - 1) {
-                await sleep(REDEEM_DELAY_MS)
+            if (i < urls.length - 1) {
+                await sleep(redeemDelayMs)
             }
         }
 
-        log('All redeem actions triggered')
-        updateStatus(`Redeemed ${keys.length} key(s)`)
+        log('All redeem tabs opened')
+        updateStatus(`Opened ${urls.length} redeem tab(s)`)
         setButtonsEnabled(true)
     }
 
@@ -280,6 +281,36 @@
         })
     }
 
+    function createDelayInput(labelText, defaultValue, onChange) {
+        const row = document.createElement('div')
+        row.className = 'fac-delay-row'
+
+        const label = document.createElement('label')
+        label.className = 'fac-delay-label'
+        label.textContent = labelText
+
+        const input = document.createElement('input')
+        input.type = 'number'
+        input.className = 'fac-delay-input'
+        input.min = '100'
+        input.max = '10000'
+        input.step = '100'
+        input.value = defaultValue
+        input.addEventListener('change', () => {
+            const val = parseInt(input.value, 10)
+            if (!isNaN(val) && val >= 100) onChange(val)
+        })
+
+        const unit = document.createElement('span')
+        unit.className = 'fac-delay-unit'
+        unit.textContent = 'ms'
+
+        row.appendChild(label)
+        row.appendChild(input)
+        row.appendChild(unit)
+        return row
+    }
+
     function createPanel() {
         const panel = document.createElement('div')
         panel.id = 'fac-panel'
@@ -309,6 +340,12 @@
         revealAndRedeemBtn.textContent = 'Reveal + Redeem All'
         revealAndRedeemBtn.addEventListener('click', revealAndRedeem)
         panel.appendChild(revealAndRedeemBtn)
+
+        const delaySection = document.createElement('div')
+        delaySection.id = 'fac-delays'
+        delaySection.appendChild(createDelayInput('Reveal delay', DEFAULT_REVEAL_DELAY_MS, v => { revealDelayMs = v }))
+        delaySection.appendChild(createDelayInput('Redeem delay', DEFAULT_REDEEM_DELAY_MS, v => { redeemDelayMs = v }))
+        panel.appendChild(delaySection)
 
         statusEl = document.createElement('div')
         statusEl.id = 'fac-status'
@@ -374,6 +411,45 @@
 
             .fac-btn-primary:hover {
                 background: #ffb74d;
+            }
+
+            #fac-delays {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+                border-top: 1px solid #424242;
+                padding-top: 8px;
+                margin-top: 2px;
+            }
+
+            .fac-delay-row {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+
+            .fac-delay-label {
+                font-size: 11px;
+                color: #9e9e9e;
+                flex: 1;
+                margin: 0;
+            }
+
+            .fac-delay-input {
+                width: 60px;
+                background: #333;
+                color: #eee;
+                border: 1px solid #616161;
+                border-radius: 3px;
+                padding: 2px 4px;
+                font-size: 12px;
+                font-family: inherit;
+                text-align: right;
+            }
+
+            .fac-delay-unit {
+                font-size: 11px;
+                color: #757575;
             }
 
             #fac-status {
