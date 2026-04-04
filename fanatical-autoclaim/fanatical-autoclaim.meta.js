@@ -10,5 +10,6 @@
 // @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
+// @grant        GM_openInTab
 // @connect      raw.githubusercontent.com
 // ==/UserScript==
