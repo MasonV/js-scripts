@@ -94,11 +94,20 @@ Call `checkForUpdate()` at the top of the initialization block. The banner shoul
 
 ## Version & Deployment
 
+**Every commit that changes a script MUST bump the version.** No exceptions. This is how Tampermonkey detects updates — if the version doesn't change, users don't get the fix.
+
 1. Edit the `.user.js` file.
-2. Bump `@version` in **both** `.user.js` and `.meta.js` — they must match.
-3. `@updateURL` → `.meta.js` (lightweight version check).
-4. `@downloadURL` → `.user.js` (full script delivery).
-5. Scripts are served via raw GitHub URLs from `main` branch. Merging to `main` is deployment.
+2. Bump `@version` in **both** `.user.js` and `.meta.js` — they must match. Also update the `SCRIPT_VERSION` constant in the script body.
+3. Use semver: patch for bug fixes, minor for new features, major for breaking changes.
+4. `@updateURL` → `.meta.js` (lightweight version check).
+5. `@downloadURL` → `.user.js` (full script delivery).
+6. Scripts are served via raw GitHub URLs from `main` branch. Merging to `main` is deployment.
+
+## Git Workflow
+
+- **One PR per logical change.** Don't merge a PR and then push more commits to the same branch — create a new branch/PR for follow-up work.
+- **Don't push to a merged branch.** If a PR is already merged and you have more changes, branch off `main` fresh.
+- Before creating a PR, verify the branch is up to date with `main` and all intended commits are included.
 
 ## Testing
 

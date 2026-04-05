@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Fanatical Autoclaim
 // @namespace    fanatical-autoclaim
-// @version      1.0.0
+// @version      1.2.0
 // @description  Bulk-reveal and bulk-redeem Steam keys on Fanatical order pages
 // @match        https://www.fanatical.com/en/orders/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -18,7 +18,7 @@
 ;(function () {
     'use strict'
 
-    const SCRIPT_VERSION = '1.0.0'
+    const SCRIPT_VERSION = '1.2.0'
     const META_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.meta.js'
     const DOWNLOAD_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.user.js'
     const LOG_PREFIX = '[Fanatical Autoclaim]'
@@ -315,10 +315,22 @@
         const panel = document.createElement('div')
         panel.id = 'fac-panel'
 
+        const header = document.createElement('div')
+        header.id = 'fac-header'
+
         const title = document.createElement('div')
         title.id = 'fac-title'
         title.textContent = 'Autoclaim'
-        panel.appendChild(title)
+        header.appendChild(title)
+
+        const closeBtn = document.createElement('button')
+        closeBtn.id = 'fac-close-btn'
+        closeBtn.textContent = '\u00D7'
+        closeBtn.title = 'Close panel'
+        closeBtn.addEventListener('click', () => panel.remove())
+        header.appendChild(closeBtn)
+
+        panel.appendChild(header)
 
         revealBtn = document.createElement('button')
         revealBtn.id = 'fac-reveal-btn'
@@ -376,13 +388,37 @@
                 color: #eee;
             }
 
+            #fac-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+
             #fac-title {
                 font-weight: 700;
                 font-size: 13px;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
                 color: #ff9800;
+                flex: 1;
                 text-align: center;
+                padding-left: 20px;
+            }
+
+            #fac-close-btn {
+                background: none;
+                border: none;
+                color: #757575;
+                font-size: 18px;
+                cursor: pointer;
+                padding: 0;
+                line-height: 1;
+                width: 20px;
+                font-family: inherit;
+            }
+
+            #fac-close-btn:hover {
+                color: #eee;
             }
 
             .fac-btn {
