@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.3.0
+// @version      1.3.1
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.3.0'
+	const SCRIPT_VERSION = '1.3.1'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =
@@ -168,8 +168,14 @@
 		// unsafeWindow needed because GM_xmlhttpRequest grant puts us in sandbox
 		const resp = unsafeWindow.ytInitialPlayerResponse
 		if (resp?.videoDetails?.videoId === videoId) {
+			// YouTube moved category out of videoDetails into microformat at some point;
+			// fall back through both locations.
+			const category =
+				resp.microformat?.playerMicroformatRenderer?.category ||
+				resp.videoDetails.category ||
+				null
 			return {
-				category: resp.videoDetails.category || null,
+				category,
 				channelId: resp.videoDetails.channelId || null,
 				channelName: resp.videoDetails.author || null,
 			}
@@ -321,6 +327,7 @@
 				cursor: pointer;
 				transition: background 0.15s;
 				vertical-align: middle;
+				user-select: none;
 			}
 			#${MENU_BTN_ID}:hover {
 				background: rgba(255, 255, 255, 0.1);
@@ -329,13 +336,10 @@
 				background: rgba(255, 255, 255, 0.15);
 			}
 
-			/* ── Dropdown menu ── */
+			/* ── Dropdown menu (body-level, fixed positioned) ── */
 			#${DROPDOWN_ID} {
 				display: none;
-				position: absolute;
-				top: 100%;
-				right: 0;
-				margin-top: 8px;
+				position: fixed;
 				min-width: 240px;
 				background: #282828;
 				border: 1px solid #444;
@@ -394,43 +398,84 @@
 	 * Injects the ♫ icon button into the YouTube masthead, right before
 	 * the Create button / avatar area.
 	 */
+	function positionDropdown(btn, dropdown) {
+		const rect = btn.getBoundingClientRect()
+		const width = dropdown.offsetWidth || 240
+		dropdown.style.top = `${rect.bottom + 8}px`
+		dropdown.style.left = `${Math.max(8, rect.right - width)}px`
+	}
+
 	function getOrCreateMenuBtn() {
 		let btn = document.getElementById(MENU_BTN_ID)
 		if (btn) return btn
 
-		btn = document.createElement('button')
+		// Use a <div role=button> rather than <button> so we can safely host
+		// (or be adjacent to) other interactive content, and so YouTube's
+		// masthead button delegation doesn't interfere with our click handling.
+		btn = document.createElement('div')
 		btn.id = MENU_BTN_ID
 		btn.textContent = '\u266B'
 		btn.title = 'YT Music Redirect'
+		btn.setAttribute('role', 'button')
+		btn.setAttribute('tabindex', '0')
 		btn.setAttribute('aria-label', 'YT Music Redirect menu')
 
 		// Insert into the masthead end buttons (where Create + avatar live)
 		const buttonsContainer =
 			document.querySelector('ytd-masthead #end #buttons') ||
+			document.querySelector('ytd-masthead #end #end-buttons') ||
 			document.querySelector('ytd-masthead #end')
 		if (buttonsContainer) {
 			buttonsContainer.insertBefore(btn, buttonsContainer.firstChild)
 		} else {
 			// Fallback: fixed position in top-right
-			btn.style.cssText = 'position:fixed;top:8px;right:60px;z-index:9999;'
+			btn.style.cssText +=
+				';position:fixed;top:8px;right:60px;z-index:9999;background:rgba(0,0,0,0.6);'
 			document.body.appendChild(btn)
 		}
 
-		// Toggle dropdown on click
-		btn.addEventListener('click', (e) => {
+		// Toggle dropdown on click. Use capture phase + stopImmediatePropagation
+		// so YouTube's masthead delegated handlers can't swallow the event.
+		const onTrigger = (e) => {
 			e.stopPropagation()
+			e.stopImmediatePropagation()
 			const dropdown = document.getElementById(DROPDOWN_ID)
-			if (!dropdown) return
-			const isOpen = dropdown.classList.toggle('ytmr-visible')
-			btn.classList.toggle('ytmr-open', isOpen)
+			if (!dropdown) {
+				warn('Menu clicked but dropdown is missing')
+				return
+			}
+			const willOpen = !dropdown.classList.contains('ytmr-visible')
+			dropdown.classList.toggle('ytmr-visible', willOpen)
+			btn.classList.toggle('ytmr-open', willOpen)
+			if (willOpen) positionDropdown(btn, dropdown)
+		}
+		btn.addEventListener('click', onTrigger, true)
+		btn.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter' || e.key === ' ') onTrigger(e)
 		})
 
 		// Close dropdown when clicking outside
-		document.addEventListener('click', () => {
+		document.addEventListener(
+			'click',
+			(e) => {
+				const dropdown = document.getElementById(DROPDOWN_ID)
+				if (!dropdown) return
+				if (e.target === btn || btn.contains(e.target) || dropdown.contains(e.target)) return
+				dropdown.classList.remove('ytmr-visible')
+				btn.classList.remove('ytmr-open')
+			},
+			true,
+		)
+
+		// Reposition on scroll/resize while open
+		const reposition = () => {
 			const dropdown = document.getElementById(DROPDOWN_ID)
-			if (dropdown) dropdown.classList.remove('ytmr-visible')
-			btn.classList.remove('ytmr-open')
-		})
+			if (dropdown && dropdown.classList.contains('ytmr-visible')) {
+				positionDropdown(btn, dropdown)
+			}
+		}
+		window.addEventListener('scroll', reposition, true)
+		window.addEventListener('resize', reposition)
 
 		return btn
 	}
@@ -504,9 +549,8 @@
 		dismissItem.addEventListener('click', () => removeRedirectButton())
 		dropdown.appendChild(dismissItem)
 
-		// Attach dropdown relative to the button
-		menuBtn.style.position = 'relative'
-		menuBtn.appendChild(dropdown)
+		// Attach dropdown to body so it isn't trapped inside masthead/button DOM
+		document.body.appendChild(dropdown)
 
 		log('Redirect menu injected into masthead')
 	}
