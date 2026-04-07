@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.3.4
+// @version      1.3.5
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.3.4'
+	const SCRIPT_VERSION = '1.3.5'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =
@@ -569,10 +569,13 @@
 		bindItem(dismissItem, () => removeRedirectButton())
 		dropdown.appendChild(dismissItem)
 
-		// Attach dropdown to body so it isn't trapped inside masthead/button DOM
-		document.body.appendChild(dropdown)
+		// Attach dropdown inside the trigger div. The trigger is a <div> (not a
+		// <button>), so nesting interactive controls is fine, and this keeps
+		// the dropdown bound to the trigger lifecycle — some YouTube SPA cleanup
+		// was removing body-level children, leaving the button orphaned.
+		menuBtn.appendChild(dropdown)
 
-		log('Redirect menu injected into masthead')
+		log('Redirect menu injected')
 	}
 
 	function createDivider() {
