@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.3.2
+// @version      1.3.3
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.3.2'
+	const SCRIPT_VERSION = '1.3.3'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =
@@ -445,6 +445,15 @@
 		btn.addEventListener('click', onTrigger, true)
 		btn.addEventListener('keydown', (e) => {
 			if (e.key === 'Enter' || e.key === ' ') onTrigger(e)
+		})
+
+		// Close on Escape when the dropdown is open
+		document.addEventListener('keydown', (e) => {
+			if (e.key !== 'Escape') return
+			const dropdown = document.getElementById(DROPDOWN_ID)
+			if (!dropdown || !dropdown.classList.contains('ytmr-visible')) return
+			dropdown.classList.remove('ytmr-visible')
+			btn.classList.remove('ytmr-open')
 		})
 
 		// Close dropdown when clicking outside
