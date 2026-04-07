@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.3.3
+// @version      1.3.4
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.3.3'
+	const SCRIPT_VERSION = '1.3.4'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =
@@ -311,12 +311,12 @@
 				background: #1976d2;
 			}
 
-			/* ── Floating icon button (fixed, top-right) ── */
+			/* ── Floating icon button (fixed, below masthead) ── */
 			#${MENU_BTN_ID} {
 				position: fixed;
-				top: 12px;
-				right: 200px;
-				z-index: 9999;
+				top: 72px;
+				right: 16px;
+				z-index: 2147483000;
 				display: inline-flex;
 				align-items: center;
 				justify-content: center;
@@ -427,11 +427,16 @@
 		// YouTube's masthead, which keeps us safe from SPA re-renders.
 		document.body.appendChild(btn)
 
-		// Toggle dropdown on click. Use capture phase + stopImmediatePropagation
-		// so YouTube's masthead delegated handlers can't swallow the event.
+		// Toggle dropdown. Use pointerdown (not click) because YouTube's masthead
+		// has delegated handlers that can suppress synthesized click events on
+		// elements overlapping its area. pointerdown fires earlier and isn't
+		// subject to that suppression. Also use capture phase + preventDefault
+		// so nothing upstream can steal the event.
 		const onTrigger = (e) => {
+			e.preventDefault()
 			e.stopPropagation()
 			e.stopImmediatePropagation()
+			log('Menu button triggered')
 			const dropdown = document.getElementById(DROPDOWN_ID)
 			if (!dropdown) {
 				warn('Menu clicked but dropdown is missing')
@@ -442,6 +447,8 @@
 			btn.classList.toggle('ytmr-open', willOpen)
 			if (willOpen) positionDropdown(btn, dropdown)
 		}
+		btn.addEventListener('pointerdown', onTrigger, true)
+		// Fallback for environments where pointerdown isn't available
 		btn.addEventListener('click', onTrigger, true)
 		btn.addEventListener('keydown', (e) => {
 			if (e.key === 'Enter' || e.key === ' ') onTrigger(e)
@@ -457,17 +464,15 @@
 		})
 
 		// Close dropdown when clicking outside
-		document.addEventListener(
-			'click',
-			(e) => {
-				const dropdown = document.getElementById(DROPDOWN_ID)
-				if (!dropdown) return
-				if (e.target === btn || btn.contains(e.target) || dropdown.contains(e.target)) return
-				dropdown.classList.remove('ytmr-visible')
-				btn.classList.remove('ytmr-open')
-			},
-			true,
-		)
+		const onOutside = (e) => {
+			const dropdown = document.getElementById(DROPDOWN_ID)
+			if (!dropdown) return
+			if (e.target === btn || btn.contains(e.target) || dropdown.contains(e.target)) return
+			dropdown.classList.remove('ytmr-visible')
+			btn.classList.remove('ytmr-open')
+		}
+		document.addEventListener('pointerdown', onOutside, true)
+		document.addEventListener('click', onOutside, true)
 
 		// Reposition on scroll/resize while open
 		const reposition = () => {
@@ -492,14 +497,27 @@
 		const dropdown = document.createElement('div')
 		dropdown.id = DROPDOWN_ID
 
-		// Prevent clicks inside dropdown from closing it
+		// Prevent pointer events inside dropdown from closing it
+		dropdown.addEventListener('pointerdown', (e) => e.stopPropagation())
 		dropdown.addEventListener('click', (e) => e.stopPropagation())
+
+		// Helper: bind a menu item to a handler using pointerdown (for the
+		// same reason we use pointerdown on the trigger) with click fallback.
+		const bindItem = (el, handler) => {
+			const wrapped = (e) => {
+				e.preventDefault()
+				e.stopPropagation()
+				handler()
+			}
+			el.addEventListener('pointerdown', wrapped)
+			el.addEventListener('click', wrapped)
+		}
 
 		// Open in YT Music
 		const redirectItem = document.createElement('button')
 		redirectItem.className = 'ytmr-menu-item ytmr-redirect-item'
 		redirectItem.innerHTML = '<span class="ytmr-icon">\u266B</span> Open in YT Music'
-		redirectItem.addEventListener('click', () => redirectToMusic(videoId))
+		bindItem(redirectItem, () => redirectToMusic(videoId))
 		dropdown.appendChild(redirectItem)
 
 		if (channelId) {
@@ -518,7 +536,7 @@
 			}
 
 			updateChannelItem(inList)
-			channelItem.addEventListener('click', () => {
+			bindItem(channelItem, () => {
 				if (isChannelInList(channelId)) {
 					removeChannel(channelId)
 					updateChannelItem(false)
@@ -534,7 +552,7 @@
 			blockItem.className = 'ytmr-menu-item'
 			blockItem.innerHTML = `<span class="ytmr-icon">\u2715</span> Not a music channel`
 			blockItem.title = `Never show redirect for ${displayName}`
-			blockItem.addEventListener('click', () => {
+			bindItem(blockItem, () => {
 				blockChannel(channelId, channelName)
 				removeRedirectButton()
 				log(`Blocked "${displayName}" — redirect UI removed`)
@@ -548,7 +566,7 @@
 		const dismissItem = document.createElement('button')
 		dismissItem.className = 'ytmr-menu-item'
 		dismissItem.innerHTML = '<span class="ytmr-icon">\u00D7</span> Dismiss'
-		dismissItem.addEventListener('click', () => removeRedirectButton())
+		bindItem(dismissItem, () => removeRedirectButton())
 		dropdown.appendChild(dismissItem)
 
 		// Attach dropdown to body so it isn't trapped inside masthead/button DOM
