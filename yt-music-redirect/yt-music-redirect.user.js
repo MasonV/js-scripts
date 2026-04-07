@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.3.1
+// @version      1.3.2
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.3.1'
+	const SCRIPT_VERSION = '1.3.2'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =
@@ -311,9 +311,12 @@
 				background: #1976d2;
 			}
 
-			/* ── Masthead icon button ── */
+			/* ── Floating icon button (fixed, top-right) ── */
 			#${MENU_BTN_ID} {
-				position: relative;
+				position: fixed;
+				top: 12px;
+				right: 200px;
+				z-index: 9999;
 				display: inline-flex;
 				align-items: center;
 				justify-content: center;
@@ -321,19 +324,19 @@
 				height: 40px;
 				border: none;
 				border-radius: 50%;
-				background: transparent;
+				background: rgba(0, 0, 0, 0.55);
 				color: #fff;
 				font-size: 20px;
+				line-height: 1;
 				cursor: pointer;
 				transition: background 0.15s;
-				vertical-align: middle;
 				user-select: none;
 			}
 			#${MENU_BTN_ID}:hover {
-				background: rgba(255, 255, 255, 0.1);
+				background: rgba(0, 0, 0, 0.75);
 			}
 			#${MENU_BTN_ID}.ytmr-open {
-				background: rgba(255, 255, 255, 0.15);
+				background: rgba(0, 0, 0, 0.85);
 			}
 
 			/* ── Dropdown menu (body-level, fixed positioned) ── */
@@ -420,19 +423,9 @@
 		btn.setAttribute('tabindex', '0')
 		btn.setAttribute('aria-label', 'YT Music Redirect menu')
 
-		// Insert into the masthead end buttons (where Create + avatar live)
-		const buttonsContainer =
-			document.querySelector('ytd-masthead #end #buttons') ||
-			document.querySelector('ytd-masthead #end #end-buttons') ||
-			document.querySelector('ytd-masthead #end')
-		if (buttonsContainer) {
-			buttonsContainer.insertBefore(btn, buttonsContainer.firstChild)
-		} else {
-			// Fallback: fixed position in top-right
-			btn.style.cssText +=
-				';position:fixed;top:8px;right:60px;z-index:9999;background:rgba(0,0,0,0.6);'
-			document.body.appendChild(btn)
-		}
+		// Append to body — fixed positioning means we don't need to live in
+		// YouTube's masthead, which keeps us safe from SPA re-renders.
+		document.body.appendChild(btn)
 
 		// Toggle dropdown on click. Use capture phase + stopImmediatePropagation
 		// so YouTube's masthead delegated handlers can't swallow the event.
