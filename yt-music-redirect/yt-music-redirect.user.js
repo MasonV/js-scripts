@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.3.5
+// @version      1.3.6
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.3.5'
+	const SCRIPT_VERSION = '1.3.6'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =
@@ -602,10 +602,173 @@
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
+	//  BUTTON CLICKABILITY DIAGNOSTIC (temporary — remove after testing)
+	// ═══════════════════════════════════════════════════════════════════
+
+	function injectClickabilityTest() {
+		const BASE = `
+			position: fixed;
+			right: 8px;
+			z-index: 2147483647;
+			width: 190px;
+			padding: 6px 10px;
+			border-radius: 6px;
+			font: bold 11px monospace;
+			text-align: center;
+			cursor: pointer;
+			box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+			pointer-events: all !important;
+			border: none;
+			color: #fff;
+		`
+		const COLORS = ['#b71c1c','#e65100','#f57f17','#1b5e20','#0d47a1','#4a148c','#880e4f','#006064','#37474f','#4e342e']
+
+		function topPx(i) { return 72 + i * 58 }
+
+		function markHit(n, method) {
+			log(`DIAGNOSTIC btn ${n} fired — ${method}`)
+			const s = document.getElementById(`ytbt-s-${n}`)
+			if (s) { s.textContent = 'CLICKED!'; s.style.background = '#00c853' }
+		}
+
+		function status(n) {
+			const s = document.createElement('span')
+			s.id = `ytbt-s-${n}`
+			s.style.cssText = 'display:block;margin-top:3px;padding:2px 4px;border-radius:3px;font-size:10px;background:rgba(0,0,0,0.4)'
+			s.textContent = 'waiting...'
+			return s
+		}
+
+		// 1. <button> + click, body
+		;(function() {
+			const n = 1, btn = document.createElement('button')
+			btn.style.cssText = BASE + `top:${topPx(0)}px;background:${COLORS[0]}`
+			btn.textContent = `${n}. <button> click`
+			btn.appendChild(status(n))
+			btn.addEventListener('click', () => markHit(n, '<button> click, body'))
+			document.body.appendChild(btn)
+		})()
+
+		// 2. <button> + pointerdown capture, body
+		;(function() {
+			const n = 2, btn = document.createElement('button')
+			btn.style.cssText = BASE + `top:${topPx(1)}px;background:${COLORS[1]}`
+			btn.textContent = `${n}. <button> pointerdown`
+			btn.appendChild(status(n))
+			btn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); markHit(n, '<button> pointerdown capture, body') }, true)
+			document.body.appendChild(btn)
+		})()
+
+		// 3. <div role=button> + pointerdown capture (mirrors current broken approach)
+		;(function() {
+			const n = 3, btn = document.createElement('div')
+			btn.setAttribute('role', 'button')
+			btn.setAttribute('tabindex', '0')
+			btn.style.cssText = BASE + `top:${topPx(2)}px;background:${COLORS[2]}`
+			btn.textContent = `${n}. <div> pointerdown`
+			btn.appendChild(status(n))
+			btn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); markHit(n, '<div role=button> pointerdown capture') }, true)
+			document.body.appendChild(btn)
+		})()
+
+		// 4. <button> appended to <html> not <body>
+		;(function() {
+			const n = 4, btn = document.createElement('button')
+			btn.style.cssText = BASE + `top:${topPx(3)}px;background:${COLORS[3]}`
+			btn.textContent = `${n}. <button> on <html>`
+			btn.appendChild(status(n))
+			btn.addEventListener('click', () => markHit(n, '<button> click, documentElement'))
+			document.documentElement.appendChild(btn)
+		})()
+
+		// 5. Shadow DOM
+		;(function() {
+			const n = 5
+			const host = document.createElement('div')
+			host.style.cssText = `position:fixed;top:${topPx(4)}px;right:8px;z-index:2147483647;pointer-events:all !important`
+			const shadow = host.attachShadow({ mode: 'open' })
+			const styleEl = document.createElement('style')
+			styleEl.textContent = `button { ${BASE.replace('position: fixed;','')} background:${COLORS[4]};display:block;width:190px }`
+			const btn = document.createElement('button')
+			btn.textContent = `${n}. Shadow DOM`
+			btn.appendChild(status(n))
+			btn.addEventListener('click', () => markHit(n, 'Shadow DOM <button> click'))
+			shadow.appendChild(styleEl)
+			shadow.appendChild(btn)
+			document.body.appendChild(host)
+		})()
+
+		// 6. <button> + mousedown capture
+		;(function() {
+			const n = 6, btn = document.createElement('button')
+			btn.style.cssText = BASE + `top:${topPx(5)}px;background:${COLORS[5]}`
+			btn.textContent = `${n}. mousedown capture`
+			btn.appendChild(status(n))
+			btn.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); markHit(n, '<button> mousedown capture') }, true)
+			document.body.appendChild(btn)
+		})()
+
+		// 7. inline .onclick property
+		;(function() {
+			const n = 7, btn = document.createElement('button')
+			btn.style.cssText = BASE + `top:${topPx(6)}px;background:${COLORS[6]}`
+			btn.textContent = `${n}. inline onclick`
+			btn.appendChild(status(n))
+			btn.onclick = (e) => { e.stopPropagation(); markHit(n, 'inline .onclick property') }
+			document.body.appendChild(btn)
+		})()
+
+		// 8. <a> tag
+		;(function() {
+			const n = 8, btn = document.createElement('a')
+			btn.style.cssText = BASE + `top:${topPx(7)}px;background:${COLORS[7]};text-decoration:none;display:block`
+			btn.textContent = `${n}. <a> click`
+			btn.href = '#'
+			btn.appendChild(status(n))
+			btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); markHit(n, '<a href="#"> click') })
+			document.body.appendChild(btn)
+		})()
+
+		// 9. Listener on window watching for hits on the element
+		;(function() {
+			const n = 9, btn = document.createElement('button')
+			btn.id = 'ytbt-btn-9'
+			btn.style.cssText = BASE + `top:${topPx(8)}px;background:${COLORS[8]}`
+			btn.textContent = `${n}. window capture`
+			btn.appendChild(status(n))
+			document.body.appendChild(btn)
+			window.addEventListener('pointerdown', (e) => {
+				if (e.target === btn || btn.contains(e.target)) {
+					e.preventDefault(); e.stopImmediatePropagation()
+					markHit(n, 'window pointerdown capture + target check')
+				}
+			}, true)
+		})()
+
+		// 10. <input type=button>
+		;(function() {
+			const n = 10
+			const wrap = document.createElement('div')
+			wrap.style.cssText = `position:fixed;top:${topPx(9)}px;right:8px;z-index:2147483647`
+			const btn = document.createElement('input')
+			btn.type = 'button'
+			btn.value = `${n}. <input type=button>`
+			btn.style.cssText = BASE.replace('position: fixed;','') + `background:${COLORS[9]};width:190px`
+			btn.addEventListener('click', () => markHit(n, '<input type=button> click'))
+			wrap.appendChild(btn)
+			wrap.appendChild(status(n))
+			document.body.appendChild(wrap)
+		})()
+
+		log('Diagnostic: 10 test buttons injected')
+	}
+
+	// ═══════════════════════════════════════════════════════════════════
 	//  EVENT LISTENERS
 	// ═══════════════════════════════════════════════════════════════════
 
 	checkForUpdate()
+	injectClickabilityTest()
 
 	// Initial page load
 	if (window.location.pathname === '/watch') {
