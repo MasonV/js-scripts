@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.3.11
+// @version      1.3.12
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.3.11'
+	const SCRIPT_VERSION = '1.3.12'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =
@@ -352,7 +352,7 @@
 				font-family: 'YouTube Sans', 'Roboto', sans-serif;
 				font-size: 14px;
 				color: #e0e0e0;
-				z-index: 10001;
+				z-index: 2147483647;
 			}
 			#${DROPDOWN_ID}.ytmr-visible {
 				display: block;
@@ -583,6 +583,8 @@
 
 	// YouTube SPA navigation — fired after client-side route changes
 	document.addEventListener('yt-navigate-finish', () => {
+		// Clear cache so returning to the same video recreates the dropdown
+		checked.clear()
 		if (window.location.pathname === '/watch') {
 			handleWatch()
 		} else {
