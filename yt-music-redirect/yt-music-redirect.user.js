@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.3.7
+// @version      1.3.8
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.3.7'
+	const SCRIPT_VERSION = '1.3.8'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =
@@ -988,7 +988,96 @@
 			log('V18 FULL REPRODUCTION injected — this should fail like the real button')
 		}, 2000)
 
-		log('Replica variants V11–V18 injected (right column). V13 & V18 appear after 2s.')
+		// ═══════════════════════════════════════════════════════════════════
+		//  v1.3.8 — V11 is blocked by the real menu button. These prove it.
+		// ═══════════════════════════════════════════════════════════════════
+		//
+		//  v1.3.7 result: V11 is the only failing variant. V18 (full reproduction)
+		//  works. The only thing unique to V11 is that it sits at the EXACT same
+		//  spot as the real #ytmr-menu-btn (top:72px right:16px) with the same
+		//  z-index (2147483000). Since the real button is appended LATER in the
+		//  DOM, it wins the stacking fight and swallows all clicks at that spot.
+
+		// ── V19: V11 + MAX z-index — beats the real button at stacking ──
+		//    If this works, the problem was just z-order / DOM order.
+		;(function () {
+			const n = 19, top = 72
+			const btn = makeReplica({ n, top, desc: 'V19 same as V11 but MAX z-index', zIndex: MAX_Z })
+			attachListener(btn, n, 'max z-index over real button')
+			document.body.appendChild(btn)
+			// Label shifted down-left so it doesn't overlap with V11's label
+			const lbl = makeLabel(n, top - 20, 'V19 max z over real')
+			lbl.style.right = '180px'
+			document.body.appendChild(lbl)
+		})()
+
+		// ── V20: V11 shifted horizontally — same row, different column ──
+		//    At right:80 so it clears the real button (which spans right:16-56).
+		//    Isolates whether the top:72 row itself has something weird, or
+		//    whether the issue is strictly the column the real button occupies.
+		;(function () {
+			const n = 20, top = 72
+			const btn = makeReplica({ n, top, desc: 'V20 same top but right:80', right: 80 })
+			attachListener(btn, n, 'offset to right:80')
+			document.body.appendChild(btn)
+			const lbl = makeLabel(n, top + 20, 'V20 right:80')
+			lbl.style.right = '130px'
+			document.body.appendChild(lbl)
+		})()
+
+		// ── V21: Delete the real menu button, then inject V11 at its spot ──
+		//    Waits 3s for handleWatch() to create the real button, nukes it,
+		//    then drops V21 in its place. If THIS works, the real button was
+		//    the sole blocker.
+		setTimeout(() => {
+			const realBtn = document.getElementById('ytmr-menu-btn')
+			if (realBtn) {
+				log(`V21: removing real menu button before injecting (was at ${realBtn.getBoundingClientRect().top}, ${realBtn.getBoundingClientRect().right})`)
+				realBtn.remove()
+			} else {
+				log('V21: real menu button was not present at injection time')
+			}
+			const n = 21, top = 72
+			const btn = makeReplica({ n, top, desc: 'V21 after deleting #ytmr-menu-btn' })
+			attachListener(btn, n, 'after removing real button')
+			document.body.appendChild(btn)
+			const lbl = makeLabel(n, top + 40, 'V21 real btn deleted')
+			lbl.style.right = '80px'
+			document.body.appendChild(lbl)
+		}, 3000)
+
+		// ── V22: Outline the real #ytmr-menu-btn so it's visually obvious ──
+		//    Not a clickable variant — just adds a bright red outline + label
+		//    to the real button after 3s so you can SEE exactly where it is
+		//    relative to V11 and confirm the overlap.
+		setTimeout(() => {
+			const realBtn = document.getElementById('ytmr-menu-btn')
+			if (!realBtn) {
+				log('V22 highlight: real menu button is NOT in the DOM — nothing to overlap V11')
+				return
+			}
+			realBtn.style.outline = '3px solid #ff1744'
+			realBtn.style.outlineOffset = '2px'
+			const rect = realBtn.getBoundingClientRect()
+			log(`V22 highlight: real menu button present at top:${rect.top} right:${window.innerWidth - rect.right} (z-index ${getComputedStyle(realBtn).zIndex})`)
+			const marker = document.createElement('div')
+			marker.textContent = 'REAL BTN ↑'
+			marker.style.cssText = `
+				position: fixed;
+				top: ${rect.bottom + 4}px;
+				right: 4px;
+				z-index: ${MAX_Z};
+				padding: 2px 4px;
+				background: #ff1744;
+				color: #fff;
+				font: bold 9px monospace;
+				border-radius: 2px;
+				pointer-events: none;
+			`
+			document.body.appendChild(marker)
+		}, 3000)
+
+		log('Replica variants V11–V22 injected. V13/V18/V21/V22 appear after 2–3s.')
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
