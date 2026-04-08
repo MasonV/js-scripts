@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.3.9
+// @version      1.3.10
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.3.9'
+	const SCRIPT_VERSION = '1.3.10'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =
@@ -580,7 +580,13 @@
 	//            same spot as the real button with same z-index). V18 (full repro) worked.
 	//   v1.3.8 — Hypothesis: real #ytmr-menu-btn (later in DOM, same z-index) sits on
 	//            top of V11 and swallows its clicks. Added V19-V22 to confirm.
-	//   v1.3.9 — Stripped to just the 4 focused tests.
+	//   v1.3.9 — 4 focused tests. Result: V20 (right:80) and V21 (cleared spot) both
+	//            clicked. V19 got auto-removed by V21 before user could test it. The
+	//            real button was still visible after V21 ran (removal failed or re-created),
+	//            but V21 clicked because it was the last DOM element at that spot — same
+	//            z-index, later sibling wins.
+	//   v1.3.10 — Just V19 (MAX z-index, never removed) to confirm whether z-index
+	//             bump alone fixes it, plus V20 as sanity check.
 
 	function injectDiagnostic() {
 		const REAL_Z = 2147483000
@@ -645,49 +651,23 @@
 			return el
 		}
 
-		// ── V19: Exact real-button spot, MAX z-index ──
-		//    If this clicks: bumping z-index to max is the fix.
+		// ── V19: Exact real-button spot, MAX z-index — stays permanently ──
+		//    If this clicks: bumping the real button's z-index is the fix.
+		//    If this fails: something blocks even MAX_Z at this coordinate.
 		;(function () {
 			const n = 19, top = 72
 			document.body.appendChild(makeBtn({ n, top, z: MAX_Z, desc: 'V19 real location + MAX z-index' }))
-			document.body.appendChild(makeLabel(n, top, 'V19 max-z @ real spot'))
+			document.body.appendChild(makeLabel(n, top, 'V19 max-z'))
 		})()
 
-		// ── V20: Same row (top:72), shifted right to right:80 ──
-		//    Clears the real button's column (right:16–56).
-		//    If V19 fails but V20 works: something at right:16 blocks even MAX_Z.
+		// ── V20: Same row (top:72), right:80 — sanity check ──
 		;(function () {
 			const n = 20, top = 72
-			document.body.appendChild(makeBtn({ n, top, right: 80, desc: 'V20 top:72 right:80 — offset from real button' }))
-			document.body.appendChild(makeLabel(n, top, 'V20 right:80 same row', 130))
+			document.body.appendChild(makeBtn({ n, top, right: 80, desc: 'V20 top:72 right:80' }))
+			document.body.appendChild(makeLabel(n, top, 'V20 right:80', 130))
 		})()
 
-		// ── V21: Remove real button + V19, inject bare replica at real spot ──
-		//    After 3s: nukes real button and V19 from right:16, drops bare replica.
-		//    If it clicks: real button was the sole blocker.
-		//    Check console to confirm whether real button was present.
-		setTimeout(() => {
-			document.getElementById('ytmr-menu-btn')?.remove()
-			document.getElementById('ytmr-d-19')?.remove()
-			document.getElementById('ytmr-d-19-lbl')?.remove()
-			const n = 21, top = 72
-			document.body.appendChild(makeBtn({ n, top, desc: 'V21 injected after removing real button + V19' }))
-			document.body.appendChild(makeLabel(n, top, 'V21 cleared spot'))
-			log('V21: real button removed, bare replica injected at top:72 right:16')
-		}, 3000)
-
-		// ── V22: Visual only — red outline on the real button ──
-		//    Shows exactly where it sits so you can confirm overlap with V19/V21.
-		setTimeout(() => {
-			const realBtn = document.getElementById('ytmr-menu-btn')
-			if (!realBtn) { log('V22: real button not in DOM at 2.5s'); return }
-			realBtn.style.outline = '3px solid #ff1744'
-			realBtn.style.outlineOffset = '2px'
-			const r = realBtn.getBoundingClientRect()
-			log(`V22: real button at top:${Math.round(r.top)} right:${Math.round(window.innerWidth - r.right)} z:${getComputedStyle(realBtn).zIndex}`)
-		}, 2500)
-
-		log('Diagnostic V19–V22 injected. V21+V22 fire after 2.5–3s.')
+		log('Diagnostic V19+V20 injected. Click V19 — if green, z-index bump fixes the real button.')
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
