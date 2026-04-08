@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.3.8
+// @version      1.3.9
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.3.8'
+	const SCRIPT_VERSION = '1.3.9'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =
@@ -397,10 +397,6 @@
 		document.head.appendChild(style)
 	}
 
-	/**
-	 * Injects the ♫ icon button into the YouTube masthead, right before
-	 * the Create button / avatar area.
-	 */
 	function positionDropdown(btn, dropdown) {
 		const rect = btn.getBoundingClientRect()
 		const width = dropdown.offsetWidth || 240
@@ -412,9 +408,6 @@
 		let btn = document.getElementById(MENU_BTN_ID)
 		if (btn) return btn
 
-		// Use a <div role=button> rather than <button> so we can safely host
-		// (or be adjacent to) other interactive content, and so YouTube's
-		// masthead button delegation doesn't interfere with our click handling.
 		btn = document.createElement('div')
 		btn.id = MENU_BTN_ID
 		btn.textContent = '\u266B'
@@ -423,15 +416,8 @@
 		btn.setAttribute('tabindex', '0')
 		btn.setAttribute('aria-label', 'YT Music Redirect menu')
 
-		// Append to body — fixed positioning means we don't need to live in
-		// YouTube's masthead, which keeps us safe from SPA re-renders.
 		document.body.appendChild(btn)
 
-		// Toggle dropdown. Use pointerdown (not click) because YouTube's masthead
-		// has delegated handlers that can suppress synthesized click events on
-		// elements overlapping its area. pointerdown fires earlier and isn't
-		// subject to that suppression. Also use capture phase + preventDefault
-		// so nothing upstream can steal the event.
 		const onTrigger = (e) => {
 			e.preventDefault()
 			e.stopPropagation()
@@ -448,13 +434,11 @@
 			if (willOpen) positionDropdown(btn, dropdown)
 		}
 		btn.addEventListener('pointerdown', onTrigger, true)
-		// Fallback for environments where pointerdown isn't available
 		btn.addEventListener('click', onTrigger, true)
 		btn.addEventListener('keydown', (e) => {
 			if (e.key === 'Enter' || e.key === ' ') onTrigger(e)
 		})
 
-		// Close on Escape when the dropdown is open
 		document.addEventListener('keydown', (e) => {
 			if (e.key !== 'Escape') return
 			const dropdown = document.getElementById(DROPDOWN_ID)
@@ -463,7 +447,6 @@
 			btn.classList.remove('ytmr-open')
 		})
 
-		// Close dropdown when clicking outside
 		const onOutside = (e) => {
 			const dropdown = document.getElementById(DROPDOWN_ID)
 			if (!dropdown) return
@@ -474,7 +457,6 @@
 		document.addEventListener('pointerdown', onOutside, true)
 		document.addEventListener('click', onOutside, true)
 
-		// Reposition on scroll/resize while open
 		const reposition = () => {
 			const dropdown = document.getElementById(DROPDOWN_ID)
 			if (dropdown && dropdown.classList.contains('ytmr-visible')) {
@@ -493,16 +475,12 @@
 
 		const menuBtn = getOrCreateMenuBtn()
 
-		// ── Build dropdown ──
 		const dropdown = document.createElement('div')
 		dropdown.id = DROPDOWN_ID
 
-		// Prevent pointer events inside dropdown from closing it
 		dropdown.addEventListener('pointerdown', (e) => e.stopPropagation())
 		dropdown.addEventListener('click', (e) => e.stopPropagation())
 
-		// Helper: bind a menu item to a handler using pointerdown (for the
-		// same reason we use pointerdown on the trigger) with click fallback.
 		const bindItem = (el, handler) => {
 			const wrapped = (e) => {
 				e.preventDefault()
@@ -513,7 +491,6 @@
 			el.addEventListener('click', wrapped)
 		}
 
-		// Open in YT Music
 		const redirectItem = document.createElement('button')
 		redirectItem.className = 'ytmr-menu-item ytmr-redirect-item'
 		redirectItem.innerHTML = '<span class="ytmr-icon">\u266B</span> Open in YT Music'
@@ -523,7 +500,6 @@
 		if (channelId) {
 			dropdown.appendChild(createDivider())
 
-			// Auto-redirect toggle
 			const displayName = channelName || 'this channel'
 			const channelItem = document.createElement('button')
 			const inList = isChannelInList(channelId)
@@ -547,7 +523,6 @@
 			})
 			dropdown.appendChild(channelItem)
 
-			// Not music — blocklist
 			const blockItem = document.createElement('button')
 			blockItem.className = 'ytmr-menu-item'
 			blockItem.innerHTML = `<span class="ytmr-icon">\u2715</span> Not a music channel`
@@ -562,17 +537,12 @@
 
 		dropdown.appendChild(createDivider())
 
-		// Dismiss for this video
 		const dismissItem = document.createElement('button')
 		dismissItem.className = 'ytmr-menu-item'
 		dismissItem.innerHTML = '<span class="ytmr-icon">\u00D7</span> Dismiss'
 		bindItem(dismissItem, () => removeRedirectButton())
 		dropdown.appendChild(dismissItem)
 
-		// Attach dropdown inside the trigger div. The trigger is a <div> (not a
-		// <button>), so nesting interactive controls is fine, and this keeps
-		// the dropdown bound to the trigger lifecycle — some YouTube SPA cleanup
-		// was removing body-level children, leaving the button orphaned.
 		menuBtn.appendChild(dropdown)
 
 		log('Redirect menu injected')
@@ -584,7 +554,6 @@
 		return d
 	}
 
-	/** Escapes HTML entities in user-supplied text */
 	function esc(str) {
 		const el = document.createElement('span')
 		el.textContent = str
@@ -604,480 +573,121 @@
 	// ═══════════════════════════════════════════════════════════════════
 	//  BUTTON CLICKABILITY DIAGNOSTIC (temporary — remove after testing)
 	// ═══════════════════════════════════════════════════════════════════
-
-	function injectClickabilityTest() {
-		const BASE = `
-			position: fixed;
-			left: 260px;
-			z-index: 2147483647;
-			width: 190px;
-			padding: 6px 10px;
-			border-radius: 6px;
-			font: bold 11px monospace;
-			text-align: center;
-			cursor: pointer;
-			box-shadow: 0 2px 8px rgba(0,0,0,0.6);
-			pointer-events: all !important;
-			border: none;
-			color: #fff;
-		`
-		const COLORS = ['#b71c1c','#e65100','#f57f17','#1b5e20','#0d47a1','#4a148c','#880e4f','#006064','#37474f','#4e342e']
-
-		function topPx(i) { return 72 + i * 58 }
-
-		function markHit(n, method) {
-			log(`DIAGNOSTIC btn ${n} fired — ${method}`)
-			const s = document.getElementById(`ytbt-s-${n}`)
-			if (s) { s.textContent = 'CLICKED!'; s.style.background = '#00c853' }
-		}
-
-		function status(n) {
-			const s = document.createElement('span')
-			s.id = `ytbt-s-${n}`
-			s.style.cssText = 'display:block;margin-top:3px;padding:2px 4px;border-radius:3px;font-size:10px;background:rgba(0,0,0,0.4)'
-			s.textContent = 'waiting...'
-			return s
-		}
-
-		// 1. <button> + click, body
-		;(function() {
-			const n = 1, btn = document.createElement('button')
-			btn.style.cssText = BASE + `top:${topPx(0)}px;background:${COLORS[0]}`
-			btn.textContent = `${n}. <button> click`
-			btn.appendChild(status(n))
-			btn.addEventListener('click', () => markHit(n, '<button> click, body'))
-			document.body.appendChild(btn)
-		})()
-
-		// 2. <button> + pointerdown capture, body
-		;(function() {
-			const n = 2, btn = document.createElement('button')
-			btn.style.cssText = BASE + `top:${topPx(1)}px;background:${COLORS[1]}`
-			btn.textContent = `${n}. <button> pointerdown`
-			btn.appendChild(status(n))
-			btn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); markHit(n, '<button> pointerdown capture, body') }, true)
-			document.body.appendChild(btn)
-		})()
-
-		// 3. <div role=button> + pointerdown capture (mirrors current broken approach)
-		;(function() {
-			const n = 3, btn = document.createElement('div')
-			btn.setAttribute('role', 'button')
-			btn.setAttribute('tabindex', '0')
-			btn.style.cssText = BASE + `top:${topPx(2)}px;background:${COLORS[2]}`
-			btn.textContent = `${n}. <div> pointerdown`
-			btn.appendChild(status(n))
-			btn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); markHit(n, '<div role=button> pointerdown capture') }, true)
-			document.body.appendChild(btn)
-		})()
-
-		// 4. <button> appended to <html> not <body>
-		;(function() {
-			const n = 4, btn = document.createElement('button')
-			btn.style.cssText = BASE + `top:${topPx(3)}px;background:${COLORS[3]}`
-			btn.textContent = `${n}. <button> on <html>`
-			btn.appendChild(status(n))
-			btn.addEventListener('click', () => markHit(n, '<button> click, documentElement'))
-			document.documentElement.appendChild(btn)
-		})()
-
-		// 5. Shadow DOM
-		;(function() {
-			const n = 5
-			const host = document.createElement('div')
-			host.style.cssText = `position:fixed;top:${topPx(4)}px;left:260px;z-index:2147483647;pointer-events:all !important`
-			const shadow = host.attachShadow({ mode: 'open' })
-			const styleEl = document.createElement('style')
-			styleEl.textContent = `button { ${BASE.replace('position: fixed;','')} background:${COLORS[4]};display:block;width:190px }`
-			const btn = document.createElement('button')
-			btn.textContent = `${n}. Shadow DOM`
-			btn.appendChild(status(n))
-			btn.addEventListener('click', () => markHit(n, 'Shadow DOM <button> click'))
-			shadow.appendChild(styleEl)
-			shadow.appendChild(btn)
-			document.body.appendChild(host)
-		})()
-
-		// 6. <button> + mousedown capture
-		;(function() {
-			const n = 6, btn = document.createElement('button')
-			btn.style.cssText = BASE + `top:${topPx(5)}px;background:${COLORS[5]}`
-			btn.textContent = `${n}. mousedown capture`
-			btn.appendChild(status(n))
-			btn.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); markHit(n, '<button> mousedown capture') }, true)
-			document.body.appendChild(btn)
-		})()
-
-		// 7. inline .onclick property
-		;(function() {
-			const n = 7, btn = document.createElement('button')
-			btn.style.cssText = BASE + `top:${topPx(6)}px;background:${COLORS[6]}`
-			btn.textContent = `${n}. inline onclick`
-			btn.appendChild(status(n))
-			btn.onclick = (e) => { e.stopPropagation(); markHit(n, 'inline .onclick property') }
-			document.body.appendChild(btn)
-		})()
-
-		// 8. <a> tag
-		;(function() {
-			const n = 8, btn = document.createElement('a')
-			btn.style.cssText = BASE + `top:${topPx(7)}px;background:${COLORS[7]};text-decoration:none;display:block`
-			btn.textContent = `${n}. <a> click`
-			btn.href = '#'
-			btn.appendChild(status(n))
-			btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); markHit(n, '<a href="#"> click') })
-			document.body.appendChild(btn)
-		})()
-
-		// 9. Listener on window watching for hits on the element
-		;(function() {
-			const n = 9, btn = document.createElement('button')
-			btn.id = 'ytbt-btn-9'
-			btn.style.cssText = BASE + `top:${topPx(8)}px;background:${COLORS[8]}`
-			btn.textContent = `${n}. window capture`
-			btn.appendChild(status(n))
-			document.body.appendChild(btn)
-			window.addEventListener('pointerdown', (e) => {
-				if (e.target === btn || btn.contains(e.target)) {
-					e.preventDefault(); e.stopImmediatePropagation()
-					markHit(n, 'window pointerdown capture + target check')
-				}
-			}, true)
-		})()
-
-		// 10. <input type=button>
-		;(function() {
-			const n = 10
-			const wrap = document.createElement('div')
-			wrap.style.cssText = `position:fixed;top:${topPx(9)}px;left:260px;z-index:2147483647`
-			const btn = document.createElement('input')
-			btn.type = 'button'
-			btn.value = `${n}. <input type=button>`
-			btn.style.cssText = BASE.replace('position: fixed;','') + `background:${COLORS[9]};width:190px`
-			btn.addEventListener('click', () => markHit(n, '<input type=button> click'))
-			wrap.appendChild(btn)
-			wrap.appendChild(status(n))
-			document.body.appendChild(wrap)
-		})()
-
-		log('Diagnostic: 10 test buttons injected (left side)')
-	}
-
-	// ═══════════════════════════════════════════════════════════════════
-	//  REPLICA VARIANTS (v1.3.7) — isolate which real-button factor is broken
-	// ═══════════════════════════════════════════════════════════════════
 	//
-	//  The original 10 diagnostic buttons all worked (except shadow-DOM), yet
-	//  the real menu button — which uses the exact same technique as button #3
-	//  — still doesn't click. These variants reproduce the real button's
-	//  specific conditions and change ONE variable at a time.
-	//
-	//  Each variant is a 40x40 rgba circle at right:16px, matching the real
-	//  button, so whatever is specific to that *location* is constant across
-	//  them. The "baseline" (V11) should fail if the intrinsic conditions at
-	//  that spot are the problem.
+	//  History:
+	//   v1.3.6 — 10 broad variants (element/event type). All worked except Shadow DOM.
+	//   v1.3.7 — 8 replica variants. All worked except V11 (top:72 right:16 — exact
+	//            same spot as the real button with same z-index). V18 (full repro) worked.
+	//   v1.3.8 — Hypothesis: real #ytmr-menu-btn (later in DOM, same z-index) sits on
+	//            top of V11 and swallows its clicks. Added V19-V22 to confirm.
+	//   v1.3.9 — Stripped to just the 4 focused tests.
 
-	function injectReplicaVariants() {
+	function injectDiagnostic() {
 		const REAL_Z = 2147483000
-		const MAX_Z = 2147483647
+		const MAX_Z  = 2147483647
 
-		function markHitV(n, method) {
-			log(`REPLICA V${n} fired — ${method}`)
-			const el = document.getElementById(`ytmr-v-${n}`)
-			if (el) {
-				el.style.background = '#00c853'
-				el.style.color = '#000'
-			}
-			const label = document.getElementById(`ytmr-v-${n}-label`)
-			if (label) {
-				label.textContent = 'CLICKED'
-				label.style.background = '#00c853'
-				label.style.color = '#000'
-			}
+		function mark(n) {
+			log(`DIAGNOSTIC V${n} clicked`)
+			const el = document.getElementById(`ytmr-d-${n}`)
+			if (el) el.style.background = '#00c853'
+			const lbl = document.getElementById(`ytmr-d-${n}-lbl`)
+			if (lbl) { lbl.textContent = 'CLICKED'; lbl.style.background = '#00c853'; lbl.style.color = '#000' }
 		}
 
-		function makeReplica(opts) {
+		function makeBtn(opts) {
 			const el = document.createElement('div')
-			el.id = `ytmr-v-${opts.n}`
+			el.id = `ytmr-d-${opts.n}`
 			el.setAttribute('role', 'button')
 			el.setAttribute('tabindex', '0')
-			el.textContent = opts.label || `V${opts.n}`
+			el.textContent = `V${opts.n}`
 			el.title = opts.desc
 			el.style.cssText = `
 				position: fixed;
 				top: ${opts.top}px;
-				right: ${opts.right || 16}px;
-				z-index: ${opts.zIndex || REAL_Z};
-				width: ${opts.width || 40}px;
-				height: ${opts.height || 40}px;
+				right: ${opts.right ?? 16}px;
+				z-index: ${opts.z ?? REAL_Z};
+				width: 40px;
+				height: 40px;
 				display: inline-flex;
 				align-items: center;
 				justify-content: center;
-				border: none;
-				border-radius: ${opts.borderRadius || '50%'};
-				background: ${opts.bg || 'rgba(0, 0, 0, 0.55)'};
+				border-radius: 50%;
+				background: rgba(0,0,0,0.55);
 				color: #fff;
 				font: bold 11px monospace;
 				cursor: pointer;
-				user-select: none;
 				pointer-events: all !important;
 			`
+			el.addEventListener('pointerdown', (e) => {
+				e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation()
+				mark(opts.n)
+			}, true)
 			return el
 		}
 
-		/** Creates the sidebar label describing each variant */
-		function makeLabel(n, top, text) {
-			const lbl = document.createElement('div')
-			lbl.id = `ytmr-v-${n}-label`
-			lbl.textContent = text
-			lbl.style.cssText = `
+		function makeLabel(n, top, text, right) {
+			const el = document.createElement('div')
+			el.id = `ytmr-d-${n}-lbl`
+			el.textContent = text
+			el.style.cssText = `
 				position: fixed;
-				top: ${top + 10}px;
-				right: 64px;
+				top: ${top + 12}px;
+				right: ${right ?? 64}px;
 				z-index: ${MAX_Z};
 				padding: 3px 6px;
-				background: rgba(0, 0, 0, 0.75);
+				background: rgba(0,0,0,0.75);
 				color: #fff;
 				font: 10px monospace;
 				border-radius: 3px;
 				pointer-events: none;
 				white-space: nowrap;
 			`
-			return lbl
+			return el
 		}
 
-		/** Builds and returns a hidden dropdown clone to append as child */
-		function makeDropdownChild() {
-			const d = document.createElement('div')
-			d.style.cssText = `
-				display: none;
-				position: fixed;
-				min-width: 240px;
-				background: #282828;
-				border: 1px solid #444;
-				border-radius: 12px;
-				padding: 8px 0;
-				box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
-				z-index: 10001;
-			`
-			d.textContent = 'dropdown stub'
-			return d
-		}
-
-		function attachListener(el, n, method) {
-			el.addEventListener('pointerdown', (e) => {
-				e.preventDefault()
-				e.stopPropagation()
-				e.stopImmediatePropagation()
-				markHitV(n, method)
-			}, true)
-		}
-
-		// ── V11: BARE REPLICA at the real button's exact location ──
-		//    (40x40 circle, z-idx 2147483000, rgba bg, pointerdown capture)
-		//    If this WORKS: the intrinsic replica is fine — something else
-		//    (dropdown child / timing / extra listeners) is killing the real one.
-		//    If this FAILS: the real button's location/size/z-index combination
-		//    is intrinsically broken on YouTube.
-		;(function () {
-			const n = 11, top = 72
-			const btn = makeReplica({ n, top, desc: 'V11 bare replica at real location' })
-			attachListener(btn, n, 'bare replica')
-			document.body.appendChild(btn)
-			document.body.appendChild(makeLabel(n, top, 'V11 bare replica'))
-		})()
-
-		// ── V12: REPLICA + hidden dropdown child ──
-		//    Tests whether appending the dropdown as a child breaks clicks.
-		;(function () {
-			const n = 12, top = 130
-			const btn = makeReplica({ n, top, desc: 'V12 + hidden dropdown child' })
-			attachListener(btn, n, 'with dropdown child')
-			btn.appendChild(makeDropdownChild())
-			document.body.appendChild(btn)
-			document.body.appendChild(makeLabel(n, top, 'V12 +dropdown'))
-		})()
-
-		// ── V13: REPLICA + delayed injection (setTimeout 2s) ──
-		//    Simulates the real button's post-poll/SPA-nav timing. YouTube may
-		//    be mounting overlays between document-idle and 2 seconds later.
-		setTimeout(() => {
-			const n = 13, top = 188
-			const btn = makeReplica({ n, top, desc: 'V13 injected after 2s delay' })
-			attachListener(btn, n, 'delayed injection')
-			document.body.appendChild(btn)
-			document.body.appendChild(makeLabel(n, top, 'V13 setTimeout 2s'))
-			log('V13 injected after 2s delay')
-		}, 2000)
-
-		// ── V14: REPLICA with max z-index (2147483647) ──
-		//    Tests if something is sitting on top at z-index between 2147483000
-		//    and 2147483647.
-		;(function () {
-			const n = 14, top = 246
-			const btn = makeReplica({ n, top, desc: 'V14 max z-index', zIndex: MAX_Z })
-			attachListener(btn, n, 'max z-index')
-			document.body.appendChild(btn)
-			document.body.appendChild(makeLabel(n, top, 'V14 z-idx max'))
-		})()
-
-		// ── V15: REPLICA with larger 120x40 hit area ──
-		//    Tests if the 40x40 target is too small (e.g., sub-pixel issue).
-		;(function () {
-			const n = 15, top = 304
-			const btn = makeReplica({
-				n, top, desc: 'V15 larger 120x40 target',
-				width: 120, borderRadius: '20px',
-			})
-			attachListener(btn, n, 'larger 120x40')
-			document.body.appendChild(btn)
-			document.body.appendChild(makeLabel(n, top, 'V15 120x40'))
-		})()
-
-		// ── V16: REPLICA with extra event listeners (click + mousedown + keydown) ──
-		//    Real button binds all these. Tests if they interfere with pointerdown.
-		;(function () {
-			const n = 16, top = 362
-			const btn = makeReplica({ n, top, desc: 'V16 + click/mousedown/keydown' })
-			attachListener(btn, n, 'extra listeners')
-			btn.addEventListener('click', (e) => {
-				e.preventDefault()
-				e.stopPropagation()
-				markHitV(n, 'click also fired')
-			}, true)
-			btn.addEventListener('mousedown', () => log('V16 mousedown also fired'), true)
-			btn.addEventListener('keydown', (e) => {
-				if (e.key === 'Enter' || e.key === ' ') markHitV(n, 'keydown')
-			})
-			document.body.appendChild(btn)
-			document.body.appendChild(makeLabel(n, top, 'V16 multi-listener'))
-		})()
-
-		// ── V17: REPLICA safely below the masthead zone (top: 420) ──
-		//    Controls for position. Should WORK regardless — tells us the
-		//    element itself is fine and the issue is location-specific.
-		;(function () {
-			const n = 17, top = 420
-			const btn = makeReplica({ n, top, desc: 'V17 below masthead zone' })
-			attachListener(btn, n, 'safe position')
-			document.body.appendChild(btn)
-			document.body.appendChild(makeLabel(n, top, 'V17 safe pos'))
-		})()
-
-		// ── V18: FULL REPRODUCTION of the real broken button ──
-		//    Every known condition combined: 40x40 circle, rgba, z-idx 2147483000,
-		//    dropdown-child, click+mousedown+keydown listeners, delayed injection.
-		//    This SHOULD fail like the real one. If it doesn't, we're missing a
-		//    variable the real button has that we haven't replicated.
-		setTimeout(() => {
-			const n = 18, top = 478
-			const btn = makeReplica({ n, top, desc: 'V18 FULL REPRODUCTION — should fail' })
-			attachListener(btn, n, 'FULL REPRO pointerdown')
-			btn.addEventListener('click', (e) => {
-				e.preventDefault()
-				e.stopPropagation()
-				markHitV(n, 'FULL REPRO click')
-			}, true)
-			btn.addEventListener('mousedown', () => log('V18 mousedown fired'), true)
-			btn.addEventListener('keydown', (e) => {
-				if (e.key === 'Enter' || e.key === ' ') markHitV(n, 'FULL REPRO keydown')
-			})
-			btn.appendChild(makeDropdownChild())
-			document.body.appendChild(btn)
-			document.body.appendChild(makeLabel(n, top, 'V18 FULL REPRO'))
-			log('V18 FULL REPRODUCTION injected — this should fail like the real button')
-		}, 2000)
-
-		// ═══════════════════════════════════════════════════════════════════
-		//  v1.3.8 — V11 is blocked by the real menu button. These prove it.
-		// ═══════════════════════════════════════════════════════════════════
-		//
-		//  v1.3.7 result: V11 is the only failing variant. V18 (full reproduction)
-		//  works. The only thing unique to V11 is that it sits at the EXACT same
-		//  spot as the real #ytmr-menu-btn (top:72px right:16px) with the same
-		//  z-index (2147483000). Since the real button is appended LATER in the
-		//  DOM, it wins the stacking fight and swallows all clicks at that spot.
-
-		// ── V19: V11 + MAX z-index — beats the real button at stacking ──
-		//    If this works, the problem was just z-order / DOM order.
+		// ── V19: Exact real-button spot, MAX z-index ──
+		//    If this clicks: bumping z-index to max is the fix.
 		;(function () {
 			const n = 19, top = 72
-			const btn = makeReplica({ n, top, desc: 'V19 same as V11 but MAX z-index', zIndex: MAX_Z })
-			attachListener(btn, n, 'max z-index over real button')
-			document.body.appendChild(btn)
-			// Label shifted down-left so it doesn't overlap with V11's label
-			const lbl = makeLabel(n, top - 20, 'V19 max z over real')
-			lbl.style.right = '180px'
-			document.body.appendChild(lbl)
+			document.body.appendChild(makeBtn({ n, top, z: MAX_Z, desc: 'V19 real location + MAX z-index' }))
+			document.body.appendChild(makeLabel(n, top, 'V19 max-z @ real spot'))
 		})()
 
-		// ── V20: V11 shifted horizontally — same row, different column ──
-		//    At right:80 so it clears the real button (which spans right:16-56).
-		//    Isolates whether the top:72 row itself has something weird, or
-		//    whether the issue is strictly the column the real button occupies.
+		// ── V20: Same row (top:72), shifted right to right:80 ──
+		//    Clears the real button's column (right:16–56).
+		//    If V19 fails but V20 works: something at right:16 blocks even MAX_Z.
 		;(function () {
 			const n = 20, top = 72
-			const btn = makeReplica({ n, top, desc: 'V20 same top but right:80', right: 80 })
-			attachListener(btn, n, 'offset to right:80')
-			document.body.appendChild(btn)
-			const lbl = makeLabel(n, top + 20, 'V20 right:80')
-			lbl.style.right = '130px'
-			document.body.appendChild(lbl)
+			document.body.appendChild(makeBtn({ n, top, right: 80, desc: 'V20 top:72 right:80 — offset from real button' }))
+			document.body.appendChild(makeLabel(n, top, 'V20 right:80 same row', 130))
 		})()
 
-		// ── V21: Delete the real menu button, then inject V11 at its spot ──
-		//    Waits 3s for handleWatch() to create the real button, nukes it,
-		//    then drops V21 in its place. If THIS works, the real button was
-		//    the sole blocker.
+		// ── V21: Remove real button + V19, inject bare replica at real spot ──
+		//    After 3s: nukes real button and V19 from right:16, drops bare replica.
+		//    If it clicks: real button was the sole blocker.
+		//    Check console to confirm whether real button was present.
 		setTimeout(() => {
-			const realBtn = document.getElementById('ytmr-menu-btn')
-			if (realBtn) {
-				log(`V21: removing real menu button before injecting (was at ${realBtn.getBoundingClientRect().top}, ${realBtn.getBoundingClientRect().right})`)
-				realBtn.remove()
-			} else {
-				log('V21: real menu button was not present at injection time')
-			}
+			document.getElementById('ytmr-menu-btn')?.remove()
+			document.getElementById('ytmr-d-19')?.remove()
+			document.getElementById('ytmr-d-19-lbl')?.remove()
 			const n = 21, top = 72
-			const btn = makeReplica({ n, top, desc: 'V21 after deleting #ytmr-menu-btn' })
-			attachListener(btn, n, 'after removing real button')
-			document.body.appendChild(btn)
-			const lbl = makeLabel(n, top + 40, 'V21 real btn deleted')
-			lbl.style.right = '80px'
-			document.body.appendChild(lbl)
+			document.body.appendChild(makeBtn({ n, top, desc: 'V21 injected after removing real button + V19' }))
+			document.body.appendChild(makeLabel(n, top, 'V21 cleared spot'))
+			log('V21: real button removed, bare replica injected at top:72 right:16')
 		}, 3000)
 
-		// ── V22: Outline the real #ytmr-menu-btn so it's visually obvious ──
-		//    Not a clickable variant — just adds a bright red outline + label
-		//    to the real button after 3s so you can SEE exactly where it is
-		//    relative to V11 and confirm the overlap.
+		// ── V22: Visual only — red outline on the real button ──
+		//    Shows exactly where it sits so you can confirm overlap with V19/V21.
 		setTimeout(() => {
 			const realBtn = document.getElementById('ytmr-menu-btn')
-			if (!realBtn) {
-				log('V22 highlight: real menu button is NOT in the DOM — nothing to overlap V11')
-				return
-			}
+			if (!realBtn) { log('V22: real button not in DOM at 2.5s'); return }
 			realBtn.style.outline = '3px solid #ff1744'
 			realBtn.style.outlineOffset = '2px'
-			const rect = realBtn.getBoundingClientRect()
-			log(`V22 highlight: real menu button present at top:${rect.top} right:${window.innerWidth - rect.right} (z-index ${getComputedStyle(realBtn).zIndex})`)
-			const marker = document.createElement('div')
-			marker.textContent = 'REAL BTN ↑'
-			marker.style.cssText = `
-				position: fixed;
-				top: ${rect.bottom + 4}px;
-				right: 4px;
-				z-index: ${MAX_Z};
-				padding: 2px 4px;
-				background: #ff1744;
-				color: #fff;
-				font: bold 9px monospace;
-				border-radius: 2px;
-				pointer-events: none;
-			`
-			document.body.appendChild(marker)
-		}, 3000)
+			const r = realBtn.getBoundingClientRect()
+			log(`V22: real button at top:${Math.round(r.top)} right:${Math.round(window.innerWidth - r.right)} z:${getComputedStyle(realBtn).zIndex}`)
+		}, 2500)
 
-		log('Replica variants V11–V22 injected. V13/V18/V21/V22 appear after 2–3s.')
+		log('Diagnostic V19–V22 injected. V21+V22 fire after 2.5–3s.')
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -1085,8 +695,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	checkForUpdate()
-	injectClickabilityTest()
-	injectReplicaVariants()
+	injectDiagnostic()
 
 	// Initial page load
 	if (window.location.pathname === '/watch') {
