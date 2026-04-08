@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.3.6
+// @version      1.3.7
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.3.6'
+	const SCRIPT_VERSION = '1.3.7'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =
@@ -608,7 +608,7 @@
 	function injectClickabilityTest() {
 		const BASE = `
 			position: fixed;
-			right: 8px;
+			left: 260px;
 			z-index: 2147483647;
 			width: 190px;
 			padding: 6px 10px;
@@ -685,7 +685,7 @@
 		;(function() {
 			const n = 5
 			const host = document.createElement('div')
-			host.style.cssText = `position:fixed;top:${topPx(4)}px;right:8px;z-index:2147483647;pointer-events:all !important`
+			host.style.cssText = `position:fixed;top:${topPx(4)}px;left:260px;z-index:2147483647;pointer-events:all !important`
 			const shadow = host.attachShadow({ mode: 'open' })
 			const styleEl = document.createElement('style')
 			styleEl.textContent = `button { ${BASE.replace('position: fixed;','')} background:${COLORS[4]};display:block;width:190px }`
@@ -749,7 +749,7 @@
 		;(function() {
 			const n = 10
 			const wrap = document.createElement('div')
-			wrap.style.cssText = `position:fixed;top:${topPx(9)}px;right:8px;z-index:2147483647`
+			wrap.style.cssText = `position:fixed;top:${topPx(9)}px;left:260px;z-index:2147483647`
 			const btn = document.createElement('input')
 			btn.type = 'button'
 			btn.value = `${n}. <input type=button>`
@@ -760,7 +760,235 @@
 			document.body.appendChild(wrap)
 		})()
 
-		log('Diagnostic: 10 test buttons injected')
+		log('Diagnostic: 10 test buttons injected (left side)')
+	}
+
+	// ═══════════════════════════════════════════════════════════════════
+	//  REPLICA VARIANTS (v1.3.7) — isolate which real-button factor is broken
+	// ═══════════════════════════════════════════════════════════════════
+	//
+	//  The original 10 diagnostic buttons all worked (except shadow-DOM), yet
+	//  the real menu button — which uses the exact same technique as button #3
+	//  — still doesn't click. These variants reproduce the real button's
+	//  specific conditions and change ONE variable at a time.
+	//
+	//  Each variant is a 40x40 rgba circle at right:16px, matching the real
+	//  button, so whatever is specific to that *location* is constant across
+	//  them. The "baseline" (V11) should fail if the intrinsic conditions at
+	//  that spot are the problem.
+
+	function injectReplicaVariants() {
+		const REAL_Z = 2147483000
+		const MAX_Z = 2147483647
+
+		function markHitV(n, method) {
+			log(`REPLICA V${n} fired — ${method}`)
+			const el = document.getElementById(`ytmr-v-${n}`)
+			if (el) {
+				el.style.background = '#00c853'
+				el.style.color = '#000'
+			}
+			const label = document.getElementById(`ytmr-v-${n}-label`)
+			if (label) {
+				label.textContent = 'CLICKED'
+				label.style.background = '#00c853'
+				label.style.color = '#000'
+			}
+		}
+
+		function makeReplica(opts) {
+			const el = document.createElement('div')
+			el.id = `ytmr-v-${opts.n}`
+			el.setAttribute('role', 'button')
+			el.setAttribute('tabindex', '0')
+			el.textContent = opts.label || `V${opts.n}`
+			el.title = opts.desc
+			el.style.cssText = `
+				position: fixed;
+				top: ${opts.top}px;
+				right: ${opts.right || 16}px;
+				z-index: ${opts.zIndex || REAL_Z};
+				width: ${opts.width || 40}px;
+				height: ${opts.height || 40}px;
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				border: none;
+				border-radius: ${opts.borderRadius || '50%'};
+				background: ${opts.bg || 'rgba(0, 0, 0, 0.55)'};
+				color: #fff;
+				font: bold 11px monospace;
+				cursor: pointer;
+				user-select: none;
+				pointer-events: all !important;
+			`
+			return el
+		}
+
+		/** Creates the sidebar label describing each variant */
+		function makeLabel(n, top, text) {
+			const lbl = document.createElement('div')
+			lbl.id = `ytmr-v-${n}-label`
+			lbl.textContent = text
+			lbl.style.cssText = `
+				position: fixed;
+				top: ${top + 10}px;
+				right: 64px;
+				z-index: ${MAX_Z};
+				padding: 3px 6px;
+				background: rgba(0, 0, 0, 0.75);
+				color: #fff;
+				font: 10px monospace;
+				border-radius: 3px;
+				pointer-events: none;
+				white-space: nowrap;
+			`
+			return lbl
+		}
+
+		/** Builds and returns a hidden dropdown clone to append as child */
+		function makeDropdownChild() {
+			const d = document.createElement('div')
+			d.style.cssText = `
+				display: none;
+				position: fixed;
+				min-width: 240px;
+				background: #282828;
+				border: 1px solid #444;
+				border-radius: 12px;
+				padding: 8px 0;
+				box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+				z-index: 10001;
+			`
+			d.textContent = 'dropdown stub'
+			return d
+		}
+
+		function attachListener(el, n, method) {
+			el.addEventListener('pointerdown', (e) => {
+				e.preventDefault()
+				e.stopPropagation()
+				e.stopImmediatePropagation()
+				markHitV(n, method)
+			}, true)
+		}
+
+		// ── V11: BARE REPLICA at the real button's exact location ──
+		//    (40x40 circle, z-idx 2147483000, rgba bg, pointerdown capture)
+		//    If this WORKS: the intrinsic replica is fine — something else
+		//    (dropdown child / timing / extra listeners) is killing the real one.
+		//    If this FAILS: the real button's location/size/z-index combination
+		//    is intrinsically broken on YouTube.
+		;(function () {
+			const n = 11, top = 72
+			const btn = makeReplica({ n, top, desc: 'V11 bare replica at real location' })
+			attachListener(btn, n, 'bare replica')
+			document.body.appendChild(btn)
+			document.body.appendChild(makeLabel(n, top, 'V11 bare replica'))
+		})()
+
+		// ── V12: REPLICA + hidden dropdown child ──
+		//    Tests whether appending the dropdown as a child breaks clicks.
+		;(function () {
+			const n = 12, top = 130
+			const btn = makeReplica({ n, top, desc: 'V12 + hidden dropdown child' })
+			attachListener(btn, n, 'with dropdown child')
+			btn.appendChild(makeDropdownChild())
+			document.body.appendChild(btn)
+			document.body.appendChild(makeLabel(n, top, 'V12 +dropdown'))
+		})()
+
+		// ── V13: REPLICA + delayed injection (setTimeout 2s) ──
+		//    Simulates the real button's post-poll/SPA-nav timing. YouTube may
+		//    be mounting overlays between document-idle and 2 seconds later.
+		setTimeout(() => {
+			const n = 13, top = 188
+			const btn = makeReplica({ n, top, desc: 'V13 injected after 2s delay' })
+			attachListener(btn, n, 'delayed injection')
+			document.body.appendChild(btn)
+			document.body.appendChild(makeLabel(n, top, 'V13 setTimeout 2s'))
+			log('V13 injected after 2s delay')
+		}, 2000)
+
+		// ── V14: REPLICA with max z-index (2147483647) ──
+		//    Tests if something is sitting on top at z-index between 2147483000
+		//    and 2147483647.
+		;(function () {
+			const n = 14, top = 246
+			const btn = makeReplica({ n, top, desc: 'V14 max z-index', zIndex: MAX_Z })
+			attachListener(btn, n, 'max z-index')
+			document.body.appendChild(btn)
+			document.body.appendChild(makeLabel(n, top, 'V14 z-idx max'))
+		})()
+
+		// ── V15: REPLICA with larger 120x40 hit area ──
+		//    Tests if the 40x40 target is too small (e.g., sub-pixel issue).
+		;(function () {
+			const n = 15, top = 304
+			const btn = makeReplica({
+				n, top, desc: 'V15 larger 120x40 target',
+				width: 120, borderRadius: '20px',
+			})
+			attachListener(btn, n, 'larger 120x40')
+			document.body.appendChild(btn)
+			document.body.appendChild(makeLabel(n, top, 'V15 120x40'))
+		})()
+
+		// ── V16: REPLICA with extra event listeners (click + mousedown + keydown) ──
+		//    Real button binds all these. Tests if they interfere with pointerdown.
+		;(function () {
+			const n = 16, top = 362
+			const btn = makeReplica({ n, top, desc: 'V16 + click/mousedown/keydown' })
+			attachListener(btn, n, 'extra listeners')
+			btn.addEventListener('click', (e) => {
+				e.preventDefault()
+				e.stopPropagation()
+				markHitV(n, 'click also fired')
+			}, true)
+			btn.addEventListener('mousedown', () => log('V16 mousedown also fired'), true)
+			btn.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter' || e.key === ' ') markHitV(n, 'keydown')
+			})
+			document.body.appendChild(btn)
+			document.body.appendChild(makeLabel(n, top, 'V16 multi-listener'))
+		})()
+
+		// ── V17: REPLICA safely below the masthead zone (top: 420) ──
+		//    Controls for position. Should WORK regardless — tells us the
+		//    element itself is fine and the issue is location-specific.
+		;(function () {
+			const n = 17, top = 420
+			const btn = makeReplica({ n, top, desc: 'V17 below masthead zone' })
+			attachListener(btn, n, 'safe position')
+			document.body.appendChild(btn)
+			document.body.appendChild(makeLabel(n, top, 'V17 safe pos'))
+		})()
+
+		// ── V18: FULL REPRODUCTION of the real broken button ──
+		//    Every known condition combined: 40x40 circle, rgba, z-idx 2147483000,
+		//    dropdown-child, click+mousedown+keydown listeners, delayed injection.
+		//    This SHOULD fail like the real one. If it doesn't, we're missing a
+		//    variable the real button has that we haven't replicated.
+		setTimeout(() => {
+			const n = 18, top = 478
+			const btn = makeReplica({ n, top, desc: 'V18 FULL REPRODUCTION — should fail' })
+			attachListener(btn, n, 'FULL REPRO pointerdown')
+			btn.addEventListener('click', (e) => {
+				e.preventDefault()
+				e.stopPropagation()
+				markHitV(n, 'FULL REPRO click')
+			}, true)
+			btn.addEventListener('mousedown', () => log('V18 mousedown fired'), true)
+			btn.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter' || e.key === ' ') markHitV(n, 'FULL REPRO keydown')
+			})
+			btn.appendChild(makeDropdownChild())
+			document.body.appendChild(btn)
+			document.body.appendChild(makeLabel(n, top, 'V18 FULL REPRO'))
+			log('V18 FULL REPRODUCTION injected — this should fail like the real button')
+		}, 2000)
+
+		log('Replica variants V11–V18 injected (right column). V13 & V18 appear after 2s.')
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -769,6 +997,7 @@
 
 	checkForUpdate()
 	injectClickabilityTest()
+	injectReplicaVariants()
 
 	// Initial page load
 	if (window.location.pathname === '/watch') {
