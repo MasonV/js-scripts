@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.3.10
+// @version      1.3.11
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.3.10'
+	const SCRIPT_VERSION = '1.3.11'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =
@@ -316,7 +316,7 @@
 				position: fixed;
 				top: 72px;
 				right: 16px;
-				z-index: 2147483000;
+				z-index: 2147483647;
 				display: inline-flex;
 				align-items: center;
 				justify-content: center;
@@ -571,111 +571,10 @@
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
-	//  BUTTON CLICKABILITY DIAGNOSTIC (temporary — remove after testing)
-	// ═══════════════════════════════════════════════════════════════════
-	//
-	//  History:
-	//   v1.3.6 — 10 broad variants (element/event type). All worked except Shadow DOM.
-	//   v1.3.7 — 8 replica variants. All worked except V11 (top:72 right:16 — exact
-	//            same spot as the real button with same z-index). V18 (full repro) worked.
-	//   v1.3.8 — Hypothesis: real #ytmr-menu-btn (later in DOM, same z-index) sits on
-	//            top of V11 and swallows its clicks. Added V19-V22 to confirm.
-	//   v1.3.9 — 4 focused tests. Result: V20 (right:80) and V21 (cleared spot) both
-	//            clicked. V19 got auto-removed by V21 before user could test it. The
-	//            real button was still visible after V21 ran (removal failed or re-created),
-	//            but V21 clicked because it was the last DOM element at that spot — same
-	//            z-index, later sibling wins.
-	//   v1.3.10 — Just V19 (MAX z-index, never removed) to confirm whether z-index
-	//             bump alone fixes it, plus V20 as sanity check.
-
-	function injectDiagnostic() {
-		const REAL_Z = 2147483000
-		const MAX_Z  = 2147483647
-
-		function mark(n) {
-			log(`DIAGNOSTIC V${n} clicked`)
-			const el = document.getElementById(`ytmr-d-${n}`)
-			if (el) el.style.background = '#00c853'
-			const lbl = document.getElementById(`ytmr-d-${n}-lbl`)
-			if (lbl) { lbl.textContent = 'CLICKED'; lbl.style.background = '#00c853'; lbl.style.color = '#000' }
-		}
-
-		function makeBtn(opts) {
-			const el = document.createElement('div')
-			el.id = `ytmr-d-${opts.n}`
-			el.setAttribute('role', 'button')
-			el.setAttribute('tabindex', '0')
-			el.textContent = `V${opts.n}`
-			el.title = opts.desc
-			el.style.cssText = `
-				position: fixed;
-				top: ${opts.top}px;
-				right: ${opts.right ?? 16}px;
-				z-index: ${opts.z ?? REAL_Z};
-				width: 40px;
-				height: 40px;
-				display: inline-flex;
-				align-items: center;
-				justify-content: center;
-				border-radius: 50%;
-				background: rgba(0,0,0,0.55);
-				color: #fff;
-				font: bold 11px monospace;
-				cursor: pointer;
-				pointer-events: all !important;
-			`
-			el.addEventListener('pointerdown', (e) => {
-				e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation()
-				mark(opts.n)
-			}, true)
-			return el
-		}
-
-		function makeLabel(n, top, text, right) {
-			const el = document.createElement('div')
-			el.id = `ytmr-d-${n}-lbl`
-			el.textContent = text
-			el.style.cssText = `
-				position: fixed;
-				top: ${top + 12}px;
-				right: ${right ?? 64}px;
-				z-index: ${MAX_Z};
-				padding: 3px 6px;
-				background: rgba(0,0,0,0.75);
-				color: #fff;
-				font: 10px monospace;
-				border-radius: 3px;
-				pointer-events: none;
-				white-space: nowrap;
-			`
-			return el
-		}
-
-		// ── V19: Exact real-button spot, MAX z-index — stays permanently ──
-		//    If this clicks: bumping the real button's z-index is the fix.
-		//    If this fails: something blocks even MAX_Z at this coordinate.
-		;(function () {
-			const n = 19, top = 72
-			document.body.appendChild(makeBtn({ n, top, z: MAX_Z, desc: 'V19 real location + MAX z-index' }))
-			document.body.appendChild(makeLabel(n, top, 'V19 max-z'))
-		})()
-
-		// ── V20: Same row (top:72), right:80 — sanity check ──
-		;(function () {
-			const n = 20, top = 72
-			document.body.appendChild(makeBtn({ n, top, right: 80, desc: 'V20 top:72 right:80' }))
-			document.body.appendChild(makeLabel(n, top, 'V20 right:80', 130))
-		})()
-
-		log('Diagnostic V19+V20 injected. Click V19 — if green, z-index bump fixes the real button.')
-	}
-
-	// ═══════════════════════════════════════════════════════════════════
 	//  EVENT LISTENERS
 	// ═══════════════════════════════════════════════════════════════════
 
 	checkForUpdate()
-	injectDiagnostic()
 
 	// Initial page load
 	if (window.location.pathname === '/watch') {
