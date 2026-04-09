@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Focus Search
 // @namespace    auto-focus-search
-// @version      1.0.1
+// @version      1.0.2
 // @description  Automatically detects and focuses search input fields on any webpage
 // @match        *://*/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -24,7 +24,7 @@
 
     const LOG_PREFIX = '[Auto Focus Search]'
     const SHORT_PREFIX = '[AFS]'
-    const SCRIPT_VERSION = '1.0.1'
+    const SCRIPT_VERSION = '1.0.2'
     const META_URL =
         'https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.meta.js'
     const DOWNLOAD_URL =
@@ -197,6 +197,24 @@
     // ═══════════════════════════════════════════════════════════════════
 
     let cycleIndex = -1
+    let _highlightedEl = null
+    let _onBlur = null
+
+    function highlightElement(el) {
+        if (_highlightedEl && _highlightedEl !== el) {
+            _highlightedEl.classList.remove('afs-focused')
+            _highlightedEl.removeEventListener('blur', _onBlur)
+        }
+
+        el.classList.add('afs-focused')
+        _highlightedEl = el
+
+        _onBlur = () => {
+            el.classList.remove('afs-focused')
+            _highlightedEl = null
+        }
+        el.addEventListener('blur', _onBlur, { once: true })
+    }
 
     function attemptFocus() {
         if (!shouldFocus()) {
@@ -211,6 +229,7 @@
         }
 
         el.focus({ preventScroll: true })
+        highlightElement(el)
         cycleIndex = 0
         const label = describeElement(el)
         logVerbose(`Focused: ${label}`)
@@ -228,6 +247,7 @@
         cycleIndex = (cycleIndex + 1) % all.length
         const el = all[cycleIndex]
         el.focus({ preventScroll: true })
+        highlightElement(el)
         const label = describeElement(el)
         logVerbose(`Cycled to (${cycleIndex + 1}/${all.length}): ${label}`)
         showIndicator(label)
@@ -570,6 +590,18 @@
     // ═══════════════════════════════════════════════════════════════════
 
     GM_addStyle(`
+        /* Highlighted search input */
+        .afs-focused {
+            outline: 2px solid #4f9cf9 !important;
+            outline-offset: 2px !important;
+            box-shadow: 0 0 0 4px rgba(79, 156, 249, 0.25) !important;
+            animation: afs-pulse 0.4s ease-out !important;
+        }
+        @keyframes afs-pulse {
+            0%   { outline-width: 4px; box-shadow: 0 0 0 8px rgba(79, 156, 249, 0.4); }
+            100% { outline-width: 2px; box-shadow: 0 0 0 4px rgba(79, 156, 249, 0.25); }
+        }
+
         /* Floating indicator */
         #${INDICATOR_ID} {
             position: fixed;
