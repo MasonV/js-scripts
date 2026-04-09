@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Focus Search
 // @namespace    auto-focus-search
-// @version      1.0.0
+// @version      1.0.1
 // @description  Automatically detects and focuses search input fields on any webpage
 // @match        *://*/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -10,6 +10,7 @@
 // @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
+// @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
@@ -23,7 +24,7 @@
 
     const LOG_PREFIX = '[Auto Focus Search]'
     const SHORT_PREFIX = '[AFS]'
-    const SCRIPT_VERSION = '1.0.0'
+    const SCRIPT_VERSION = '1.0.1'
     const META_URL =
         'https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.meta.js'
     const DOWNLOAD_URL =
@@ -299,6 +300,12 @@
     //  SPA NAVIGATION
     // ═══════════════════════════════════════════════════════════════════
 
+    // The script runs in Tampermonkey's sandbox (due to @grant), so
+    // history.pushState here is the sandbox's copy — NOT the page's.
+    // SPA frameworks call the real pushState on the page context.
+    // We must use unsafeWindow to patch the page's actual history,
+    // or use the Navigation API which fires for all navigations.
+
     function setupSPADetection() {
         let lastUrl = location.href
 
@@ -316,19 +323,28 @@
             }, FOCUS_DELAY_MS)
         }
 
-        // Monkey-patch pushState/replaceState
-        const origPush = history.pushState
-        history.pushState = function () {
-            origPush.apply(this, arguments)
-            onNavigation()
+        // Modern Navigation API — catches all navigation types
+        if (unsafeWindow.navigation) {
+            unsafeWindow.navigation.addEventListener('navigatesuccess', onNavigation)
+            logVerbose('Using Navigation API for SPA detection')
+        } else {
+            // Fallback: patch the PAGE's history (via unsafeWindow, not sandbox)
+            const pageHistory = unsafeWindow.history
+            const origPush = pageHistory.pushState
+            pageHistory.pushState = function () {
+                origPush.apply(this, arguments)
+                onNavigation()
+            }
+
+            const origReplace = pageHistory.replaceState
+            pageHistory.replaceState = function () {
+                origReplace.apply(this, arguments)
+                onNavigation()
+            }
+            logVerbose('Using pushState/replaceState patch for SPA detection')
         }
 
-        const origReplace = history.replaceState
-        history.replaceState = function () {
-            origReplace.apply(this, arguments)
-            onNavigation()
-        }
-
+        // These events fire correctly even in sandbox
         window.addEventListener('popstate', onNavigation)
         window.addEventListener('hashchange', onNavigation)
     }
