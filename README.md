@@ -152,6 +152,28 @@ A userscript for [Fanatical](https://www.fanatical.com) order pages that bulk-re
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.meta.js`
 
+### `auto-focus-search/`
+
+A global userscript that automatically detects and focuses search input fields on any webpage, so you can start typing immediately without clicking.
+
+**Features:**
+
+- Cascading search field detection using semantic roles, input types, name attributes, placeholders, aria-labels, and common IDs/classes
+- Dynamic detection via MutationObserver for search boxes that appear after page load (modals, SPAs, Ctrl+K dialogs)
+- SPA-aware — re-triggers on `pushState`/`popstate`/`hashchange` navigation
+- Safety checks — never steals focus from inputs you're already typing in, respects pages that auto-focus their own search
+- Floating indicator with settings popover — appears briefly when a field is focused, click to toggle per-site enable/disable
+- Keyboard shortcuts: `Alt+Shift+S` to toggle on current site, `Alt+Shift+N` to cycle through multiple search inputs
+- Per-site exclusion list stored in localStorage
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.meta.js`
+
 ## Update workflow
 
 1. Edit `barter-bundle-scorer/barter-bundle-scorer.user.js`.
