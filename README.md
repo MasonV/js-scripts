@@ -132,6 +132,27 @@ A userscript for [YouTube](https://www.youtube.com) that automatically redirects
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js`
 
+### `ytm-desktop-handoff/`
+
+A userscript for [YouTube Music](https://music.youtube.com) that adds a floating button to hand off the current track/playlist to the [YouTube Music Desktop App](https://github.com/ytmdesktop/ytmdesktop) via its `ytmd://` custom protocol. Completes the YouTube → YouTube Music → YTMDesktop chain when paired with `yt-music-redirect/`.
+
+**Features:**
+
+- Floating button on `/watch` pages with a dropdown offering two handoff modes
+- **Hand off (pause tab)** — opens in YTMDesktop and pauses the browser so the desktop app plays alone
+- **Open in YTMDesktop (keep tab)** — mirrors the track in YTMDesktop while the browser keeps playing
+- Uses a hidden iframe to trigger the `ytmd://play/<VideoId>[/<PlaylistId>]` protocol without navigating the tab
+- SPA-aware — mounts/unmounts on `yt-navigate-finish` so the button only appears when there's a track to hand off
+- Requires [YouTube Music Desktop App](https://github.com/ytmdesktop/ytmdesktop) installed (registers the `ytmd://` protocol handler)
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.meta.js`
+
 ### `fanatical-autoclaim/`
 
 A userscript for [Fanatical](https://www.fanatical.com) order pages that bulk-reveals and bulk-redeems Steam keys.
