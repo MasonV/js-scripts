@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YourTube
 // @namespace    yourtube
-// @version      1.0.1
+// @version      1.0.2
 // @description  YouTube without the garbage — duration filtering, and more features to come
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -24,7 +24,7 @@
 
 	const LOG_PREFIX = '[YourTube]'
 	const LOG_PREFIX_DURATION = '[YourTube/Duration]'
-	const SCRIPT_VERSION = '1.0.0'
+	const SCRIPT_VERSION = '1.0.2'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.meta.js'
 	const DOWNLOAD_URL =
@@ -299,9 +299,18 @@
 			durationBadge: 'ytd-thumbnail-overlay-time-status-renderer',
 		}
 
+		// Strict duration shape: M:SS or H:MM:SS, nothing else. We use this to
+		// pull a duration out of a tile by walking text nodes when the badge
+		// element selector fails (YouTube renames wrappers periodically).
+		const DURATION_TEXT_RE = /^\d+:\d{1,2}(?::\d{1,2})?$/
+
 		let observer = null
 		let stylesInstalled = false
 		let scanPending = false
+		// Last scan summary string. We compare against this each scan and only
+		// log when something actually changed — keeps the console quiet during
+		// the storm of YouTube's internal mutations.
+		let lastScanSignature = ''
 
 		function shouldRunHere() {
 			return window.location.pathname.startsWith(ROUTE_SUBS)
@@ -330,6 +339,39 @@
 		}
 
 		/**
+		 * DOM-walker fallback: returns the first text node inside `tile` whose
+		 * trimmed content strictly matches the duration shape (M:SS or H:MM:SS).
+		 *
+		 * This is what saves us when YouTube renames the badge wrapper element —
+		 * the duration string itself almost always still exists somewhere in
+		 * the tile, even if our preferred selector misses. We strict-match the
+		 * full text node content to avoid false hits like timestamps embedded
+		 * in titles ("Watch this at 3:45...").
+		 */
+		function findDurationTextInTile(tile) {
+			const walker = document.createTreeWalker(tile, NodeFilter.SHOW_TEXT, null)
+			let node
+			while ((node = walker.nextNode())) {
+				const text = (node.nodeValue || '').trim()
+				if (text && DURATION_TEXT_RE.test(text)) return text
+			}
+			return ''
+		}
+
+		/**
+		 * Detects live/premiere/shorts state by scanning tile text for the
+		 * canonical badge labels. Used as a fallback when the badge element
+		 * itself isn't found by selector.
+		 */
+		function detectStateFromText(tile) {
+			const text = (tile.textContent || '').toUpperCase()
+			if (/\bLIVE\b/.test(text)) return 'live'
+			if (/\bPREMIERE/.test(text) || /\bUPCOMING\b/.test(text)) return 'premiere'
+			if (/\bSHORTS\b/.test(text)) return 'short'
+			return null
+		}
+
+		/**
 		 * Classifies a tile and (if applicable) reads its duration.
 		 * Returns { seconds, kind } where kind is one of:
 		 *   'video'    — standard video with a parseable duration
@@ -338,38 +380,55 @@
 		 *   'premiere' — scheduled / upcoming
 		 *   'unknown'  — couldn't classify (badge missing or unparseable)
 		 * `seconds` is null for non-video kinds.
+		 *
+		 * Resolution order:
+		 *   1. Shorts shelf wrapper (most reliable signal)
+		 *   2. Time-status badge element (preferred when YT renders it)
+		 *   3. Tree-walker for a duration-shaped text node anywhere in the tile
+		 *   4. Text scan for LIVE / PREMIERE / SHORTS labels
 		 */
 		function readTile(tile) {
 			if (tile.closest(SELECTORS.shortsShelf)) {
 				return { seconds: null, kind: 'short' }
 			}
 
+			// 1. Preferred path: time-status badge element.
 			const badge = tile.querySelector(SELECTORS.durationBadge)
-			if (!badge) {
-				return { seconds: null, kind: 'unknown' }
+			if (badge) {
+				const style = (badge.getAttribute('overlay-style') || '').toUpperCase()
+				if (style === 'LIVE') return { seconds: null, kind: 'live' }
+				if (style === 'UPCOMING') return { seconds: null, kind: 'premiere' }
+
+				const text = readBadgeText(badge)
+				if (text) {
+					const upper = text.toUpperCase()
+					if (upper.includes('LIVE')) return { seconds: null, kind: 'live' }
+					if (upper.includes('PREMIERE') || upper.includes('UPCOMING')) {
+						return { seconds: null, kind: 'premiere' }
+					}
+					if (upper === 'SHORTS') return { seconds: null, kind: 'short' }
+
+					const seconds = parseDuration(text)
+					if (seconds != null && !Number.isNaN(seconds)) {
+						return { seconds, kind: 'video' }
+					}
+				}
 			}
 
-			const style = (badge.getAttribute('overlay-style') || '').toUpperCase()
-			if (style === 'LIVE') return { seconds: null, kind: 'live' }
-			if (style === 'UPCOMING') return { seconds: null, kind: 'premiere' }
-
-			const text = readBadgeText(badge)
-			if (!text) return { seconds: null, kind: 'unknown' }
-
-			// Defensive: some tiles use the badge for live/upcoming even
-			// without the overlay-style attribute (older YT versions).
-			const upper = text.toUpperCase()
-			if (upper.includes('LIVE')) return { seconds: null, kind: 'live' }
-			if (upper.includes('PREMIERE') || upper.includes('UPCOMING')) {
-				return { seconds: null, kind: 'premiere' }
+			// 2. Fallback: walk text nodes for a duration-shaped string.
+			const walked = findDurationTextInTile(tile)
+			if (walked) {
+				const seconds = parseDuration(walked)
+				if (seconds != null && !Number.isNaN(seconds)) {
+					return { seconds, kind: 'video' }
+				}
 			}
-			if (upper === 'SHORTS') return { seconds: null, kind: 'short' }
 
-			const seconds = parseDuration(text)
-			if (seconds == null || Number.isNaN(seconds)) {
-				return { seconds: null, kind: 'unknown' }
-			}
-			return { seconds, kind: 'video' }
+			// 3. Fallback: scan visible text for state labels.
+			const state = detectStateFromText(tile)
+			if (state) return { seconds: null, kind: state }
+
+			return { seconds: null, kind: 'unknown' }
 		}
 
 		// ── Filter evaluation ──────────────────────────────────────────
@@ -445,10 +504,17 @@
 				}
 			}
 
-			flog.log(
-				`Scan: ${tiles.length} tiles (${visible} visible, ${hidden} hidden)`,
-				kinds,
-			)
+			// Skip the log if nothing changed since last scan. The observer
+			// is broad and fires constantly during normal page life — without
+			// dedup we'd flood the console with identical lines.
+			const signature = `${tiles.length}|${visible}|${hidden}|${kinds.video}|${kinds.short}|${kinds.live}|${kinds.premiere}|${kinds.unknown}`
+			if (signature !== lastScanSignature) {
+				lastScanSignature = signature
+				flog.log(
+					`Scan: ${tiles.length} tiles (${visible} visible, ${hidden} hidden)`,
+					kinds,
+				)
+			}
 		}
 
 		/**
@@ -465,12 +531,43 @@
 			})
 		}
 
+		/**
+		 * Returns true if `node` is, contains, or is contained-by a tile element.
+		 * Used to filter mutation records so we only re-scan when an actual
+		 * tile is added or removed, not on every internal lit-element churn.
+		 */
+		function isTileRelated(node) {
+			if (!node || node.nodeType !== Node.ELEMENT_NODE) return false
+			if (node.matches && node.matches(SELECTORS.tile)) return true
+			if (node.querySelector && node.querySelector(SELECTORS.tile)) return true
+			if (node.closest && node.closest(SELECTORS.tile)) return true
+			return false
+		}
+
+		function onMutations(records) {
+			for (const rec of records) {
+				for (const n of rec.addedNodes) {
+					if (isTileRelated(n)) {
+						scheduleScan()
+						return
+					}
+				}
+				for (const n of rec.removedNodes) {
+					if (isTileRelated(n)) {
+						scheduleScan()
+						return
+					}
+				}
+			}
+		}
+
 		function watchGrid() {
 			if (observer) observer.disconnect()
 			// Watch the whole body — YouTube swaps out the grid container on
-			// SPA navigation and narrow observers fall off. The scan itself
-			// is cheap, so wide-net observation is fine.
-			observer = new MutationObserver(scheduleScan)
+			// SPA navigation and narrow observers fall off. The mutation
+			// callback filters down to tile-related records so we don't burn
+			// cycles on every internal mutation.
+			observer = new MutationObserver(onMutations)
 			observer.observe(document.body, { childList: true, subtree: true })
 			flog.log('Observer installed')
 		}
