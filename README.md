@@ -24,6 +24,7 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
 - [Music streaming](#music-streaming)
   - [`yt-music-redirect/`](#yt-music-redirect)
   - [`ytm-desktop-handoff/`](#ytm-desktop-handoff)
+  - [`ytm-data-panel/`](#ytm-data-panel)
 - [Archived](#archived)
   - [`archive/bonjourr-quick-add/`](#archivebonjourr-quick-add)
 
@@ -278,6 +279,30 @@ A userscript for [YouTube Music](https://music.youtube.com) that adds a top-of-p
 **Metadata update checks:**
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.meta.js`
+
+---
+
+### `ytm-data-panel/`
+
+A userscript for [YouTube Music](https://music.youtube.com) that fills the empty space on `/watch` pages with a data-rich floating panel — the kind of info that's normally only on the YouTube page, surfaced directly in YTM.
+
+**Features:**
+
+- Floating, collapsible panel anchored in the top-right of `/watch` pages (collapsed state persists in `localStorage`)
+- Overview section — title, author, view count, length, publish date, and category
+- **Auto-detected chapters** — parses timestamp lines (`0:00 Intro`, `1:23 Verse`, `1:23:45 Outro`) out of the YouTube description and renders a clickable list that seeks the YTM player
+- Tag chips — every keyword on the video, rendered as chips
+- Full description text, preserving line breaks
+- Reads YTM's in-page `ytInitialPlayerResponse` blob (no external network fetches) via `unsafeWindow`
+- SPA-aware — waits for `ytInitialPlayerResponse` to catch up with the current URL after `yt-navigate-finish` before rendering, so you don't see stale data from the previous track
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-data-panel/ytm-data-panel.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-data-panel/ytm-data-panel.meta.js`
 
 <a id="archived"></a>
 
