@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         YourTube — Duration Filter
-// @namespace    youtube-duration-filter
+// @name         YourTube
+// @namespace    yourtube
 // @version      1.0.0
-// @description  Filter videos on the YouTube subscription feed by duration, with a slider, notches, and circuit-breaker toggles for Shorts/Live/Premieres
-// @match        *://www.youtube.com/feed/subscriptions*
+// @description  YouTube without the garbage — duration filtering, and more features to come
+// @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
-// @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/youtube-duration-filter/youtube-duration-filter.meta.js
-// @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/youtube-duration-filter/youtube-duration-filter.user.js
+// @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.meta.js
+// @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @connect      raw.githubusercontent.com
@@ -21,16 +21,21 @@
 	//  CONSTANTS
 	// ═══════════════════════════════════════════════════════════════════
 
-	const LOG_PREFIX = '[YourTube/Duration]'
+	const LOG_PREFIX = '[YourTube]'
+	const LOG_PREFIX_DURATION = '[YourTube/Duration]'
 	const SCRIPT_VERSION = '1.0.0'
 	const META_URL =
-		'https://raw.githubusercontent.com/MasonV/js-scripts/main/youtube-duration-filter/youtube-duration-filter.meta.js'
+		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.meta.js'
 	const DOWNLOAD_URL =
-		'https://raw.githubusercontent.com/MasonV/js-scripts/main/youtube-duration-filter/youtube-duration-filter.user.js'
+		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.user.js'
 
-	const SETTINGS_KEY = 'youtube_duration_filter_settings_v1'
-	const ONBOARDED_KEY = 'youtube_duration_filter_onboarded_v1'
-	const UPDATE_BANNER_ID = 'ydf-update-banner'
+	// All YourTube features share a single settings blob, keyed per-feature.
+	const SETTINGS_KEY = 'yourtube_settings_v1'
+	const ONBOARDED_KEY = 'yourtube_onboarded_v1'
+	const UPDATE_BANNER_ID = 'yourtube-update-banner'
+
+	// Page routes — which features run where.
+	const ROUTE_SUBS = '/feed/subscriptions'
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  LOGGING
@@ -44,8 +49,19 @@
 		console.warn(`${LOG_PREFIX} ${msg}`, ...args)
 	}
 
+	// Per-feature scoped logger. Use inside feature modules so a glance at the
+	// console tells you which feature is talking.
+	function makeLogger(prefix) {
+		return {
+			log: (msg, ...args) => console.log(`${prefix} ${msg}`, ...args),
+			warn: (msg, ...args) => console.warn(`${prefix} ${msg}`, ...args),
+			error: (msg, ...args) => console.error(`${prefix} ${msg}`, ...args),
+		}
+	}
+
 	// ═══════════════════════════════════════════════════════════════════
 	//  TIME PARSER (pure functions — testing candidates)
+	//  Shared utility — any feature that needs duration parsing uses this.
 	// ═══════════════════════════════════════════════════════════════════
 
 	/**
@@ -88,9 +104,12 @@
 		}
 
 		// Unit-tagged: e.g. "1h30m", "3m 30s", "3.5 minutes"
-		// Each component is a number followed by a unit. Strip spaces between
-		// number and unit, sum across components.
-		const componentRe = /(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b/g
+		// Each component is a number followed by a unit. The lookahead rejects
+		// only letters — `\b` wouldn't fire between two word characters like
+		// the `h` and `3` in `1h30m`, but `(?![a-z])` correctly separates units
+		// from digits while still excluding false matches like `heures`.
+		const componentRe =
+			/(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])/g
 		let total = 0
 		let matched = false
 		let match
@@ -142,7 +161,6 @@
 	}
 
 	// Smoke-test the parser on load so we catch regressions immediately.
-	// Logged as a single grouped console message.
 	function selfTestParser() {
 		const cases = [
 			['', null],
@@ -183,18 +201,48 @@
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
-	//  INIT (parser-only milestone — UI to follow)
+	//  FEATURE: DURATION FILTER (subscription feed)
+	//  Hides videos in the subscription grid whose duration falls outside
+	//  the user's configured range. UI to be wired in a subsequent commit.
 	// ═══════════════════════════════════════════════════════════════════
 
+	const DurationFilter = (() => {
+		const flog = makeLogger(LOG_PREFIX_DURATION)
+
+		function shouldRunHere() {
+			return window.location.pathname.startsWith(ROUTE_SUBS)
+		}
+
+		function init() {
+			if (!shouldRunHere()) return
+			flog.log('Feature active on subscription feed (UI not yet wired)')
+			// DOM detection, filter, and UI layers land in subsequent commits.
+		}
+
+		return { init, shouldRunHere }
+	})()
+
+	// ═══════════════════════════════════════════════════════════════════
+	//  ROUTING / INIT
+	// ═══════════════════════════════════════════════════════════════════
+
+	function runFeatures() {
+		DurationFilter.init()
+		// Future features register here.
+	}
+
 	selfTestParser()
+	runFeatures()
+
+	// YouTube is a SPA — re-run routing after every client-side navigation so
+	// features can activate/deactivate as the user moves between pages.
+	document.addEventListener('yt-navigate-finish', () => {
+		runFeatures()
+	})
+
 	log(`Initialized v${SCRIPT_VERSION} (parser milestone — UI not yet wired)`)
 
-	// Expose for in-browser inspection during development.
-	// Will be removed once the UI is wired.
-	// eslint-disable-next-line no-undef
-	if (typeof unsafeWindow !== 'undefined') {
-		// nothing yet
-	}
-	window.__ydf_parseDuration = parseDuration
-	window.__ydf_formatDuration = formatDuration
+	// Dev-only exposes for in-browser inspection. Removed before shipping.
+	window.__yourtube_parseDuration = parseDuration
+	window.__yourtube_formatDuration = formatDuration
 })()
