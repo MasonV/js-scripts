@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YourTube
 // @namespace    yourtube
-// @version      1.1.5
+// @version      1.1.6
 // @description  YouTube without the garbage — duration filtering, and more features to come
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -26,7 +26,7 @@
 
 	const LOG_PREFIX = '[YourTube]'
 	const LOG_PREFIX_DURATION = '[YourTube/Duration]'
-	const SCRIPT_VERSION = '1.1.5'
+	const SCRIPT_VERSION = '1.1.6'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.meta.js'
 	const DOWNLOAD_URL =
@@ -943,10 +943,13 @@
 				#${GEAR_ID} .yourtube-gear-open:active {
 					transform: scale(0.97);
 				}
-				#${GEAR_ID} svg {
-					width: 16px;
-					height: 16px;
+				#${GEAR_ID} .yourtube-gear-icon {
+					font-size: 16px;
+					line-height: 1;
 					flex-shrink: 0;
+				}
+				#${GEAR_ID} .yourtube-gear-label {
+					line-height: 1;
 				}
 				#${GEAR_ID} .yourtube-gear-divider {
 					width: 1px;
@@ -1319,32 +1322,63 @@
 			// inner open-button and close-button don't nest (invalid HTML)
 			// and so click events on the close-button don't bubble-fire the
 			// open-button at the same time.
+			//
+			// Everything is built via createElement + appendChild +
+			// textContent — NOT innerHTML. YouTube ships a Trusted Types
+			// CSP (`require-trusted-types-for 'script'`) which throws
+			// `Sink type mismatch violation` on every `.innerHTML = ...`
+			// assignment. The SVG gear was also dropped in favour of the
+			// ⚙ unicode glyph to avoid createElementNS ceremony and match
+			// the lightweight icon approach in ytm-desktop-handoff (↗).
 			const pill = document.createElement('div')
 			pill.id = GEAR_ID
 			pill.setAttribute('role', 'group')
 			pill.setAttribute('aria-label', 'YourTube header')
 			pill.setAttribute('style', GEAR_INLINE_STYLE)
-			pill.innerHTML = `
-				<button type="button" class="yourtube-gear-open" aria-label="Open YourTube settings" title="Open YourTube settings">
-					<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="width:16px;height:16px;flex-shrink:0;">
-						<path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
-					</svg>
-					<span>YourTube</span>
-				</button>
-				<span class="yourtube-gear-divider" aria-hidden="true"></span>
-				<button type="button" class="yourtube-gear-close" aria-label="Hide YourTube header" title="Hide header (run __yourtube_showHeader() in console to restore)">×</button>
-			`
-			const openBtn = pill.querySelector('.yourtube-gear-open')
-			const closeBtn = pill.querySelector('.yourtube-gear-close')
-			if (openBtn) openBtn.addEventListener('click', openPanel)
-			if (closeBtn) {
-				closeBtn.addEventListener('click', (e) => {
-					e.stopPropagation()
-					setHeaderHidden(true)
-					pill.remove()
-					ulog.log('Header hidden — restore with __yourtube_showHeader()')
-				})
-			}
+
+			const openBtn = document.createElement('button')
+			openBtn.type = 'button'
+			openBtn.className = 'yourtube-gear-open'
+			openBtn.setAttribute('aria-label', 'Open YourTube settings')
+			openBtn.setAttribute('title', 'Open YourTube settings')
+
+			const iconEl = document.createElement('span')
+			iconEl.className = 'yourtube-gear-icon'
+			iconEl.setAttribute('aria-hidden', 'true')
+			iconEl.textContent = '\u2699' // ⚙
+
+			const labelEl = document.createElement('span')
+			labelEl.className = 'yourtube-gear-label'
+			labelEl.textContent = 'YourTube'
+
+			openBtn.appendChild(iconEl)
+			openBtn.appendChild(labelEl)
+
+			const divider = document.createElement('span')
+			divider.className = 'yourtube-gear-divider'
+			divider.setAttribute('aria-hidden', 'true')
+
+			const closeBtn = document.createElement('button')
+			closeBtn.type = 'button'
+			closeBtn.className = 'yourtube-gear-close'
+			closeBtn.setAttribute('aria-label', 'Hide YourTube header')
+			closeBtn.setAttribute(
+				'title',
+				'Hide header (run __yourtube_showHeader() in console to restore)',
+			)
+			closeBtn.textContent = '\u00d7' // ×
+
+			pill.appendChild(openBtn)
+			pill.appendChild(divider)
+			pill.appendChild(closeBtn)
+
+			openBtn.addEventListener('click', openPanel)
+			closeBtn.addEventListener('click', (e) => {
+				e.stopPropagation()
+				setHeaderHidden(true)
+				pill.remove()
+				ulog.log('Header hidden — restore with __yourtube_showHeader()')
+			})
 			root.appendChild(pill)
 			ulog.log('Gear mounted (header pill)')
 			return true
@@ -1365,19 +1399,78 @@
 
 		// ── Panel ──────────────────────────────────────────────────────
 
-		function breakerMarkup(id, label, icon) {
-			return `
-				<div class="yourtube-breaker" data-breaker-target="${id}">
-					<div class="yourtube-breaker-label">
-						<span class="yourtube-breaker-icon">${icon}</span>
-						<span>${label}</span>
-					</div>
-					<div class="yourtube-switch" id="${id}" role="switch" aria-checked="false" tabindex="0">
-						<span class="yourtube-switch-label yourtube-on-label">ON</span>
-						<span class="yourtube-switch-label yourtube-off-label">OFF</span>
-					</div>
-				</div>
-			`
+		/**
+		 * Builds one labelled text-input row for the Duration Filter
+		 * section (label + text input + live-preview echo). Returns the
+		 * wrapping .yourtube-field element.
+		 */
+		function buildDurationField(inputId, labelText, placeholder) {
+			const field = document.createElement('div')
+			field.className = 'yourtube-field'
+
+			const label = document.createElement('label')
+			label.setAttribute('for', inputId)
+			label.textContent = labelText
+
+			const input = document.createElement('input')
+			input.id = inputId
+			input.type = 'text'
+			input.spellcheck = false
+			input.setAttribute('autocomplete', 'off')
+			input.placeholder = placeholder
+
+			const preview = document.createElement('div')
+			preview.className = 'yourtube-preview'
+			preview.setAttribute('data-preview-for', inputId)
+
+			field.appendChild(label)
+			field.appendChild(input)
+			field.appendChild(preview)
+			return field
+		}
+
+		/**
+		 * Builds a circuit-breaker row as a DOM subtree. Returns the
+		 * outer .yourtube-breaker element ready to be appended.
+		 *
+		 * Previously returned an HTML string, but YouTube's Trusted Types
+		 * CSP (`require-trusted-types-for 'script'`) blocks every
+		 * `.innerHTML = ...` assignment, so the whole SettingsUI builds
+		 * its DOM via createElement + textContent instead.
+		 */
+		function buildBreaker(id, label, icon) {
+			const row = document.createElement('div')
+			row.className = 'yourtube-breaker'
+			row.setAttribute('data-breaker-target', id)
+
+			const labelWrap = document.createElement('div')
+			labelWrap.className = 'yourtube-breaker-label'
+			const iconSpan = document.createElement('span')
+			iconSpan.className = 'yourtube-breaker-icon'
+			iconSpan.textContent = icon
+			const textSpan = document.createElement('span')
+			textSpan.textContent = label
+			labelWrap.appendChild(iconSpan)
+			labelWrap.appendChild(textSpan)
+
+			const sw = document.createElement('div')
+			sw.className = 'yourtube-switch'
+			sw.id = id
+			sw.setAttribute('role', 'switch')
+			sw.setAttribute('aria-checked', 'false')
+			sw.setAttribute('tabindex', '0')
+			const onLabel = document.createElement('span')
+			onLabel.className = 'yourtube-switch-label yourtube-on-label'
+			onLabel.textContent = 'ON'
+			const offLabel = document.createElement('span')
+			offLabel.className = 'yourtube-switch-label yourtube-off-label'
+			offLabel.textContent = 'OFF'
+			sw.appendChild(onLabel)
+			sw.appendChild(offLabel)
+
+			row.appendChild(labelWrap)
+			row.appendChild(sw)
+			return row
 		}
 
 		function buildPanel() {
@@ -1397,46 +1490,96 @@
 			overlay.id = OVERLAY_ID
 			overlay.addEventListener('click', closePanel)
 
+			// Built via DOM APIs rather than innerHTML because YouTube's
+			// Trusted Types CSP (`require-trusted-types-for 'script'`)
+			// blocks every `.innerHTML = ...` assignment with a "Sink
+			// type mismatch violation". See buildBreaker above.
 			const panel = document.createElement('div')
 			panel.id = PANEL_ID
 			panel.setAttribute('role', 'dialog')
 			panel.setAttribute('aria-label', 'YourTube settings')
-			panel.innerHTML = `
-				<div class="yourtube-header">
-					<h2>YourTube Settings</h2>
-					<button class="yourtube-close" type="button" aria-label="Close settings">×</button>
-				</div>
-				<div class="yourtube-body">
-					<section class="yourtube-section">
-						<h3>Duration filter</h3>
-						<div class="yourtube-field">
-							<label for="${FIELD_SHORTER}">Hide videos shorter than</label>
-							<input id="${FIELD_SHORTER}" type="text" spellcheck="false" autocomplete="off" placeholder="e.g. 5m, 1h30m, 3m 30s — leave blank for no minimum" />
-							<div class="yourtube-preview" data-preview-for="${FIELD_SHORTER}"></div>
-						</div>
-						<div class="yourtube-field">
-							<label for="${FIELD_LONGER}">Hide videos longer than</label>
-							<input id="${FIELD_LONGER}" type="text" spellcheck="false" autocomplete="off" placeholder="e.g. 20m, 1h — leave blank for no maximum" />
-							<div class="yourtube-preview" data-preview-for="${FIELD_LONGER}"></div>
-						</div>
-					</section>
-					<section class="yourtube-section">
-						<h3>Hide these kinds of tiles</h3>
-						<div class="yourtube-toggles">
-							${breakerMarkup(BREAKER_SHORTS, 'Shorts', '▶')}
-							${breakerMarkup(BREAKER_LIVE, 'Live streams', '●')}
-							${breakerMarkup(BREAKER_PREMIERES, 'Premieres', '◈')}
-						</div>
-					</section>
-				</div>
-				<div class="yourtube-footer">
-					<button class="yourtube-btn yourtube-primary" data-action="apply" type="button">Apply</button>
-					<button class="yourtube-btn" data-action="reset" type="button">Reset</button>
-					<button class="yourtube-btn yourtube-danger" data-action="defaults" type="button">Defaults</button>
-				</div>
-			`
 
-			panel.querySelector('.yourtube-close').addEventListener('click', closePanel)
+			// ── Header ─────────────────────────────────────────────
+			const header = document.createElement('div')
+			header.className = 'yourtube-header'
+			const headerTitle = document.createElement('h2')
+			headerTitle.textContent = 'YourTube Settings'
+			const headerClose = document.createElement('button')
+			headerClose.className = 'yourtube-close'
+			headerClose.type = 'button'
+			headerClose.setAttribute('aria-label', 'Close settings')
+			headerClose.textContent = '\u00d7' // ×
+			header.appendChild(headerTitle)
+			header.appendChild(headerClose)
+
+			// ── Body ───────────────────────────────────────────────
+			const body = document.createElement('div')
+			body.className = 'yourtube-body'
+
+			// Duration filter section
+			const durationSection = document.createElement('section')
+			durationSection.className = 'yourtube-section'
+			const durationH3 = document.createElement('h3')
+			durationH3.textContent = 'Duration filter'
+			durationSection.appendChild(durationH3)
+			durationSection.appendChild(
+				buildDurationField(
+					FIELD_SHORTER,
+					'Hide videos shorter than',
+					'e.g. 5m, 1h30m, 3m 30s — leave blank for no minimum',
+				),
+			)
+			durationSection.appendChild(
+				buildDurationField(
+					FIELD_LONGER,
+					'Hide videos longer than',
+					'e.g. 20m, 1h — leave blank for no maximum',
+				),
+			)
+
+			// Circuit-breaker section
+			const breakerSection = document.createElement('section')
+			breakerSection.className = 'yourtube-section'
+			const breakerH3 = document.createElement('h3')
+			breakerH3.textContent = 'Hide these kinds of tiles'
+			breakerSection.appendChild(breakerH3)
+			const toggles = document.createElement('div')
+			toggles.className = 'yourtube-toggles'
+			toggles.appendChild(buildBreaker(BREAKER_SHORTS, 'Shorts', '\u25b6')) // ▶
+			toggles.appendChild(buildBreaker(BREAKER_LIVE, 'Live streams', '\u25cf')) // ●
+			toggles.appendChild(buildBreaker(BREAKER_PREMIERES, 'Premieres', '\u25c8')) // ◈
+			breakerSection.appendChild(toggles)
+
+			body.appendChild(durationSection)
+			body.appendChild(breakerSection)
+
+			// ── Footer ─────────────────────────────────────────────
+			const footer = document.createElement('div')
+			footer.className = 'yourtube-footer'
+			const applyBtn = document.createElement('button')
+			applyBtn.className = 'yourtube-btn yourtube-primary'
+			applyBtn.setAttribute('data-action', 'apply')
+			applyBtn.type = 'button'
+			applyBtn.textContent = 'Apply'
+			const resetBtn = document.createElement('button')
+			resetBtn.className = 'yourtube-btn'
+			resetBtn.setAttribute('data-action', 'reset')
+			resetBtn.type = 'button'
+			resetBtn.textContent = 'Reset'
+			const defaultsBtn = document.createElement('button')
+			defaultsBtn.className = 'yourtube-btn yourtube-danger'
+			defaultsBtn.setAttribute('data-action', 'defaults')
+			defaultsBtn.type = 'button'
+			defaultsBtn.textContent = 'Defaults'
+			footer.appendChild(applyBtn)
+			footer.appendChild(resetBtn)
+			footer.appendChild(defaultsBtn)
+
+			panel.appendChild(header)
+			panel.appendChild(body)
+			panel.appendChild(footer)
+
+			headerClose.addEventListener('click', closePanel)
 
 			// Wire live-preview on the two text inputs. Parsing happens on
 			// every keystroke so the user sees their input being understood.
