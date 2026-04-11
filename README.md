@@ -4,23 +4,67 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
 
 ## Scripts
 
-- [Games](#games)
+- [Utility](#utility)
+  - [`auto-focus-search/`](#auto-focus-search)
+  - [`llm-stats-show-all/`](#llm-stats-show-all)
+- [Gaming](#gaming)
   - [`barter-bundle-scorer/`](#barter-bundle-scorer)
   - [`fanatical-autoclaim/`](#fanatical-autoclaim)
   - [`lichess-declutter/`](#lichess-declutter)
-- [Media](#media)
+- [Work](#work)
+  - [`google-address-autocomplete-ca/`](#google-address-autocomplete-ca)
+  - [`odoo-heic-to-jpeg/`](#odoo-heic-to-jpeg)
+- [Music streaming](#music-streaming)
   - [`yt-music-redirect/`](#yt-music-redirect)
   - [`ytm-desktop-handoff/`](#ytm-desktop-handoff)
-- [Work (Odoo)](#work-odoo)
-  - [`odoo-heic-to-jpeg/`](#odoo-heic-to-jpeg)
-  - [`google-address-autocomplete-ca/`](#google-address-autocomplete-ca)
-- [Utilities](#utilities)
-  - [`auto-focus-search/`](#auto-focus-search)
-  - [`llm-stats-show-all/`](#llm-stats-show-all)
 - [Archived](#archived)
   - [`archive/bonjourr-quick-add/`](#archivebonjourr-quick-add)
 
-## Games
+## Utility
+
+### `auto-focus-search/`
+
+A global userscript that automatically detects and focuses search input fields on any webpage, so you can start typing immediately without clicking.
+
+**Features:**
+
+- Cascading search field detection using semantic roles, input types, name attributes, placeholders, aria-labels, and common IDs/classes
+- Dynamic detection via MutationObserver for search boxes that appear after page load (modals, SPAs, Ctrl+K dialogs)
+- SPA-aware — re-triggers on `pushState`/`popstate`/`hashchange` navigation
+- Safety checks — never steals focus from inputs you're already typing in, respects pages that auto-focus their own search
+- Floating indicator with settings popover — appears briefly when a field is focused, click to toggle per-site enable/disable
+- Keyboard shortcuts: `Alt+Shift+S` to toggle on current site, `Alt+Shift+N` to cycle through multiple search inputs
+- Per-site exclusion list stored in localStorage
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.meta.js`
+
+### `llm-stats-show-all/`
+
+A userscript for [llm-stats.com](https://llm-stats.com) leaderboard pages that auto-paginates through all models and displays them in a single table.
+
+**Features:**
+
+- Automatically clicks through all pagination pages, collecting every model row
+- Replaces the paginated table with a single view of all models
+- Progress banner with percentage indicator during loading
+- Deduplicates rows to handle any overlap between pages
+- Hides pagination controls once all models are loaded
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.meta.js`
+
+## Gaming
 
 ### `barter-bundle-scorer/`
 
@@ -89,7 +133,47 @@ A userscript for [lichess.org](https://lichess.org) that strips the homepage dow
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/lichess-declutter/lichess-declutter.meta.js`
 
-## Media
+## Work
+
+### `google-address-autocomplete-ca/`
+
+A userscript for [Odoo](https://www.odoo.com) SaaS instances that restricts Google Places Autocomplete results to Canada with a location bias toward Southern Ontario.
+
+**Features:**
+
+- Wraps `google.maps.places.Autocomplete` constructor to inject `componentRestrictions: { country: "ca" }`
+- Wraps `AutocompleteService.getPlacePredictions` with the same restriction plus a circular location bias (centered on Southern Ontario, 150 km radius)
+- Non-destructive — does not override restrictions if already present
+- Polls until `google.maps.places` is loaded before patching
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/google-address-autocomplete-ca/google-address-autocomplete-ca.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/google-address-autocomplete-ca/google-address-autocomplete-ca.meta.js`
+
+### `odoo-heic-to-jpeg/`
+
+A userscript for [Odoo](https://www.odoo.com) that converts HEIC/HEIF images to JPEG client-side before upload. Solves the browser HEIC rendering gap on Odoo SaaS where server-side conversion is blocked by sandbox restrictions.
+
+**Features:**
+
+- Automatically detects HEIC/HEIF files in file picker and drag-and-drop uploads
+- Converts to JPEG client-side using heic2any before Odoo processes the upload
+- Toast notification confirms conversion count
+- Graceful fallback — if conversion fails, the original file is uploaded rather than silently lost
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.meta.js`
+
+## Music streaming
 
 ### `yt-music-redirect/`
 
@@ -130,90 +214,6 @@ A userscript for [YouTube Music](https://music.youtube.com) that adds a floating
 **Metadata update checks:**
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.meta.js`
-
-## Work (Odoo)
-
-### `odoo-heic-to-jpeg/`
-
-A userscript for [Odoo](https://www.odoo.com) that converts HEIC/HEIF images to JPEG client-side before upload. Solves the browser HEIC rendering gap on Odoo SaaS where server-side conversion is blocked by sandbox restrictions.
-
-**Features:**
-
-- Automatically detects HEIC/HEIF files in file picker and drag-and-drop uploads
-- Converts to JPEG client-side using heic2any before Odoo processes the upload
-- Toast notification confirms conversion count
-- Graceful fallback — if conversion fails, the original file is uploaded rather than silently lost
-
-**Install / download:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.user.js`
-
-**Metadata update checks:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.meta.js`
-
-### `google-address-autocomplete-ca/`
-
-A userscript for [Odoo](https://www.odoo.com) SaaS instances that restricts Google Places Autocomplete results to Canada with a location bias toward Southern Ontario.
-
-**Features:**
-
-- Wraps `google.maps.places.Autocomplete` constructor to inject `componentRestrictions: { country: "ca" }`
-- Wraps `AutocompleteService.getPlacePredictions` with the same restriction plus a circular location bias (centered on Southern Ontario, 150 km radius)
-- Non-destructive — does not override restrictions if already present
-- Polls until `google.maps.places` is loaded before patching
-
-**Install / download:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/google-address-autocomplete-ca/google-address-autocomplete-ca.user.js`
-
-**Metadata update checks:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/google-address-autocomplete-ca/google-address-autocomplete-ca.meta.js`
-
-## Utilities
-
-### `auto-focus-search/`
-
-A global userscript that automatically detects and focuses search input fields on any webpage, so you can start typing immediately without clicking.
-
-**Features:**
-
-- Cascading search field detection using semantic roles, input types, name attributes, placeholders, aria-labels, and common IDs/classes
-- Dynamic detection via MutationObserver for search boxes that appear after page load (modals, SPAs, Ctrl+K dialogs)
-- SPA-aware — re-triggers on `pushState`/`popstate`/`hashchange` navigation
-- Safety checks — never steals focus from inputs you're already typing in, respects pages that auto-focus their own search
-- Floating indicator with settings popover — appears briefly when a field is focused, click to toggle per-site enable/disable
-- Keyboard shortcuts: `Alt+Shift+S` to toggle on current site, `Alt+Shift+N` to cycle through multiple search inputs
-- Per-site exclusion list stored in localStorage
-
-**Install / download:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.user.js`
-
-**Metadata update checks:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.meta.js`
-
-### `llm-stats-show-all/`
-
-A userscript for [llm-stats.com](https://llm-stats.com) leaderboard pages that auto-paginates through all models and displays them in a single table.
-
-**Features:**
-
-- Automatically clicks through all pagination pages, collecting every model row
-- Replaces the paginated table with a single view of all models
-- Progress banner with percentage indicator during loading
-- Deduplicates rows to handle any overlap between pages
-- Hides pagination controls once all models are loaded
-
-**Install / download:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.user.js`
-
-**Metadata update checks:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.meta.js`
 
 ## Archived
 
