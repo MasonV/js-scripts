@@ -10,6 +10,7 @@
 // @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
+// @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
@@ -243,6 +244,8 @@
 	log(`Initialized v${SCRIPT_VERSION} (parser milestone — UI not yet wired)`)
 
 	// Dev-only exposes for in-browser inspection. Removed before shipping.
-	window.__yourtube_parseDuration = parseDuration
-	window.__yourtube_formatDuration = formatDuration
+	// Must use unsafeWindow because @grant GM_* puts the script in Tampermonkey's
+	// sandbox — `window` would attach to the sandbox global, invisible to DevTools.
+	unsafeWindow.__yourtube_parseDuration = parseDuration
+	unsafeWindow.__yourtube_formatDuration = formatDuration
 })()
