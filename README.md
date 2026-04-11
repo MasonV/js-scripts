@@ -4,6 +4,68 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
 
 ## Scripts
 
+- [Utility](#utility)
+  - [`auto-focus-search/`](#auto-focus-search)
+  - [`llm-stats-show-all/`](#llm-stats-show-all)
+- [Gaming](#gaming)
+  - [`barter-bundle-scorer/`](#barter-bundle-scorer)
+  - [`fanatical-autoclaim/`](#fanatical-autoclaim)
+  - [`lichess-declutter/`](#lichess-declutter)
+- [Work](#work)
+  - [`google-address-autocomplete-ca/`](#google-address-autocomplete-ca)
+  - [`odoo-heic-to-jpeg/`](#odoo-heic-to-jpeg)
+- [Music streaming](#music-streaming)
+  - [`yt-music-redirect/`](#yt-music-redirect)
+  - [`ytm-desktop-handoff/`](#ytm-desktop-handoff)
+- [Archived](#archived)
+  - [`archive/bonjourr-quick-add/`](#archivebonjourr-quick-add)
+
+## Utility
+
+### `auto-focus-search/`
+
+A global userscript that automatically detects and focuses search input fields on any webpage, so you can start typing immediately without clicking.
+
+**Features:**
+
+- Cascading search field detection using semantic roles, input types, name attributes, placeholders, aria-labels, and common IDs/classes
+- Dynamic detection via MutationObserver for search boxes that appear after page load (modals, SPAs, Ctrl+K dialogs)
+- SPA-aware — re-triggers on `pushState`/`popstate`/`hashchange` navigation
+- Safety checks — never steals focus from inputs you're already typing in, respects pages that auto-focus their own search
+- Floating indicator with settings popover — appears briefly when a field is focused, click to toggle per-site enable/disable
+- Keyboard shortcuts: `Alt+Shift+S` to toggle on current site, `Alt+Shift+N` to cycle through multiple search inputs
+- Per-site exclusion list stored in localStorage
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.meta.js`
+
+### `llm-stats-show-all/`
+
+A userscript for [llm-stats.com](https://llm-stats.com) leaderboard pages that auto-paginates through all models and displays them in a single table.
+
+**Features:**
+
+- Automatically clicks through all pagination pages, collecting every model row
+- Replaces the paginated table with a single view of all models
+- Progress banner with percentage indicator during loading
+- Deduplicates rows to handle any overlap between pages
+- Hides pagination controls once all models are loaded
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.meta.js`
+
+## Gaming
+
 ### `barter-bundle-scorer/`
 
 A userscript for [Barter.vg](https://barter.vg) bundle pages that scores each game and provides a side-panel evaluation of the overall bundle.
@@ -31,29 +93,25 @@ A userscript for [Barter.vg](https://barter.vg) bundle pages that scores each ga
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/barter-bundle-scorer/barter-bundle-scorer.meta.js`
 
-### `llm-stats-show-all/`
+### `fanatical-autoclaim/`
 
-A userscript for [llm-stats.com](https://llm-stats.com) leaderboard pages that auto-paginates through all models and displays them in a single table.
+A userscript for [Fanatical](https://www.fanatical.com) order pages that bulk-reveals and bulk-redeems Steam keys.
 
 **Features:**
 
-- Automatically clicks through all pagination pages, collecting every model row
-- Replaces the paginated table with a single view of all models
-- Progress banner with percentage indicator during loading
-- Deduplicates rows to handle any overlap between pages
-- Hides pagination controls once all models are loaded
+- Floating control panel on order pages with Reveal All, Redeem All, and combined Reveal + Redeem buttons
+- Sequential key reveal with delays to avoid API rate limits
+- Redeems keys via existing "Redeem on Steam" buttons, with fallback to `steam://registerkey/` URLs
+- Status display showing current progress and game names
+- Waits for React SPA to render before activating
 
 **Install / download:**
 
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.user.js`
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.user.js`
 
 **Metadata update checks:**
 
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.meta.js`
-
-### `bonjourr-quick-add/` *(abandoned)*
-
-A userscript for [Bonjourr](https://bonjourr.fr) new tab pages that provides a quick interface for adding shortcuts with automatic page title fetching. **Not functional** — Firefox's extension security model blocks userscript injection into `moz-extension://` pages. Kept in the repo in case browser APIs or Bonjourr change to make this viable. See [`REPORT.md`](bonjourr-quick-add/REPORT.md) for the full post-mortem.
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.meta.js`
 
 ### `lichess-declutter/`
 
@@ -75,24 +133,7 @@ A userscript for [lichess.org](https://lichess.org) that strips the homepage dow
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/lichess-declutter/lichess-declutter.meta.js`
 
-### `odoo-heic-to-jpeg/`
-
-A userscript for [Odoo](https://www.odoo.com) that converts HEIC/HEIF images to JPEG client-side before upload. Solves the browser HEIC rendering gap on Odoo SaaS where server-side conversion is blocked by sandbox restrictions.
-
-**Features:**
-
-- Automatically detects HEIC/HEIF files in file picker and drag-and-drop uploads
-- Converts to JPEG client-side using heic2any before Odoo processes the upload
-- Toast notification confirms conversion count
-- Graceful fallback — if conversion fails, the original file is uploaded rather than silently lost
-
-**Install / download:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.user.js`
-
-**Metadata update checks:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.meta.js`
+## Work
 
 ### `google-address-autocomplete-ca/`
 
@@ -112,6 +153,27 @@ A userscript for [Odoo](https://www.odoo.com) SaaS instances that restricts Goog
 **Metadata update checks:**
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/google-address-autocomplete-ca/google-address-autocomplete-ca.meta.js`
+
+### `odoo-heic-to-jpeg/`
+
+A userscript for [Odoo](https://www.odoo.com) that converts HEIC/HEIF images to JPEG client-side before upload. Solves the browser HEIC rendering gap on Odoo SaaS where server-side conversion is blocked by sandbox restrictions.
+
+**Features:**
+
+- Automatically detects HEIC/HEIF files in file picker and drag-and-drop uploads
+- Converts to JPEG client-side using heic2any before Odoo processes the upload
+- Toast notification confirms conversion count
+- Graceful fallback — if conversion fails, the original file is uploaded rather than silently lost
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.meta.js`
+
+## Music streaming
 
 ### `yt-music-redirect/`
 
@@ -153,50 +215,17 @@ A userscript for [YouTube Music](https://music.youtube.com) that adds a floating
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.meta.js`
 
-### `fanatical-autoclaim/`
+## Archived
 
-A userscript for [Fanatical](https://www.fanatical.com) order pages that bulk-reveals and bulk-redeems Steam keys.
+Scripts that are no longer functional or maintained. Kept in the repo for reference — not served via raw URLs.
 
-**Features:**
+### `archive/bonjourr-quick-add/`
 
-- Floating control panel on order pages with Reveal All, Redeem All, and combined Reveal + Redeem buttons
-- Sequential key reveal with delays to avoid API rate limits
-- Redeems keys via existing "Redeem on Steam" buttons, with fallback to `steam://registerkey/` URLs
-- Status display showing current progress and game names
-- Waits for React SPA to render before activating
-
-**Install / download:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.user.js`
-
-**Metadata update checks:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.meta.js`
-
-### `auto-focus-search/`
-
-A global userscript that automatically detects and focuses search input fields on any webpage, so you can start typing immediately without clicking.
-
-**Features:**
-
-- Cascading search field detection using semantic roles, input types, name attributes, placeholders, aria-labels, and common IDs/classes
-- Dynamic detection via MutationObserver for search boxes that appear after page load (modals, SPAs, Ctrl+K dialogs)
-- SPA-aware — re-triggers on `pushState`/`popstate`/`hashchange` navigation
-- Safety checks — never steals focus from inputs you're already typing in, respects pages that auto-focus their own search
-- Floating indicator with settings popover — appears briefly when a field is focused, click to toggle per-site enable/disable
-- Keyboard shortcuts: `Alt+Shift+S` to toggle on current site, `Alt+Shift+N` to cycle through multiple search inputs
-- Per-site exclusion list stored in localStorage
-
-**Install / download:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.user.js`
-
-**Metadata update checks:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.meta.js`
+A userscript for [Bonjourr](https://bonjourr.fr) new tab pages that provides a quick interface for adding shortcuts with automatic page title fetching. **Not functional** — Firefox's extension security model blocks userscript injection into `moz-extension://` pages. Kept in the repo in case browser APIs or Bonjourr change to make this viable. See [`REPORT.md`](archive/bonjourr-quick-add/REPORT.md) for the full post-mortem.
 
 ## Update workflow
 
-1. Edit `barter-bundle-scorer/barter-bundle-scorer.user.js`.
-2. Bump `@version` in both script files under `barter-bundle-scorer/`.
+1. Edit the script's `.user.js` file.
+2. Bump `@version` in **both** the `.user.js` and `.meta.js` files (and the `SCRIPT_VERSION` constant in the script body). They must all match.
 3. Keep `@updateURL` pointed at `.meta.js` and `@downloadURL` pointed at `.user.js`.
+4. Merge to `main` — scripts are served via raw GitHub URLs from the `main` branch, so merging is deployment.
