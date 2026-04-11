@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YourTube
 // @namespace    yourtube
-// @version      1.1.2
+// @version      1.1.3
 // @description  YouTube without the garbage — duration filtering, and more features to come
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -26,7 +26,7 @@
 
 	const LOG_PREFIX = '[YourTube]'
 	const LOG_PREFIX_DURATION = '[YourTube/Duration]'
-	const SCRIPT_VERSION = '1.1.2-debug'
+	const SCRIPT_VERSION = '1.1.3'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.meta.js'
 	const DOWNLOAD_URL =
@@ -565,12 +565,15 @@
 
 		function watchGrid() {
 			if (observer) observer.disconnect()
-			// Watch the whole body — YouTube swaps out the grid container on
-			// SPA navigation and narrow observers fall off. The mutation
-			// callback filters down to tile-related records so we don't burn
-			// cycles on every internal mutation.
+			// Watch the document root (documentElement) — YouTube swaps out
+			// the grid container on SPA navigation and narrow observers
+			// fall off. We observe the root instead of body because body
+			// itself can be replaced on this user's YT variant (see the
+			// v1.1.2 debug probe diagnosis). The mutation callback filters
+			// down to tile-related records so we don't burn cycles on
+			// every internal mutation.
 			observer = new MutationObserver(onMutations)
-			observer.observe(document.body, { childList: true, subtree: true })
+			observer.observe(document.documentElement, { childList: true, subtree: true })
 			flog.log('Observer installed')
 		}
 
@@ -1215,8 +1218,15 @@
 
 		function mountGear() {
 			if (document.getElementById(GEAR_ID)) return false
-			if (!document.body) {
-				ulog.warn('mountGear: document.body not ready, deferring')
+			// Mount target is document.documentElement (the <html> element),
+			// not document.body. The v1.1.2 debug probe proved that YouTube
+			// wipes or replaces body-level children we add — only children
+			// appended to documentElement survive YT's SPA churn on this
+			// user's setup. See DebugProbe "B (html)" for the original
+			// diagnosis.
+			const root = document.documentElement
+			if (!root) {
+				ulog.warn('mountGear: document.documentElement not ready, deferring')
 				return false
 			}
 			const btn = document.createElement('button')
@@ -1231,7 +1241,7 @@
 				<span>YourTube</span>
 			`
 			btn.addEventListener('click', openPanel)
-			document.body.appendChild(btn)
+			root.appendChild(btn)
 			ulog.log('Gear mounted')
 			return true
 		}
@@ -1255,8 +1265,11 @@
 
 		function buildPanel() {
 			if (panelBuilt && document.getElementById(PANEL_ID)) return false
-			if (!document.body) {
-				ulog.warn('buildPanel: document.body not ready, deferring')
+			// Same reasoning as mountGear: mount to documentElement, not
+			// body. See SettingsUI.mountGear for context.
+			const root = document.documentElement
+			if (!root) {
+				ulog.warn('buildPanel: document.documentElement not ready, deferring')
 				return false
 			}
 			// Reset the flag if we're rebuilding after YouTube removed
@@ -1336,8 +1349,8 @@
 			panel.querySelector('[data-action="reset"]').addEventListener('click', onReset)
 			panel.querySelector('[data-action="defaults"]').addEventListener('click', onDefaults)
 
-			document.body.appendChild(overlay)
-			document.body.appendChild(panel)
+			root.appendChild(overlay)
+			root.appendChild(panel)
 			ulog.log('Panel built')
 			return true
 		}
@@ -1484,7 +1497,6 @@
 		// ── Mount lifecycle ────────────────────────────────────────────
 
 		let healObserver = null
-		let bodyWaitObserver = null
 		// Debounce for heal checks — YT's DOM churns constantly; we check
 		// at most once per animation frame.
 		let healPending = false
@@ -1537,33 +1549,26 @@
 		}
 
 		/**
-		 * YouTube scripts sometimes run at document-start, before body exists.
-		 * If we land in that window we observe the root for body insertion,
-		 * then kick init once it arrives. No-ops if body is already there.
+		 * We mount onto document.documentElement (the <html> element),
+		 * which exists essentially as soon as the page parser starts.
+		 * This helper is kept for symmetry and as a safety net — in the
+		 * degenerate case where documentElement isn't yet present, we
+		 * schedule a microtask retry.
 		 */
-		function waitForBody(cb) {
-			if (document.body) {
+		function waitForRoot(cb) {
+			if (document.documentElement) {
 				cb()
 				return
 			}
-			if (bodyWaitObserver) return
-			ulog.log('Waiting for document.body...')
-			bodyWaitObserver = new MutationObserver(() => {
-				if (document.body) {
-					bodyWaitObserver.disconnect()
-					bodyWaitObserver = null
-					ulog.log('document.body is now available')
-					cb()
-				}
-			})
-			bodyWaitObserver.observe(document.documentElement, {
-				childList: true,
-			})
+			ulog.log('Waiting for document.documentElement...')
+			// documentElement is parsed extremely early; if it's missing
+			// we must be pre-parse. A microtask retry is enough.
+			queueMicrotask(() => waitForRoot(cb))
 		}
 
 		function init() {
 			try {
-				waitForBody(() => {
+				waitForRoot(() => {
 					installStyles()
 					ensureMounted()
 					startSelfHeal()
@@ -1580,10 +1585,24 @@
 	//  ROUTING / INIT
 	// ═══════════════════════════════════════════════════════════════════
 
+	// Opt-in flag: set `localStorage.setItem('yourtube_debug_probe_v1', '1')`
+	// in the devtools console and reload to enable the DebugProbe for UI
+	// mount diagnostics. Defaults to off so the markers don't clutter the
+	// page in normal use.
+	function isDebugProbeEnabled() {
+		try {
+			return localStorage.getItem('yourtube_debug_probe_v1') === '1'
+		} catch (_) {
+			return false
+		}
+	}
+
 	function runFeatures() {
-		// Debug probe runs FIRST so we see mount results even if the
-		// real SettingsUI mount crashes later in the chain.
-		DebugProbe.init()
+		if (isDebugProbeEnabled()) {
+			// Probe runs FIRST so we see mount results even if the
+			// real SettingsUI mount crashes later in the chain.
+			DebugProbe.init()
+		}
 		SettingsUI.init()
 		DurationFilter.init()
 		// Future features register here.
@@ -1622,7 +1641,7 @@
 		}
 	}, 2000)
 
-	log(`🐛 DEBUG BUILD v${SCRIPT_VERSION} — watch for A/B/C/D/E markers on the page`)
+	log(`Initialized v${SCRIPT_VERSION} — click the YourTube button bottom-right to open settings`)
 
 	// Dev-only exposes for in-browser inspection. Removed before shipping.
 	// Firefox's content script sandbox wraps function references crossing the
@@ -1640,4 +1659,29 @@
 	devExpose('__yourtube_formatDuration', formatDuration)
 	devExpose('__yourtube_getSettings', getSettings)
 	devExpose('__yourtube_applyFilter', DurationFilter.applyFilter)
+
+	// Toggles for the UI-mount debug probe. Use from devtools console:
+	//   __yourtube_enableDebugProbe()  then reload
+	//   __yourtube_disableDebugProbe() then reload
+	// The probe mounts labeled test badges using five different DOM
+	// strategies so we can diagnose future UI insertion failures on
+	// YouTube variants or page layouts where our current approach breaks.
+	devExpose('__yourtube_enableDebugProbe', () => {
+		try {
+			localStorage.setItem('yourtube_debug_probe_v1', '1')
+			console.log('[YourTube] Debug probe ENABLED — reload the page')
+		} catch (e) {
+			console.warn('[YourTube] Failed to enable debug probe:', e)
+		}
+	})
+	devExpose('__yourtube_disableDebugProbe', () => {
+		try {
+			localStorage.removeItem('yourtube_debug_probe_v1')
+			console.log('[YourTube] Debug probe DISABLED — reload the page')
+		} catch (e) {
+			console.warn('[YourTube] Failed to disable debug probe:', e)
+		}
+	})
+	// Also allow invoking the probe one-shot without persisting the flag.
+	devExpose('__yourtube_runDebugProbe', () => DebugProbe.init())
 })()
