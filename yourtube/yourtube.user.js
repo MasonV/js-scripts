@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YourTube
 // @namespace    yourtube
-// @version      1.1.3
+// @version      1.1.4
 // @description  YouTube without the garbage — duration filtering, and more features to come
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -26,7 +26,7 @@
 
 	const LOG_PREFIX = '[YourTube]'
 	const LOG_PREFIX_DURATION = '[YourTube/Duration]'
-	const SCRIPT_VERSION = '1.1.3'
+	const SCRIPT_VERSION = '1.1.4'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.meta.js'
 	const DOWNLOAD_URL =
@@ -893,34 +893,64 @@
 				addStyle(`
 				#${GEAR_ID} {
 					position: fixed;
-					bottom: 24px;
+					top: 14px;
 					right: 24px;
 					z-index: 2147483646;
-					min-width: 56px;
-					height: 56px;
-					padding: 0 20px 0 16px;
-					border-radius: 28px;
+					height: 40px;
+					padding: 0 4px 0 14px;
+					border-radius: 20px;
 					background: #0f0f0f;
 					color: #fff;
 					border: 2px solid #3ea6ff;
 					box-shadow: 0 4px 16px rgba(0,0,0,0.5);
 					font-family: Roboto, "YouTube Sans", Arial, sans-serif;
-					font-size: 14px;
+					font-size: 13px;
 					font-weight: 600;
-					cursor: pointer;
-					display: flex;
+					display: inline-flex;
 					align-items: center;
-					gap: 10px;
+					gap: 8px;
 					transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
 				}
 				#${GEAR_ID}:hover {
-					transform: translateY(-2px);
-					box-shadow: 0 8px 24px rgba(62,166,255,0.55);
+					transform: translateY(-1px);
+					box-shadow: 0 6px 20px rgba(62,166,255,0.55);
+				}
+				#${GEAR_ID} .yourtube-gear-open {
+					display: inline-flex;
+					align-items: center;
+					gap: 8px;
+					background: transparent;
+					color: inherit;
+					border: 0;
+					padding: 0 4px 0 0;
+					height: 100%;
+					font: inherit;
+					cursor: pointer;
 				}
 				#${GEAR_ID} svg {
-					width: 22px;
-					height: 22px;
+					width: 18px;
+					height: 18px;
 					flex-shrink: 0;
+				}
+				#${GEAR_ID} .yourtube-gear-close {
+					display: inline-flex;
+					align-items: center;
+					justify-content: center;
+					width: 26px;
+					height: 26px;
+					margin-left: 4px;
+					border-radius: 50%;
+					background: transparent;
+					color: #aaa;
+					border: 0;
+					font-size: 18px;
+					line-height: 1;
+					cursor: pointer;
+					transition: background 0.12s ease-out, color 0.12s ease-out;
+				}
+				#${GEAR_ID} .yourtube-gear-close:hover {
+					background: rgba(255,80,80,0.18);
+					color: #ff6b6b;
 				}
 
 				#${OVERLAY_ID} {
@@ -1189,35 +1219,71 @@
 
 		// ── Gear button ────────────────────────────────────────────────
 
-		// Critical inline styles — used as a belt-and-suspenders fallback in
-		// case GM_addStyle is blocked or runs late. Without these, a failed
-		// stylesheet install would leave the button as a flow-layout element
-		// invisible amid YouTube's content. The CSS class is the preferred
-		// path and wins over inline styles for hover/transition.
+		// localStorage key that remembers whether the user dismissed the
+		// header pill. When set, mountGear() is a no-op and the self-heal
+		// observer won't remount — the user explicitly said "hide me". A
+		// dev-exposed `__yourtube_showHeader()` clears the flag so the
+		// user can recover from the console if they want the pill back.
+		const HEADER_HIDDEN_KEY = 'yourtube_header_hidden_v1'
+
+		function isHeaderHidden() {
+			try {
+				return localStorage.getItem(HEADER_HIDDEN_KEY) === '1'
+			} catch (_) {
+				return false
+			}
+		}
+
+		function setHeaderHidden(hidden) {
+			try {
+				if (hidden) {
+					localStorage.setItem(HEADER_HIDDEN_KEY, '1')
+				} else {
+					localStorage.removeItem(HEADER_HIDDEN_KEY)
+				}
+			} catch (e) {
+				ulog.warn('setHeaderHidden: localStorage write failed:', e)
+			}
+		}
+
+		// Critical inline styles — used as a belt-and-suspenders fallback
+		// in case GM_addStyle is blocked or runs late. Without these, a
+		// failed stylesheet install would leave the pill as a flow-layout
+		// element invisible amid YouTube's content. The CSS class is the
+		// preferred path and wins over inline styles for hover/transition.
+		//
+		// Positioned at top of the viewport to match the only DOM mount
+		// strategy that survived YouTube's SPA churn in v1.1.2's debug
+		// probe (see DebugProbe "B (html)"). v1.1.3 mounted to
+		// documentElement but kept bottom-right coords — the element was
+		// still not visible on the user's setup. v1.1.4 moves it to the
+		// top, turning it into a header-style pill.
 		const GEAR_INLINE_STYLE = [
 			'position: fixed',
-			'bottom: 24px',
+			'top: 14px',
 			'right: 24px',
 			'z-index: 2147483646',
-			'min-width: 56px',
-			'height: 56px',
-			'padding: 0 20px 0 16px',
-			'border-radius: 28px',
+			'height: 40px',
+			'padding: 0 4px 0 14px',
+			'border-radius: 20px',
 			'background: #0f0f0f',
 			'color: #fff',
 			'border: 2px solid #3ea6ff',
 			'box-shadow: 0 4px 16px rgba(0,0,0,0.5)',
 			'font-family: Roboto, Arial, sans-serif',
-			'font-size: 14px',
+			'font-size: 13px',
 			'font-weight: 600',
-			'cursor: pointer',
-			'display: flex',
+			'display: inline-flex',
 			'align-items: center',
-			'gap: 10px',
+			'gap: 8px',
 		].join('; ')
 
 		function mountGear() {
 			if (document.getElementById(GEAR_ID)) return false
+			// Respect the "dismissed" flag — if the user explicitly closed
+			// the pill, don't fight them by remounting. Recovery path is
+			// __yourtube_showHeader() from the devtools console.
+			if (isHeaderHidden()) return false
 			// Mount target is document.documentElement (the <html> element),
 			// not document.body. The v1.1.2 debug probe proved that YouTube
 			// wipes or replaces body-level children we add — only children
@@ -1229,21 +1295,51 @@
 				ulog.warn('mountGear: document.documentElement not ready, deferring')
 				return false
 			}
-			const btn = document.createElement('button')
-			btn.id = GEAR_ID
-			btn.type = 'button'
-			btn.setAttribute('aria-label', 'Open YourTube settings')
-			btn.setAttribute('style', GEAR_INLINE_STYLE)
-			btn.innerHTML = `
-				<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="width:22px;height:22px;flex-shrink:0;">
-					<path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
-				</svg>
-				<span>YourTube</span>
+			// The pill is a <div> container rather than a <button> so the
+			// inner open-button and close-button don't nest (invalid HTML)
+			// and so click events on the close-button don't bubble-fire the
+			// open-button at the same time.
+			const pill = document.createElement('div')
+			pill.id = GEAR_ID
+			pill.setAttribute('role', 'group')
+			pill.setAttribute('aria-label', 'YourTube header')
+			pill.setAttribute('style', GEAR_INLINE_STYLE)
+			pill.innerHTML = `
+				<button type="button" class="yourtube-gear-open" aria-label="Open YourTube settings">
+					<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="width:18px;height:18px;flex-shrink:0;">
+						<path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
+					</svg>
+					<span>YourTube</span>
+				</button>
+				<button type="button" class="yourtube-gear-close" aria-label="Hide YourTube header" title="Hide header (use __yourtube_showHeader() in console to restore)">×</button>
 			`
-			btn.addEventListener('click', openPanel)
-			root.appendChild(btn)
-			ulog.log('Gear mounted')
+			const openBtn = pill.querySelector('.yourtube-gear-open')
+			const closeBtn = pill.querySelector('.yourtube-gear-close')
+			if (openBtn) openBtn.addEventListener('click', openPanel)
+			if (closeBtn) {
+				closeBtn.addEventListener('click', (e) => {
+					e.stopPropagation()
+					setHeaderHidden(true)
+					pill.remove()
+					ulog.log('Header hidden — restore with __yourtube_showHeader()')
+				})
+			}
+			root.appendChild(pill)
+			ulog.log('Gear mounted (header pill)')
 			return true
+		}
+
+		/**
+		 * Clears the hidden flag and force-remounts the pill. Used by the
+		 * dev expose `__yourtube_showHeader()` for console-based recovery
+		 * if the user dismissed the header and wants it back.
+		 */
+		function showHeader() {
+			setHeaderHidden(false)
+			const existing = document.getElementById(GEAR_ID)
+			if (existing) existing.remove()
+			mountGear()
+			ulog.log('Header restored')
 		}
 
 		// ── Panel ──────────────────────────────────────────────────────
@@ -1578,7 +1674,7 @@
 			}
 		}
 
-		return { init, openPanel, closePanel, ensureMounted }
+		return { init, openPanel, closePanel, ensureMounted, showHeader }
 	})()
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -1641,7 +1737,10 @@
 		}
 	}, 2000)
 
-	log(`Initialized v${SCRIPT_VERSION} — click the YourTube button bottom-right to open settings`)
+	log(
+		`Initialized v${SCRIPT_VERSION} — look for the "YourTube" pill top-right of the page. ` +
+			`Click × on the pill to hide it; run __yourtube_showHeader() in this console to restore.`,
+	)
 
 	// Dev-only exposes for in-browser inspection. Removed before shipping.
 	// Firefox's content script sandbox wraps function references crossing the
@@ -1659,6 +1758,19 @@
 	devExpose('__yourtube_formatDuration', formatDuration)
 	devExpose('__yourtube_getSettings', getSettings)
 	devExpose('__yourtube_applyFilter', DurationFilter.applyFilter)
+
+	// Recovery command: if the user dismissed the header pill and wants
+	// it back, they can run `__yourtube_showHeader()` from the devtools
+	// console. Not a "dev-only" expose — this is the only re-entry point
+	// once the pill is hidden, so it ships with the script.
+	devExpose('__yourtube_showHeader', () => {
+		try {
+			SettingsUI.showHeader()
+			console.log('[YourTube] Header restored')
+		} catch (e) {
+			console.warn('[YourTube] Failed to restore header:', e)
+		}
+	})
 
 	// Toggles for the UI-mount debug probe. Use from devtools console:
 	//   __yourtube_enableDebugProbe()  then reload
