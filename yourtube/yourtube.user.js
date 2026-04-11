@@ -244,8 +244,17 @@
 	log(`Initialized v${SCRIPT_VERSION} (parser milestone — UI not yet wired)`)
 
 	// Dev-only exposes for in-browser inspection. Removed before shipping.
-	// Must use unsafeWindow because @grant GM_* puts the script in Tampermonkey's
-	// sandbox — `window` would attach to the sandbox global, invisible to DevTools.
-	unsafeWindow.__yourtube_parseDuration = parseDuration
-	unsafeWindow.__yourtube_formatDuration = formatDuration
+	// Firefox's content script sandbox wraps function references crossing the
+	// boundary — direct assignment to unsafeWindow gives the page side a wrapper
+	// it can't call. exportFunction() is Firefox's official escape hatch.
+	// Chrome's Tampermonkey doesn't need it, so we fall back to direct assignment.
+	function devExpose(name, fn) {
+		if (typeof exportFunction === 'function') {
+			exportFunction(fn, unsafeWindow, { defineAs: name })
+		} else {
+			unsafeWindow[name] = fn
+		}
+	}
+	devExpose('__yourtube_parseDuration', parseDuration)
+	devExpose('__yourtube_formatDuration', formatDuration)
 })()
