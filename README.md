@@ -2,7 +2,13 @@
 
 Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScript, no build step.
 
-## Scripts
+<a id="scripts"></a>
+
+---
+
+<h2 align="center">━━━━━━━━━━━━━━━━━━━━━━━  Scripts  ━━━━━━━━━━━━━━━━━━━━━━━</h2>
+
+---
 
 - [Utility](#utility)
   - [`auto-focus-search/`](#auto-focus-search)
@@ -20,7 +26,13 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
 - [Archived](#archived)
   - [`archive/bonjourr-quick-add/`](#archivebonjourr-quick-add)
 
-## Utility
+<a id="utility"></a>
+
+---
+
+<h2 align="center">━━━━━━━━━━━━━━━━━━━━━━━  Utility  ━━━━━━━━━━━━━━━━━━━━━━━</h2>
+
+---
 
 ### `auto-focus-search/`
 
@@ -66,7 +78,13 @@ A userscript for [llm-stats.com](https://llm-stats.com) leaderboard pages that a
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.meta.js`
 
-## Gaming
+<a id="gaming"></a>
+
+---
+
+<h2 align="center">━━━━━━━━━━━━━━━━━━━━━━━  Gaming  ━━━━━━━━━━━━━━━━━━━━━━━</h2>
+
+---
 
 ### `barter-bundle-scorer/`
 
@@ -139,7 +157,13 @@ A userscript for [lichess.org](https://lichess.org) that strips the homepage dow
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/lichess-declutter/lichess-declutter.meta.js`
 
-## Work
+<a id="work"></a>
+
+---
+
+<h2 align="center">━━━━━━━━━━━━━━━━━━━━━━━  Work  ━━━━━━━━━━━━━━━━━━━━━━━</h2>
+
+---
 
 ### `google-address-autocomplete-ca/`
 
@@ -181,7 +205,13 @@ A userscript for [Odoo](https://www.odoo.com) that converts HEIC/HEIF images to 
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.meta.js`
 
-## Music streaming
+<a id="music-streaming"></a>
+
+---
+
+<h2 align="center">━━━━━━━━━━━━━━━━━━━━━━━  Music streaming  ━━━━━━━━━━━━━━━━━━━━━━━</h2>
+
+---
 
 ### `yt-music-redirect/`
 
@@ -225,7 +255,13 @@ A userscript for [YouTube Music](https://music.youtube.com) that adds a floating
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.meta.js`
 
-## Archived
+<a id="archived"></a>
+
+---
+
+<h2 align="center">━━━━━━━━━━━━━━━━━━━━━━━  Archived  ━━━━━━━━━━━━━━━━━━━━━━━</h2>
+
+---
 
 Scripts that are no longer functional or maintained. Kept in the repo for reference — not served via raw URLs.
 
@@ -233,7 +269,13 @@ Scripts that are no longer functional or maintained. Kept in the repo for refere
 
 A userscript for [Bonjourr](https://bonjourr.fr) new tab pages that provides a quick interface for adding shortcuts with automatic page title fetching. **Not functional** — Firefox's extension security model blocks userscript injection into `moz-extension://` pages. Kept in the repo in case browser APIs or Bonjourr change to make this viable. See [`REPORT.md`](archive/bonjourr-quick-add/REPORT.md) for the full post-mortem.
 
-## Update workflow
+<a id="update-workflow"></a>
+
+---
+
+<h2 align="center">━━━━━━━━━━━━━━━━━━━━━━━  Update workflow  ━━━━━━━━━━━━━━━━━━━━━━━</h2>
+
+---
 
 1. Edit the script's `.user.js` file.
 2. Bump `@version` in **both** the `.user.js` and `.meta.js` files (and the `SCRIPT_VERSION` constant in the script body). They must all match.
