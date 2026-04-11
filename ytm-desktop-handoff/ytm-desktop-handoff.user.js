@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YTM Desktop Handoff
 // @namespace    ytm-desktop-handoff
-// @version      1.0.0
-// @description  Adds a button on YouTube Music to open the current track/playlist in YouTube Music Desktop App via the ytmd:// protocol
+// @version      3.0.0
+// @description  Adds a pill button to YouTube Music /watch pages that hands off the current track to the YouTube Music Desktop App via the ytmd:// protocol (pauses this tab so the desktop app plays alone)
 // @match        *://music.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
@@ -21,15 +21,14 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YTM Handoff]'
-	const SCRIPT_VERSION = '1.0.0'
+	const SCRIPT_VERSION = '3.0.0'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.meta.js'
 	const DOWNLOAD_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.user.js'
 
 	const UPDATE_BANNER_ID = 'ytmdh-update-banner'
-	const MENU_BTN_ID = 'ytmdh-menu-btn'
-	const DROPDOWN_ID = 'ytmdh-dropdown'
+	const PILL_ID = 'ytmdh-pill'
 	const LAUNCHER_IFRAME_ID = 'ytmdh-launcher-frame'
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -143,20 +142,17 @@
 		}
 	}
 
-	function handoff({ pauseHere }) {
+	function handoff() {
 		const uri = buildHandoffUri()
 		if (!uri) {
 			warn('No track in URL — nothing to hand off')
 			return
 		}
-		log(`Handoff → ${uri} (pauseHere=${pauseHere})`)
+		log(`Handoff → ${uri}`)
 		launchProtocol(uri)
-		if (pauseHere) {
-			// Small delay so the protocol handler fires before we pause —
-			// avoids any race with YTM's own playback state reconciliation.
-			setTimeout(pauseYtmPlayback, 120)
-		}
-		closeDropdown()
+		// Small delay so the protocol handler fires before we pause —
+		// avoids any race with YTM's own playback state reconciliation.
+		setTimeout(pauseYtmPlayback, 120)
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -187,278 +183,90 @@
 				background: #1976d2;
 			}
 
-			/* ── Floating icon button (fixed, top-right) ── */
-			#${MENU_BTN_ID} {
+			/* ── Single-click handoff pill — anchored in the top-right ── */
+			#${PILL_ID} {
 				position: fixed;
 				top: 72px;
 				right: 16px;
 				z-index: 2147483647;
 				display: inline-flex;
 				align-items: center;
-				justify-content: center;
-				width: 40px;
-				height: 40px;
-				border: none;
-				border-radius: 50%;
-				background: rgba(0, 0, 0, 0.55);
-				color: #fff;
-				font-size: 20px;
+				gap: 8px;
+				padding: 8px 18px;
+				border: 1px solid rgba(255, 255, 255, 0.12);
+				background: rgba(15, 15, 15, 0.88);
+				backdrop-filter: blur(8px);
+				-webkit-backdrop-filter: blur(8px);
+				color: #cfcfcf;
+				font-family: 'YouTube Sans', 'Roboto', sans-serif;
+				font-size: 13px;
+				font-weight: 500;
 				line-height: 1;
 				cursor: pointer;
-				transition: background 0.15s;
+				border-radius: 999px;
+				box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
 				user-select: none;
+				transition: background 0.15s, color 0.15s, transform 0.1s,
+					box-shadow 0.15s, border-color 0.15s;
 			}
-			#${MENU_BTN_ID}:hover {
-				background: rgba(0, 0, 0, 0.85);
+			#${PILL_ID}:hover {
+				background: #ff4e7a;
+				color: #fff;
+				border-color: rgba(255, 255, 255, 0.24);
+				box-shadow: 0 6px 22px rgba(255, 78, 122, 0.45);
 			}
-			#${MENU_BTN_ID}.ytmdh-open {
-				background: rgba(0, 0, 0, 0.9);
+			#${PILL_ID}:active {
+				transform: scale(0.97);
 			}
-
-			/* ── Dropdown menu ── */
-			#${DROPDOWN_ID} {
-				display: none;
-				position: fixed;
-				min-width: 280px;
-				background: #282828;
-				border: 1px solid #444;
-				border-radius: 12px;
-				padding: 8px 0;
-				box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
-				font-family: 'YouTube Sans', 'Roboto', sans-serif;
-				font-size: 14px;
-				color: #e0e0e0;
-				z-index: 2147483647;
+			#${PILL_ID} .ytmdh-pill-icon {
+				font-size: 15px;
+				line-height: 1;
 			}
-			#${DROPDOWN_ID}.ytmdh-visible {
-				display: block;
-			}
-			#${DROPDOWN_ID} .ytmdh-menu-item {
-				display: flex;
-				align-items: flex-start;
-				gap: 12px;
-				width: 100%;
-				padding: 10px 16px;
-				border: none;
-				background: transparent;
-				color: #e0e0e0;
-				font-size: 14px;
-				font-family: inherit;
-				cursor: pointer;
-				text-align: left;
-				transition: background 0.1s;
-				box-sizing: border-box;
-			}
-			#${DROPDOWN_ID} .ytmdh-menu-item:hover {
-				background: rgba(255, 255, 255, 0.1);
-			}
-			#${DROPDOWN_ID} .ytmdh-menu-item .ytmdh-icon {
-				flex-shrink: 0;
-				width: 20px;
-				text-align: center;
-				font-size: 16px;
-				margin-top: 1px;
-			}
-			#${DROPDOWN_ID} .ytmdh-menu-item.ytmdh-primary .ytmdh-label {
-				color: #ff4e7a;
-			}
-			#${DROPDOWN_ID} .ytmdh-col {
-				display: flex;
-				flex-direction: column;
-				flex: 1;
-			}
-			#${DROPDOWN_ID} .ytmdh-label {
-				font-weight: 500;
-			}
-			#${DROPDOWN_ID} .ytmdh-sub {
-				display: block;
-				font-size: 11px;
-				color: #999;
-				margin-top: 2px;
-			}
-			#${DROPDOWN_ID} .ytmdh-divider {
-				height: 1px;
-				background: #444;
-				margin: 4px 0;
+			#${PILL_ID} .ytmdh-pill-label {
+				line-height: 1;
 			}
 		`
 		document.head.appendChild(style)
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
-	//  UI — BUTTON & DROPDOWN
+	//  UI — HANDOFF PILL
 	// ═══════════════════════════════════════════════════════════════════
 
-	function positionDropdown(btn, dropdown) {
-		const rect = btn.getBoundingClientRect()
-		const width = dropdown.offsetWidth || 280
-		dropdown.style.top = `${rect.bottom + 8}px`
-		dropdown.style.left = `${Math.max(8, rect.right - width)}px`
-	}
+	function mountPill() {
+		injectStyles()
+		removePill()
 
-	function closeDropdown() {
-		document.getElementById(DROPDOWN_ID)?.classList.remove('ytmdh-visible')
-		document.getElementById(MENU_BTN_ID)?.classList.remove('ytmdh-open')
-	}
-
-	function getOrCreateMenuBtn() {
-		let btn = document.getElementById(MENU_BTN_ID)
-		if (btn) return btn
-
-		btn = document.createElement('div')
-		btn.id = MENU_BTN_ID
-		btn.textContent = '\u2197' // ↗ north-east arrow = "open externally"
-		btn.title = 'Open in YT Music Desktop'
-		btn.setAttribute('role', 'button')
-		btn.setAttribute('tabindex', '0')
-		btn.setAttribute('aria-label', 'Open in YT Music Desktop')
-
-		document.body.appendChild(btn)
-
-		const onTrigger = (e) => {
-			e.preventDefault()
-			e.stopPropagation()
-			e.stopImmediatePropagation()
-			const dropdown = document.getElementById(DROPDOWN_ID)
-			if (!dropdown) {
-				warn('Menu clicked but dropdown is missing')
-				return
-			}
-			const willOpen = !dropdown.classList.contains('ytmdh-visible')
-			dropdown.classList.toggle('ytmdh-visible', willOpen)
-			btn.classList.toggle('ytmdh-open', willOpen)
-			if (willOpen) positionDropdown(btn, dropdown)
-		}
-		btn.addEventListener('pointerdown', onTrigger, true)
-		btn.addEventListener('click', onTrigger, true)
-		btn.addEventListener('keydown', (e) => {
-			if (e.key === 'Enter' || e.key === ' ') onTrigger(e)
-		})
-
-		document.addEventListener('keydown', (e) => {
-			if (e.key === 'Escape') closeDropdown()
-		})
-
-		const onOutside = (e) => {
-			const dropdown = document.getElementById(DROPDOWN_ID)
-			if (!dropdown) return
-			if (e.target === btn || btn.contains(e.target) || dropdown.contains(e.target)) return
-			closeDropdown()
-		}
-		document.addEventListener('pointerdown', onOutside, true)
-		document.addEventListener('click', onOutside, true)
-
-		const reposition = () => {
-			const dropdown = document.getElementById(DROPDOWN_ID)
-			if (dropdown?.classList.contains('ytmdh-visible')) {
-				positionDropdown(btn, dropdown)
-			}
-		}
-		window.addEventListener('scroll', reposition, true)
-		window.addEventListener('resize', reposition)
-
-		return btn
-	}
-
-	function buildMenuItem({ icon, label, sub, primary, onClick }) {
-		const item = document.createElement('button')
-		item.className = 'ytmdh-menu-item' + (primary ? ' ytmdh-primary' : '')
+		const btn = document.createElement('button')
+		btn.id = PILL_ID
+		btn.type = 'button'
+		btn.title = 'Hand off to YT Music Desktop (pauses this tab)'
+		btn.setAttribute('aria-label', 'Hand off to YT Music Desktop')
 
 		const iconEl = document.createElement('span')
-		iconEl.className = 'ytmdh-icon'
-		iconEl.textContent = icon
-
-		const col = document.createElement('span')
-		col.className = 'ytmdh-col'
+		iconEl.className = 'ytmdh-pill-icon'
+		iconEl.textContent = '\u2197' // ↗ north-east arrow = "open externally"
 
 		const labelEl = document.createElement('span')
-		labelEl.className = 'ytmdh-label'
-		labelEl.textContent = label
-		col.appendChild(labelEl)
+		labelEl.className = 'ytmdh-pill-label'
+		labelEl.textContent = 'YTMDesktop'
 
-		if (sub) {
-			const subEl = document.createElement('span')
-			subEl.className = 'ytmdh-sub'
-			subEl.textContent = sub
-			col.appendChild(subEl)
-		}
+		btn.appendChild(iconEl)
+		btn.appendChild(labelEl)
 
-		item.appendChild(iconEl)
-		item.appendChild(col)
-
-		const wrapped = (e) => {
+		const onClick = (e) => {
 			e.preventDefault()
 			e.stopPropagation()
-			onClick()
+			handoff()
 		}
-		item.addEventListener('pointerdown', wrapped)
-		item.addEventListener('click', wrapped)
+		btn.addEventListener('click', onClick)
 
-		return item
+		document.body.appendChild(btn)
+		log('Handoff pill mounted')
 	}
 
-	function createDivider() {
-		const d = document.createElement('div')
-		d.className = 'ytmdh-divider'
-		return d
-	}
-
-	function mountButton() {
-		injectStyles()
-		removeDropdown()
-
-		const menuBtn = getOrCreateMenuBtn()
-
-		const dropdown = document.createElement('div')
-		dropdown.id = DROPDOWN_ID
-		dropdown.addEventListener('pointerdown', (e) => e.stopPropagation())
-		dropdown.addEventListener('click', (e) => e.stopPropagation())
-
-		// Primary: full handoff — opens in desktop AND pauses the browser.
-		// One click moves playback entirely to YTMDesktop.
-		dropdown.appendChild(
-			buildMenuItem({
-				icon: '\u2197', // ↗
-				label: 'Hand off to YTMDesktop',
-				sub: 'Pauses this tab — plays in desktop only',
-				primary: true,
-				onClick: () => handoff({ pauseHere: true }),
-			}),
-		)
-
-		// Secondary: open in desktop but leave the browser alone. Useful
-		// when the user wants to keep listening here and just mirror the
-		// track in the desktop app (e.g. to queue into a desktop playlist).
-		dropdown.appendChild(
-			buildMenuItem({
-				icon: '\u29C9', // ⧉ two overlapping squares
-				label: 'Open in YTMDesktop',
-				sub: 'Keeps this tab playing — desktop opens alongside',
-				onClick: () => handoff({ pauseHere: false }),
-			}),
-		)
-
-		dropdown.appendChild(createDivider())
-
-		dropdown.appendChild(
-			buildMenuItem({
-				icon: '\u00D7', // ×
-				label: 'Dismiss',
-				onClick: removeButton,
-			}),
-		)
-
-		menuBtn.appendChild(dropdown)
-		log('Handoff menu mounted')
-	}
-
-	function removeDropdown() {
-		document.getElementById(DROPDOWN_ID)?.remove()
-	}
-
-	function removeButton() {
-		removeDropdown()
-		document.getElementById(MENU_BTN_ID)?.remove()
+	function removePill() {
+		document.getElementById(PILL_ID)?.remove()
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -466,15 +274,15 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	/**
-	 * The ytmd:// scheme requires a video ID, so the button only makes
-	 * sense on /watch routes where the URL exposes `v` (and optionally
-	 * `list`). On other YTM routes we remove the button entirely.
+	 * The ytmd:// scheme requires a video ID, so the pill only makes sense
+	 * on /watch routes where the URL exposes `v` (and optionally `list`).
+	 * On other YTM routes we remove the pill entirely.
 	 */
 	function handleRoute() {
 		if (window.location.pathname === '/watch' && getVideoId()) {
-			mountButton()
+			mountPill()
 		} else {
-			removeButton()
+			removePill()
 		}
 	}
 
@@ -488,5 +296,5 @@
 	// YTM is a Polymer/Lit SPA — same navigation event as youtube.com.
 	document.addEventListener('yt-navigate-finish', handleRoute)
 
-	log('Initialized')
+	log(`Initialized v${SCRIPT_VERSION}`)
 })()
