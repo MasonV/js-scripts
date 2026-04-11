@@ -44,6 +44,8 @@ A global userscript that automatically detects and focuses search input fields o
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.meta.js`
 
+---
+
 ### `llm-stats-show-all/`
 
 A userscript for [llm-stats.com](https://llm-stats.com) leaderboard pages that auto-paginates through all models and displays them in a single table.
@@ -93,6 +95,8 @@ A userscript for [Barter.vg](https://barter.vg) bundle pages that scores each ga
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/barter-bundle-scorer/barter-bundle-scorer.meta.js`
 
+---
+
 ### `fanatical-autoclaim/`
 
 A userscript for [Fanatical](https://www.fanatical.com) order pages that bulk-reveals and bulk-redeems Steam keys.
@@ -112,6 +116,8 @@ A userscript for [Fanatical](https://www.fanatical.com) order pages that bulk-re
 **Metadata update checks:**
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.meta.js`
+
+---
 
 ### `lichess-declutter/`
 
@@ -154,6 +160,8 @@ A userscript for [Odoo](https://www.odoo.com) SaaS instances that restricts Goog
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/google-address-autocomplete-ca/google-address-autocomplete-ca.meta.js`
 
+---
+
 ### `odoo-heic-to-jpeg/`
 
 A userscript for [Odoo](https://www.odoo.com) that converts HEIC/HEIF images to JPEG client-side before upload. Solves the browser HEIC rendering gap on Odoo SaaS where server-side conversion is blocked by sandbox restrictions.
@@ -193,6 +201,8 @@ A userscript for [YouTube](https://www.youtube.com) that automatically redirects
 **Metadata update checks:**
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js`
+
+---
 
 ### `ytm-desktop-handoff/`
 
