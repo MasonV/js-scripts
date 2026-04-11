@@ -17,6 +17,24 @@ Scripts are single-file by design. Organize sections with visual dividers:
 // ═══════════════════════════════════════════════════════════════════
 ```
 
+## Core Principles
+
+These apply to every script in this repo. When in doubt, re-read these before making a design call.
+
+**Natural flow.** Controls should read like a sentence when scanned top-to-bottom. Group related controls. Put the most common action first. A user seeing the UI for the first time should be able to guess what each control does without reading docs.
+
+**Obvious execution.** Every control says what it does in plain language. No jargon, no hidden modes, no settings whose meaning requires reading the source. The button label is the contract.
+
+**Show the result.** When input needs parsing (durations, regexes, URLs), echo the parsed interpretation next to the input. The user should never have to guess whether the script understood them.
+
+**Positive phrasing.** Prefer "Show / Hide" over "Don't show." Prefer enabled toggles over inverted ones. Avoid double negatives.
+
+**Icon + text, never icon alone.** Glyphs are memory aids, not replacements for labels. Every button with an icon also has a text label.
+
+**Defaults that do no harm.** A fresh install behaves conservatively — hide nothing the user didn't ask to hide, never lose data, never surprise. Destructive actions (reset to defaults, delete, etc.) get a distinct visual treatment (red) and a confirmation.
+
+**Delight is allowed.** Within the above constraints, playful visual touches (circuit-breaker toggles, glowing LEDs, satisfying animations) are encouraged. Serious tools can still be fun.
+
 ## Conventions
 
 ### Logging
