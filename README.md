@@ -259,17 +259,15 @@ A userscript for [YouTube](https://www.youtube.com) that automatically redirects
 
 ### `ytm-desktop-handoff/`
 
-A userscript for [YouTube Music](https://music.youtube.com) that adds a top-of-page destination toggle so you can switch where the current track plays: listen here in YTM, watch the video version on YouTube, or hand off to the [YouTube Music Desktop App](https://github.com/ytmdesktop/ytmdesktop) via its `ytmd://` custom protocol. Completes the YouTube → YouTube Music → YTMDesktop chain when paired with `yt-music-redirect/`.
+A userscript for [YouTube Music](https://music.youtube.com) that adds a single-click pill button to hand off the current track/playlist to the [YouTube Music Desktop App](https://github.com/ytmdesktop/ytmdesktop) via its `ytmd://` custom protocol. Completes the YouTube → YouTube Music → YTMDesktop chain when paired with `yt-music-redirect/`.
 
 **Features:**
 
-- Segmented **Song / Video / YTDesktop** toggle anchored at the top-center of `/watch` pages, with the current destination highlighted
-- **Song** (♪) — resumes playback here in the YT Music tab
-- **Video** (▶) — navigates to the equivalent `youtube.com/watch?v=…` (preserves `&list=…` if present) so you can watch the music video
-- **YTDesktop** (↗) — hands off to YTMDesktop and pauses this tab so only the desktop app plays
-- Uses a hidden iframe to trigger `ytmd://play/<VideoId>[/<PlaylistId>]` without navigating the tab
-- SPA-aware — mounts/unmounts on `yt-navigate-finish` so the toggle only appears when there's a track to act on
-- Requires [YouTube Music Desktop App](https://github.com/ytmdesktop/ytmdesktop) installed (registers the `ytmd://` protocol handler) for the YTDesktop destination
+- Single-click pill button anchored in the top-right of `/watch` pages — no menus, no modes
+- Launches the current track in YTMDesktop and pauses the browser tab so the desktop app plays alone
+- Uses a hidden iframe to trigger the `ytmd://play/<VideoId>[/<PlaylistId>]` protocol without navigating the tab
+- SPA-aware — mounts/unmounts on `yt-navigate-finish` so the pill only appears when there's a track to hand off
+- Requires [YouTube Music Desktop App](https://github.com/ytmdesktop/ytmdesktop) installed (registers the `ytmd://` protocol handler)
 
 **Install / download:**
 
