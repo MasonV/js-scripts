@@ -61,6 +61,71 @@
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
+	//  SETTINGS (single blob, keyed per-feature)
+	//  Shared by all features. Defaults are intentionally conservative —
+	//  on first install nothing is hidden until the user opens the UI
+	//  and configures something.
+	// ═══════════════════════════════════════════════════════════════════
+
+	const DEFAULT_SETTINGS = {
+		duration: {
+			shorterThan: null, // seconds; null = no lower bound
+			longerThan: null, // seconds; null = no upper bound
+			hideShorts: false,
+			hideLive: false,
+			hidePremieres: false,
+		},
+	}
+
+	function getSettings() {
+		try {
+			const raw = localStorage.getItem(SETTINGS_KEY)
+			if (!raw) return structuredCloneCompat(DEFAULT_SETTINGS)
+			const parsed = JSON.parse(raw)
+			// Shallow-merge per feature so new defaults land without wiping
+			// the user's existing preferences.
+			return {
+				...DEFAULT_SETTINGS,
+				...parsed,
+				duration: {
+					...DEFAULT_SETTINGS.duration,
+					...(parsed && parsed.duration ? parsed.duration : {}),
+				},
+			}
+		} catch (e) {
+			warn('Failed to read settings, using defaults:', e)
+			return structuredCloneCompat(DEFAULT_SETTINGS)
+		}
+	}
+
+	function saveSettings(next) {
+		try {
+			localStorage.setItem(SETTINGS_KEY, JSON.stringify(next))
+		} catch (e) {
+			warn('Failed to save settings:', e)
+		}
+	}
+
+	// structuredClone may not be present in very old browsers; fall back to
+	// JSON round-trip. DEFAULT_SETTINGS contains only JSON-safe values.
+	function structuredCloneCompat(obj) {
+		if (typeof structuredClone === 'function') return structuredClone(obj)
+		return JSON.parse(JSON.stringify(obj))
+	}
+
+	// GM_addStyle is Tampermonkey-provided. Violentmonkey also supports it,
+	// but if we ever run somewhere that doesn't, fall back to a style element.
+	function addStyle(css) {
+		if (typeof GM_addStyle === 'function') {
+			GM_addStyle(css)
+			return
+		}
+		const el = document.createElement('style')
+		el.textContent = css
+		document.head.appendChild(el)
+	}
+
+	// ═══════════════════════════════════════════════════════════════════
 	//  TIME PARSER (pure functions — testing candidates)
 	//  Shared utility — any feature that needs duration parsing uses this.
 	// ═══════════════════════════════════════════════════════════════════
@@ -203,24 +268,234 @@
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  FEATURE: DURATION FILTER (subscription feed)
-	//  Hides videos in the subscription grid whose duration falls outside
-	//  the user's configured range. UI to be wired in a subsequent commit.
+	//
+	//  Lifecycle:
+	//    1. init() is called on script load and on every yt-navigate-finish
+	//    2. If the current page is not the subs feed → teardown observer
+	//    3. Otherwise install CSS (once), scan current tiles, watch the grid
+	//       for new tiles, and apply the filter on each mutation
+	//
+	//  DOM layout on /feed/subscriptions:
+	//    ytd-rich-grid-renderer
+	//      └─ ytd-rich-item-renderer (one per tile)
+	//           └─ ytd-rich-grid-media
+	//                └─ ytd-thumbnail-overlay-time-status-renderer
+	//                     └─ span (contains "12:34" / "1:23:45" / "LIVE" / etc.)
+	//    ytd-rich-shelf-renderer[is-shorts] contains Shorts tiles
+	//
+	//  Selectors are intentionally loose and probed in a fallback chain —
+	//  YouTube's DOM changes and we'd rather degrade than hard-break.
 	// ═══════════════════════════════════════════════════════════════════
 
 	const DurationFilter = (() => {
 		const flog = makeLogger(LOG_PREFIX_DURATION)
 
+		const HIDDEN_CLASS = 'yourtube-duration-hidden'
+		const STYLES_INSTALLED_FLAG = 'yourtube-duration-styles-installed'
+
+		const SELECTORS = {
+			tile: 'ytd-rich-item-renderer',
+			shortsShelf: 'ytd-rich-shelf-renderer[is-shorts]',
+			durationBadge: 'ytd-thumbnail-overlay-time-status-renderer',
+		}
+
+		let observer = null
+		let stylesInstalled = false
+		let scanPending = false
+
 		function shouldRunHere() {
 			return window.location.pathname.startsWith(ROUTE_SUBS)
 		}
 
-		function init() {
-			if (!shouldRunHere()) return
-			flog.log('Feature active on subscription feed (UI not yet wired)')
-			// DOM detection, filter, and UI layers land in subsequent commits.
+		// ── DOM reading ────────────────────────────────────────────────
+
+		/**
+		 * Pulls the visible text out of a time-status badge. YouTube has used
+		 * different inner element IDs/classes over the years; try each and
+		 * fall back to the badge's own textContent.
+		 */
+		function readBadgeText(badge) {
+			const candidates = [
+				badge.querySelector('#text'),
+				badge.querySelector('.badge-shape-wiz__text'),
+				badge.querySelector('span'),
+				badge,
+			]
+			for (const el of candidates) {
+				if (!el) continue
+				const text = (el.textContent || '').trim()
+				if (text) return text
+			}
+			return ''
 		}
 
-		return { init, shouldRunHere }
+		/**
+		 * Classifies a tile and (if applicable) reads its duration.
+		 * Returns { seconds, kind } where kind is one of:
+		 *   'video'    — standard video with a parseable duration
+		 *   'short'    — inside a Shorts shelf, or badge text includes SHORTS
+		 *   'live'     — currently streaming
+		 *   'premiere' — scheduled / upcoming
+		 *   'unknown'  — couldn't classify (badge missing or unparseable)
+		 * `seconds` is null for non-video kinds.
+		 */
+		function readTile(tile) {
+			if (tile.closest(SELECTORS.shortsShelf)) {
+				return { seconds: null, kind: 'short' }
+			}
+
+			const badge = tile.querySelector(SELECTORS.durationBadge)
+			if (!badge) {
+				return { seconds: null, kind: 'unknown' }
+			}
+
+			const style = (badge.getAttribute('overlay-style') || '').toUpperCase()
+			if (style === 'LIVE') return { seconds: null, kind: 'live' }
+			if (style === 'UPCOMING') return { seconds: null, kind: 'premiere' }
+
+			const text = readBadgeText(badge)
+			if (!text) return { seconds: null, kind: 'unknown' }
+
+			// Defensive: some tiles use the badge for live/upcoming even
+			// without the overlay-style attribute (older YT versions).
+			const upper = text.toUpperCase()
+			if (upper.includes('LIVE')) return { seconds: null, kind: 'live' }
+			if (upper.includes('PREMIERE') || upper.includes('UPCOMING')) {
+				return { seconds: null, kind: 'premiere' }
+			}
+			if (upper === 'SHORTS') return { seconds: null, kind: 'short' }
+
+			const seconds = parseDuration(text)
+			if (seconds == null || Number.isNaN(seconds)) {
+				return { seconds: null, kind: 'unknown' }
+			}
+			return { seconds, kind: 'video' }
+		}
+
+		// ── Filter evaluation ──────────────────────────────────────────
+
+		/**
+		 * Decides whether a tile should be visible given current settings.
+		 * Returns true to show, false to hide. Unknown-kind tiles are never
+		 * hidden — if we can't classify it, the safe default is to show it.
+		 */
+		function evaluateTile(info, settings) {
+			switch (info.kind) {
+				case 'short':
+					return !settings.hideShorts
+				case 'live':
+					return !settings.hideLive
+				case 'premiere':
+					return !settings.hidePremieres
+				case 'unknown':
+					return true
+				case 'video': {
+					if (settings.shorterThan != null && info.seconds < settings.shorterThan) {
+						return false
+					}
+					if (settings.longerThan != null && info.seconds > settings.longerThan) {
+						return false
+					}
+					return true
+				}
+				default:
+					return true
+			}
+		}
+
+		// ── Application ────────────────────────────────────────────────
+
+		function installStyles() {
+			if (stylesInstalled) return
+			stylesInstalled = true
+			addStyle(`
+				.${HIDDEN_CLASS} {
+					display: none !important;
+				}
+			`)
+			flog.log('Styles installed')
+		}
+
+		/**
+		 * Scans every tile currently in the DOM, classifies it, applies the
+		 * current filter, and logs a summary. Idempotent — safe to call on
+		 * every mutation. Bails out if we're no longer on the subs page, since
+		 * the broad document.body observer can fire mid-SPA-navigation.
+		 */
+		function applyFilter() {
+			if (!shouldRunHere()) return
+			const settings = getSettings().duration
+			const tiles = document.querySelectorAll(SELECTORS.tile)
+
+			const kinds = { video: 0, short: 0, live: 0, premiere: 0, unknown: 0 }
+			let visible = 0
+			let hidden = 0
+
+			for (const tile of tiles) {
+				const info = readTile(tile)
+				kinds[info.kind] = (kinds[info.kind] || 0) + 1
+
+				const show = evaluateTile(info, settings)
+				if (show) {
+					tile.classList.remove(HIDDEN_CLASS)
+					visible++
+				} else {
+					tile.classList.add(HIDDEN_CLASS)
+					hidden++
+				}
+			}
+
+			flog.log(
+				`Scan: ${tiles.length} tiles (${visible} visible, ${hidden} hidden)`,
+				kinds,
+			)
+		}
+
+		/**
+		 * Debounces filter application to once per animation frame. The
+		 * subs grid fires dozens of mutations during lazy-load and we'd
+		 * otherwise run the filter on every one.
+		 */
+		function scheduleScan() {
+			if (scanPending) return
+			scanPending = true
+			requestAnimationFrame(() => {
+				scanPending = false
+				applyFilter()
+			})
+		}
+
+		function watchGrid() {
+			if (observer) observer.disconnect()
+			// Watch the whole body — YouTube swaps out the grid container on
+			// SPA navigation and narrow observers fall off. The scan itself
+			// is cheap, so wide-net observation is fine.
+			observer = new MutationObserver(scheduleScan)
+			observer.observe(document.body, { childList: true, subtree: true })
+			flog.log('Observer installed')
+		}
+
+		function teardown() {
+			if (observer) {
+				observer.disconnect()
+				observer = null
+				flog.log('Observer torn down')
+			}
+		}
+
+		function init() {
+			if (!shouldRunHere()) {
+				teardown()
+				return
+			}
+			installStyles()
+			// Initial scan + schedule — the initial scan catches tiles already
+			// in the DOM, the observer catches everything that appears after.
+			applyFilter()
+			watchGrid()
+		}
+
+		return { init, shouldRunHere, readTile, evaluateTile, applyFilter }
 	})()
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -241,7 +516,7 @@
 		runFeatures()
 	})
 
-	log(`Initialized v${SCRIPT_VERSION} (parser milestone — UI not yet wired)`)
+	log(`Initialized v${SCRIPT_VERSION} (detection milestone — UI not yet wired)`)
 
 	// Dev-only exposes for in-browser inspection. Removed before shipping.
 	// Firefox's content script sandbox wraps function references crossing the
@@ -257,4 +532,6 @@
 	}
 	devExpose('__yourtube_parseDuration', parseDuration)
 	devExpose('__yourtube_formatDuration', formatDuration)
+	devExpose('__yourtube_getSettings', getSettings)
+	devExpose('__yourtube_applyFilter', DurationFilter.applyFilter)
 })()
