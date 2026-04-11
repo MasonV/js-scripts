@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YourTube
 // @namespace    yourtube
-// @version      1.1.0
+// @version      1.1.1
 // @description  YouTube without the garbage — duration filtering, and more features to come
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -24,7 +24,7 @@
 
 	const LOG_PREFIX = '[YourTube]'
 	const LOG_PREFIX_DURATION = '[YourTube/Duration]'
-	const SCRIPT_VERSION = '1.1.0'
+	const SCRIPT_VERSION = '1.1.1'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.meta.js'
 	const DOWNLOAD_URL =
@@ -639,13 +639,13 @@
 
 		function installStyles() {
 			if (stylesInstalled) return
-			stylesInstalled = true
-			addStyle(`
+			try {
+				addStyle(`
 				#${GEAR_ID} {
 					position: fixed;
 					bottom: 24px;
 					right: 24px;
-					z-index: 9998;
+					z-index: 2147483646;
 					min-width: 56px;
 					height: 56px;
 					padding: 0 20px 0 16px;
@@ -677,7 +677,7 @@
 					position: fixed;
 					inset: 0;
 					background: rgba(0,0,0,0.55);
-					z-index: 10000;
+					z-index: 2147483645;
 					opacity: 0;
 					pointer-events: none;
 					transition: opacity 0.18s ease-out;
@@ -694,7 +694,7 @@
 					bottom: 0;
 					width: 440px;
 					max-width: 100vw;
-					z-index: 10001;
+					z-index: 2147483647;
 					background: #0f0f0f;
 					color: #f1f1f1;
 					font-family: Roboto, "YouTube Sans", Arial, sans-serif;
@@ -930,24 +930,63 @@
 					border-color: #ff6666;
 				}
 			`)
+				stylesInstalled = true
+				ulog.log('Styles installed')
+			} catch (e) {
+				ulog.warn('Style install failed, continuing with inline fallbacks:', e)
+			}
 		}
 
 		// ── Gear button ────────────────────────────────────────────────
 
+		// Critical inline styles — used as a belt-and-suspenders fallback in
+		// case GM_addStyle is blocked or runs late. Without these, a failed
+		// stylesheet install would leave the button as a flow-layout element
+		// invisible amid YouTube's content. The CSS class is the preferred
+		// path and wins over inline styles for hover/transition.
+		const GEAR_INLINE_STYLE = [
+			'position: fixed',
+			'bottom: 24px',
+			'right: 24px',
+			'z-index: 2147483646',
+			'min-width: 56px',
+			'height: 56px',
+			'padding: 0 20px 0 16px',
+			'border-radius: 28px',
+			'background: #0f0f0f',
+			'color: #fff',
+			'border: 2px solid #3ea6ff',
+			'box-shadow: 0 4px 16px rgba(0,0,0,0.5)',
+			'font-family: Roboto, Arial, sans-serif',
+			'font-size: 14px',
+			'font-weight: 600',
+			'cursor: pointer',
+			'display: flex',
+			'align-items: center',
+			'gap: 10px',
+		].join('; ')
+
 		function mountGear() {
-			if (document.getElementById(GEAR_ID)) return
+			if (document.getElementById(GEAR_ID)) return false
+			if (!document.body) {
+				ulog.warn('mountGear: document.body not ready, deferring')
+				return false
+			}
 			const btn = document.createElement('button')
 			btn.id = GEAR_ID
 			btn.type = 'button'
 			btn.setAttribute('aria-label', 'Open YourTube settings')
+			btn.setAttribute('style', GEAR_INLINE_STYLE)
 			btn.innerHTML = `
-				<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+				<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="width:22px;height:22px;flex-shrink:0;">
 					<path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
 				</svg>
 				<span>YourTube</span>
 			`
 			btn.addEventListener('click', openPanel)
 			document.body.appendChild(btn)
+			ulog.log('Gear mounted')
+			return true
 		}
 
 		// ── Panel ──────────────────────────────────────────────────────
@@ -968,7 +1007,13 @@
 		}
 
 		function buildPanel() {
-			if (panelBuilt) return
+			if (panelBuilt && document.getElementById(PANEL_ID)) return false
+			if (!document.body) {
+				ulog.warn('buildPanel: document.body not ready, deferring')
+				return false
+			}
+			// Reset the flag if we're rebuilding after YouTube removed
+			// our panel from the DOM (SPA navigation, app shell swap).
 			panelBuilt = true
 
 			const overlay = document.createElement('div')
@@ -1046,6 +1091,8 @@
 
 			document.body.appendChild(overlay)
 			document.body.appendChild(panel)
+			ulog.log('Panel built')
+			return true
 		}
 
 		// ── Live preview ───────────────────────────────────────────────
@@ -1187,13 +1234,99 @@
 			}
 		}
 
-		function init() {
-			installStyles()
-			mountGear()
-			buildPanel()
+		// ── Mount lifecycle ────────────────────────────────────────────
+
+		let healObserver = null
+		let bodyWaitObserver = null
+		// Debounce for heal checks — YT's DOM churns constantly; we check
+		// at most once per animation frame.
+		let healPending = false
+
+		/**
+		 * Verifies the gear + panel are still in the DOM and remounts them
+		 * if YouTube's SPA churn has pruned them. Idempotent — cheap to
+		 * call from a hot MutationObserver path.
+		 */
+		function ensureMounted() {
+			let changed = false
+			if (!document.getElementById(GEAR_ID)) {
+				if (mountGear()) changed = true
+			}
+			if (!document.getElementById(PANEL_ID)) {
+				// Reset flag so buildPanel rebuilds from scratch.
+				panelBuilt = false
+				if (buildPanel()) changed = true
+			}
+			return changed
 		}
 
-		return { init, openPanel, closePanel }
+		function scheduleHealCheck() {
+			if (healPending) return
+			healPending = true
+			requestAnimationFrame(() => {
+				healPending = false
+				try {
+					ensureMounted()
+				} catch (e) {
+					ulog.warn('Heal check failed:', e)
+				}
+			})
+		}
+
+		/**
+		 * Watches document.documentElement (not body — body itself can be
+		 * swapped out by extensions) for child mutations and re-runs the
+		 * heal check whenever something changes. Cheap because ensureMounted
+		 * is two getElementById calls in the hot path.
+		 */
+		function startSelfHeal() {
+			if (healObserver) return
+			healObserver = new MutationObserver(scheduleHealCheck)
+			healObserver.observe(document.documentElement, {
+				childList: true,
+				subtree: true,
+			})
+			ulog.log('Self-heal observer installed')
+		}
+
+		/**
+		 * YouTube scripts sometimes run at document-start, before body exists.
+		 * If we land in that window we observe the root for body insertion,
+		 * then kick init once it arrives. No-ops if body is already there.
+		 */
+		function waitForBody(cb) {
+			if (document.body) {
+				cb()
+				return
+			}
+			if (bodyWaitObserver) return
+			ulog.log('Waiting for document.body...')
+			bodyWaitObserver = new MutationObserver(() => {
+				if (document.body) {
+					bodyWaitObserver.disconnect()
+					bodyWaitObserver = null
+					ulog.log('document.body is now available')
+					cb()
+				}
+			})
+			bodyWaitObserver.observe(document.documentElement, {
+				childList: true,
+			})
+		}
+
+		function init() {
+			try {
+				waitForBody(() => {
+					installStyles()
+					ensureMounted()
+					startSelfHeal()
+				})
+			} catch (e) {
+				ulog.warn('init failed:', e)
+			}
+		}
+
+		return { init, openPanel, closePanel, ensureMounted }
 	})()
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -1209,11 +1342,35 @@
 	selfTestParser()
 	runFeatures()
 
-	// YouTube is a SPA — re-run routing after every client-side navigation so
-	// features can activate/deactivate as the user moves between pages.
-	document.addEventListener('yt-navigate-finish', () => {
-		runFeatures()
-	})
+	// YouTube is a SPA. On client-side navigation, YT can tear down
+	// and rebuild large sections of the DOM — including our mounted
+	// gear button and panel. We listen to every nav/page event YT
+	// emits so we can re-run routing and let the features heal
+	// themselves. `ensureMounted()` is idempotent and cheap.
+	const SPA_EVENTS = [
+		'yt-navigate-finish',
+		'yt-navigate-start',
+		'yt-page-data-updated',
+		'yt-page-type-changed',
+		'spfdone', // legacy YouTube SPA event, harmless if unused
+	]
+	for (const evt of SPA_EVENTS) {
+		document.addEventListener(evt, () => {
+			runFeatures()
+		})
+	}
+
+	// Belt-and-suspenders: if all the SPA events above fail to fire
+	// on some YT variant, a low-frequency poll will still notice a
+	// missing gear and remount. Runs every 2s, checks a single
+	// getElementById — negligible cost, high resilience payoff.
+	setInterval(() => {
+		try {
+			SettingsUI.ensureMounted()
+		} catch (e) {
+			/* swallow — ensureMounted already logs internally */
+		}
+	}, 2000)
 
 	log(`Initialized v${SCRIPT_VERSION} — click the YourTube button bottom-right to open settings`)
 
