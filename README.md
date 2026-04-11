@@ -206,16 +206,17 @@ A userscript for [YouTube](https://www.youtube.com) that automatically redirects
 
 ### `ytm-desktop-handoff/`
 
-A userscript for [YouTube Music](https://music.youtube.com) that adds a floating button to hand off the current track/playlist to the [YouTube Music Desktop App](https://github.com/ytmdesktop/ytmdesktop) via its `ytmd://` custom protocol. Completes the YouTube → YouTube Music → YTMDesktop chain when paired with `yt-music-redirect/`.
+A userscript for [YouTube Music](https://music.youtube.com) that adds a top-of-page destination toggle so you can switch where the current track plays: listen here in YTM, watch the video version on YouTube, or hand off to the [YouTube Music Desktop App](https://github.com/ytmdesktop/ytmdesktop) via its `ytmd://` custom protocol. Completes the YouTube → YouTube Music → YTMDesktop chain when paired with `yt-music-redirect/`.
 
 **Features:**
 
-- Floating button on `/watch` pages with a dropdown offering two handoff modes
-- **Hand off (pause tab)** — opens in YTMDesktop and pauses the browser so the desktop app plays alone
-- **Open in YTMDesktop (keep tab)** — mirrors the track in YTMDesktop while the browser keeps playing
-- Uses a hidden iframe to trigger the `ytmd://play/<VideoId>[/<PlaylistId>]` protocol without navigating the tab
-- SPA-aware — mounts/unmounts on `yt-navigate-finish` so the button only appears when there's a track to hand off
-- Requires [YouTube Music Desktop App](https://github.com/ytmdesktop/ytmdesktop) installed (registers the `ytmd://` protocol handler)
+- Segmented **Song / Video / YTDesktop** toggle anchored at the top-center of `/watch` pages, with the current destination highlighted
+- **Song** (♪) — resumes playback here in the YT Music tab
+- **Video** (▶) — navigates to the equivalent `youtube.com/watch?v=…` (preserves `&list=…` if present) so you can watch the music video
+- **YTDesktop** (↗) — hands off to YTMDesktop and pauses this tab so only the desktop app plays
+- Uses a hidden iframe to trigger `ytmd://play/<VideoId>[/<PlaylistId>]` without navigating the tab
+- SPA-aware — mounts/unmounts on `yt-navigate-finish` so the toggle only appears when there's a track to act on
+- Requires [YouTube Music Desktop App](https://github.com/ytmdesktop/ytmdesktop) installed (registers the `ytmd://` protocol handler) for the YTDesktop destination
 
 **Install / download:**
 

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YTM Desktop Handoff
 // @namespace    ytm-desktop-handoff
-// @version      1.0.0
-// @description  Adds a button on YouTube Music to open the current track/playlist in YouTube Music Desktop App via the ytmd:// protocol
+// @version      2.0.0
+// @description  Top-of-page destination toggle on YouTube Music — switch playback between Song (here), Video (YouTube), or YTDesktop (the desktop app via ytmd://)
 // @match        *://music.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
@@ -21,16 +21,21 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YTM Handoff]'
-	const SCRIPT_VERSION = '1.0.0'
+	const SCRIPT_VERSION = '2.0.0'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.meta.js'
 	const DOWNLOAD_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.user.js'
 
 	const UPDATE_BANNER_ID = 'ytmdh-update-banner'
-	const MENU_BTN_ID = 'ytmdh-menu-btn'
-	const DROPDOWN_ID = 'ytmdh-dropdown'
+	const TOGGLE_ID = 'ytmdh-toggle'
 	const LAUNCHER_IFRAME_ID = 'ytmdh-launcher-frame'
+
+	// Playback destinations for the three-way toggle. The user picks where
+	// they want this track to play and the UI highlights that choice.
+	const DEST_SONG = 'song' // Listen here in YT Music (this tab)
+	const DEST_VIDEO = 'video' // Watch the YouTube video version (navigates away)
+	const DEST_YTDESKTOP = 'ytdesktop' // Hand off to the YTMDesktop app (pauses this tab)
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  LOGGING
@@ -109,8 +114,21 @@
 		return playlistId ? `ytmd://play/${videoId}/${playlistId}` : `ytmd://play/${videoId}`
 	}
 
+	/**
+	 * Builds the equivalent youtube.com/watch URL for the current track —
+	 * used when the user picks the "Video" destination and wants to watch
+	 * the music video version instead of listening in YTM.
+	 */
+	function buildYouTubeVideoUrl() {
+		const videoId = getVideoId()
+		if (!videoId) return null
+		const playlistId = getPlaylistId()
+		const base = `https://www.youtube.com/watch?v=${videoId}`
+		return playlistId ? `${base}&list=${playlistId}` : base
+	}
+
 	// ═══════════════════════════════════════════════════════════════════
-	//  HANDOFF
+	//  PLAYBACK CONTROL
 	// ═══════════════════════════════════════════════════════════════════
 
 	/**
@@ -143,20 +161,59 @@
 		}
 	}
 
-	function handoff({ pauseHere }) {
+	/**
+	 * Resumes the YT Music browser player. Used when the user clicks back
+	 * to the "Song" destination after a handoff — pulls playback back
+	 * into this tab.
+	 */
+	function resumeYtmPlayback() {
+		const video = document.querySelector('video')
+		if (video && video.paused) {
+			const p = video.play()
+			if (p && typeof p.catch === 'function') {
+				p.catch((e) => warn('Resume failed (likely autoplay policy):', e))
+			}
+			log('Resumed YT Music browser playback')
+		}
+	}
+
+	// ═══════════════════════════════════════════════════════════════════
+	//  DESTINATION ACTIONS
+	//  One function per segment on the toggle. Each does its side-effect
+	//  (resume / navigate / protocol launch) and updates the active state.
+	// ═══════════════════════════════════════════════════════════════════
+
+	function goSong() {
+		resumeYtmPlayback()
+		setActive(DEST_SONG)
+	}
+
+	function goVideo() {
+		const url = buildYouTubeVideoUrl()
+		if (!url) {
+			warn('No track in URL — nothing to open on YouTube')
+			return
+		}
+		log(`Video → ${url}`)
+		// Pause first so audio doesn't double-up during the brief moment
+		// before YouTube takes over the tab.
+		pauseYtmPlayback()
+		setActive(DEST_VIDEO)
+		window.location.href = url
+	}
+
+	function goYtdesktop() {
 		const uri = buildHandoffUri()
 		if (!uri) {
 			warn('No track in URL — nothing to hand off')
 			return
 		}
-		log(`Handoff → ${uri} (pauseHere=${pauseHere})`)
+		log(`YTDesktop → ${uri}`)
 		launchProtocol(uri)
-		if (pauseHere) {
-			// Small delay so the protocol handler fires before we pause —
-			// avoids any race with YTM's own playback state reconciliation.
-			setTimeout(pauseYtmPlayback, 120)
-		}
-		closeDropdown()
+		// Small delay so the protocol handler fires before we pause —
+		// avoids any race with YTM's own playback state reconciliation.
+		setTimeout(pauseYtmPlayback, 120)
+		setActive(DEST_YTDESKTOP)
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -187,278 +244,152 @@
 				background: #1976d2;
 			}
 
-			/* ── Floating icon button (fixed, top-right) ── */
-			#${MENU_BTN_ID} {
+			/* ── Segmented destination toggle — anchored at the top, centered ── */
+			#${TOGGLE_ID} {
 				position: fixed;
 				top: 72px;
-				right: 16px;
+				left: 50%;
+				transform: translateX(-50%);
 				z-index: 2147483647;
 				display: inline-flex;
-				align-items: center;
-				justify-content: center;
-				width: 40px;
-				height: 40px;
-				border: none;
-				border-radius: 50%;
-				background: rgba(0, 0, 0, 0.55);
-				color: #fff;
-				font-size: 20px;
-				line-height: 1;
-				cursor: pointer;
-				transition: background 0.15s;
+				padding: 4px;
+				background: rgba(15, 15, 15, 0.88);
+				backdrop-filter: blur(8px);
+				-webkit-backdrop-filter: blur(8px);
+				border: 1px solid rgba(255, 255, 255, 0.12);
+				border-radius: 999px;
+				box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+				font-family: 'YouTube Sans', 'Roboto', sans-serif;
 				user-select: none;
 			}
-			#${MENU_BTN_ID}:hover {
-				background: rgba(0, 0, 0, 0.85);
-			}
-			#${MENU_BTN_ID}.ytmdh-open {
-				background: rgba(0, 0, 0, 0.9);
-			}
-
-			/* ── Dropdown menu ── */
-			#${DROPDOWN_ID} {
-				display: none;
-				position: fixed;
-				min-width: 280px;
-				background: #282828;
-				border: 1px solid #444;
-				border-radius: 12px;
-				padding: 8px 0;
-				box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
-				font-family: 'YouTube Sans', 'Roboto', sans-serif;
-				font-size: 14px;
-				color: #e0e0e0;
-				z-index: 2147483647;
-			}
-			#${DROPDOWN_ID}.ytmdh-visible {
-				display: block;
-			}
-			#${DROPDOWN_ID} .ytmdh-menu-item {
-				display: flex;
-				align-items: flex-start;
-				gap: 12px;
-				width: 100%;
-				padding: 10px 16px;
+			#${TOGGLE_ID} .ytmdh-segment {
+				display: inline-flex;
+				align-items: center;
+				gap: 8px;
+				padding: 8px 18px;
 				border: none;
 				background: transparent;
-				color: #e0e0e0;
-				font-size: 14px;
+				color: #cfcfcf;
 				font-family: inherit;
-				cursor: pointer;
-				text-align: left;
-				transition: background 0.1s;
-				box-sizing: border-box;
-			}
-			#${DROPDOWN_ID} .ytmdh-menu-item:hover {
-				background: rgba(255, 255, 255, 0.1);
-			}
-			#${DROPDOWN_ID} .ytmdh-menu-item .ytmdh-icon {
-				flex-shrink: 0;
-				width: 20px;
-				text-align: center;
-				font-size: 16px;
-				margin-top: 1px;
-			}
-			#${DROPDOWN_ID} .ytmdh-menu-item.ytmdh-primary .ytmdh-label {
-				color: #ff4e7a;
-			}
-			#${DROPDOWN_ID} .ytmdh-col {
-				display: flex;
-				flex-direction: column;
-				flex: 1;
-			}
-			#${DROPDOWN_ID} .ytmdh-label {
+				font-size: 13px;
 				font-weight: 500;
+				cursor: pointer;
+				border-radius: 999px;
+				transition: background 0.15s, color 0.15s, transform 0.1s;
 			}
-			#${DROPDOWN_ID} .ytmdh-sub {
-				display: block;
-				font-size: 11px;
-				color: #999;
-				margin-top: 2px;
+			#${TOGGLE_ID} .ytmdh-segment:hover {
+				background: rgba(255, 255, 255, 0.08);
+				color: #fff;
 			}
-			#${DROPDOWN_ID} .ytmdh-divider {
-				height: 1px;
-				background: #444;
-				margin: 4px 0;
+			#${TOGGLE_ID} .ytmdh-segment:active {
+				transform: scale(0.97);
+			}
+			#${TOGGLE_ID} .ytmdh-segment.ytmdh-active {
+				background: #ff4e7a;
+				color: #fff;
+				box-shadow: 0 2px 10px rgba(255, 78, 122, 0.45);
+			}
+			#${TOGGLE_ID} .ytmdh-seg-icon {
+				font-size: 15px;
+				line-height: 1;
+			}
+			#${TOGGLE_ID} .ytmdh-seg-label {
+				line-height: 1;
 			}
 		`
 		document.head.appendChild(style)
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
-	//  UI — BUTTON & DROPDOWN
+	//  UI — DESTINATION TOGGLE
 	// ═══════════════════════════════════════════════════════════════════
 
-	function positionDropdown(btn, dropdown) {
-		const rect = btn.getBoundingClientRect()
-		const width = dropdown.offsetWidth || 280
-		dropdown.style.top = `${rect.bottom + 8}px`
-		dropdown.style.left = `${Math.max(8, rect.right - width)}px`
-	}
-
-	function closeDropdown() {
-		document.getElementById(DROPDOWN_ID)?.classList.remove('ytmdh-visible')
-		document.getElementById(MENU_BTN_ID)?.classList.remove('ytmdh-open')
-	}
-
-	function getOrCreateMenuBtn() {
-		let btn = document.getElementById(MENU_BTN_ID)
-		if (btn) return btn
-
-		btn = document.createElement('div')
-		btn.id = MENU_BTN_ID
-		btn.textContent = '\u2197' // ↗ north-east arrow = "open externally"
-		btn.title = 'Open in YT Music Desktop'
-		btn.setAttribute('role', 'button')
-		btn.setAttribute('tabindex', '0')
-		btn.setAttribute('aria-label', 'Open in YT Music Desktop')
-
-		document.body.appendChild(btn)
-
-		const onTrigger = (e) => {
-			e.preventDefault()
-			e.stopPropagation()
-			e.stopImmediatePropagation()
-			const dropdown = document.getElementById(DROPDOWN_ID)
-			if (!dropdown) {
-				warn('Menu clicked but dropdown is missing')
-				return
-			}
-			const willOpen = !dropdown.classList.contains('ytmdh-visible')
-			dropdown.classList.toggle('ytmdh-visible', willOpen)
-			btn.classList.toggle('ytmdh-open', willOpen)
-			if (willOpen) positionDropdown(btn, dropdown)
-		}
-		btn.addEventListener('pointerdown', onTrigger, true)
-		btn.addEventListener('click', onTrigger, true)
-		btn.addEventListener('keydown', (e) => {
-			if (e.key === 'Enter' || e.key === ' ') onTrigger(e)
-		})
-
-		document.addEventListener('keydown', (e) => {
-			if (e.key === 'Escape') closeDropdown()
-		})
-
-		const onOutside = (e) => {
-			const dropdown = document.getElementById(DROPDOWN_ID)
-			if (!dropdown) return
-			if (e.target === btn || btn.contains(e.target) || dropdown.contains(e.target)) return
-			closeDropdown()
-		}
-		document.addEventListener('pointerdown', onOutside, true)
-		document.addEventListener('click', onOutside, true)
-
-		const reposition = () => {
-			const dropdown = document.getElementById(DROPDOWN_ID)
-			if (dropdown?.classList.contains('ytmdh-visible')) {
-				positionDropdown(btn, dropdown)
-			}
-		}
-		window.addEventListener('scroll', reposition, true)
-		window.addEventListener('resize', reposition)
-
-		return btn
-	}
-
-	function buildMenuItem({ icon, label, sub, primary, onClick }) {
-		const item = document.createElement('button')
-		item.className = 'ytmdh-menu-item' + (primary ? ' ytmdh-primary' : '')
+	function buildSegment({ dest, icon, label, title, onClick }) {
+		const btn = document.createElement('button')
+		btn.type = 'button'
+		btn.className = 'ytmdh-segment'
+		btn.dataset.dest = dest
+		btn.title = title
+		btn.setAttribute('aria-label', title)
 
 		const iconEl = document.createElement('span')
-		iconEl.className = 'ytmdh-icon'
+		iconEl.className = 'ytmdh-seg-icon'
 		iconEl.textContent = icon
 
-		const col = document.createElement('span')
-		col.className = 'ytmdh-col'
-
 		const labelEl = document.createElement('span')
-		labelEl.className = 'ytmdh-label'
+		labelEl.className = 'ytmdh-seg-label'
 		labelEl.textContent = label
-		col.appendChild(labelEl)
 
-		if (sub) {
-			const subEl = document.createElement('span')
-			subEl.className = 'ytmdh-sub'
-			subEl.textContent = sub
-			col.appendChild(subEl)
-		}
-
-		item.appendChild(iconEl)
-		item.appendChild(col)
+		btn.appendChild(iconEl)
+		btn.appendChild(labelEl)
 
 		const wrapped = (e) => {
 			e.preventDefault()
 			e.stopPropagation()
 			onClick()
 		}
-		item.addEventListener('pointerdown', wrapped)
-		item.addEventListener('click', wrapped)
+		btn.addEventListener('click', wrapped)
 
-		return item
+		return btn
 	}
 
-	function createDivider() {
-		const d = document.createElement('div')
-		d.className = 'ytmdh-divider'
-		return d
+	function setActive(dest) {
+		const toggle = document.getElementById(TOGGLE_ID)
+		if (!toggle) return
+		toggle.querySelectorAll('.ytmdh-segment').forEach((btn) => {
+			btn.classList.toggle('ytmdh-active', btn.dataset.dest === dest)
+		})
 	}
 
-	function mountButton() {
+	function mountToggle() {
 		injectStyles()
-		removeDropdown()
+		removeToggle()
 
-		const menuBtn = getOrCreateMenuBtn()
+		const toggle = document.createElement('div')
+		toggle.id = TOGGLE_ID
+		toggle.setAttribute('role', 'group')
+		toggle.setAttribute('aria-label', 'Playback destination')
 
-		const dropdown = document.createElement('div')
-		dropdown.id = DROPDOWN_ID
-		dropdown.addEventListener('pointerdown', (e) => e.stopPropagation())
-		dropdown.addEventListener('click', (e) => e.stopPropagation())
+		toggle.appendChild(
+			buildSegment({
+				dest: DEST_SONG,
+				icon: '\u266A', // ♪
+				label: 'Song',
+				title: 'Listen here in YT Music',
+				onClick: goSong,
+			}),
+		)
 
-		// Primary: full handoff — opens in desktop AND pauses the browser.
-		// One click moves playback entirely to YTMDesktop.
-		dropdown.appendChild(
-			buildMenuItem({
+		toggle.appendChild(
+			buildSegment({
+				dest: DEST_VIDEO,
+				icon: '\u25B6', // ▶
+				label: 'Video',
+				title: 'Watch the video version on YouTube',
+				onClick: goVideo,
+			}),
+		)
+
+		toggle.appendChild(
+			buildSegment({
+				dest: DEST_YTDESKTOP,
 				icon: '\u2197', // ↗
-				label: 'Hand off to YTMDesktop',
-				sub: 'Pauses this tab — plays in desktop only',
-				primary: true,
-				onClick: () => handoff({ pauseHere: true }),
+				label: 'YTDesktop',
+				title: 'Hand off to YT Music Desktop (pauses this tab)',
+				onClick: goYtdesktop,
 			}),
 		)
 
-		// Secondary: open in desktop but leave the browser alone. Useful
-		// when the user wants to keep listening here and just mirror the
-		// track in the desktop app (e.g. to queue into a desktop playlist).
-		dropdown.appendChild(
-			buildMenuItem({
-				icon: '\u29C9', // ⧉ two overlapping squares
-				label: 'Open in YTMDesktop',
-				sub: 'Keeps this tab playing — desktop opens alongside',
-				onClick: () => handoff({ pauseHere: false }),
-			}),
-		)
+		document.body.appendChild(toggle)
 
-		dropdown.appendChild(createDivider())
+		// Default: Song is active on mount — we're already in YT Music.
+		setActive(DEST_SONG)
 
-		dropdown.appendChild(
-			buildMenuItem({
-				icon: '\u00D7', // ×
-				label: 'Dismiss',
-				onClick: removeButton,
-			}),
-		)
-
-		menuBtn.appendChild(dropdown)
-		log('Handoff menu mounted')
+		log('Destination toggle mounted')
 	}
 
-	function removeDropdown() {
-		document.getElementById(DROPDOWN_ID)?.remove()
-	}
-
-	function removeButton() {
-		removeDropdown()
-		document.getElementById(MENU_BTN_ID)?.remove()
+	function removeToggle() {
+		document.getElementById(TOGGLE_ID)?.remove()
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -466,15 +397,14 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	/**
-	 * The ytmd:// scheme requires a video ID, so the button only makes
-	 * sense on /watch routes where the URL exposes `v` (and optionally
-	 * `list`). On other YTM routes we remove the button entirely.
+	 * The toggle only makes sense on /watch routes where the URL exposes
+	 * `v` (and optionally `list`). On other YTM routes we remove it entirely.
 	 */
 	function handleRoute() {
 		if (window.location.pathname === '/watch' && getVideoId()) {
-			mountButton()
+			mountToggle()
 		} else {
-			removeButton()
+			removeToggle()
 		}
 	}
 
@@ -488,5 +418,5 @@
 	// YTM is a Polymer/Lit SPA — same navigation event as youtube.com.
 	document.addEventListener('yt-navigate-finish', handleRoute)
 
-	log('Initialized')
+	log(`Initialized v${SCRIPT_VERSION}`)
 })()
