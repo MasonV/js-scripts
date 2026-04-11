@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YourTube
 // @namespace    yourtube
-// @version      1.1.4
+// @version      1.1.5
 // @description  YouTube without the garbage — duration filtering, and more features to come
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -26,7 +26,7 @@
 
 	const LOG_PREFIX = '[YourTube]'
 	const LOG_PREFIX_DURATION = '[YourTube/Duration]'
-	const SCRIPT_VERSION = '1.1.4'
+	const SCRIPT_VERSION = '1.1.5'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.meta.js'
 	const DOWNLOAD_URL =
@@ -891,29 +891,40 @@
 			if (stylesInstalled) return
 			try {
 				addStyle(`
+				/* ── Header pill — anchored top-right below YouTube's masthead ──
+				   Visual language matches ytm-desktop-handoff and ytm-data-panel:
+				   subtle border, blurred dark background, muted text, pill
+				   radius, accent on hover. */
 				#${GEAR_ID} {
 					position: fixed;
-					top: 14px;
-					right: 24px;
+					top: 72px;
+					right: 16px;
 					z-index: 2147483646;
-					height: 40px;
-					padding: 0 4px 0 14px;
-					border-radius: 20px;
-					background: #0f0f0f;
-					color: #fff;
-					border: 2px solid #3ea6ff;
-					box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-					font-family: Roboto, "YouTube Sans", Arial, sans-serif;
-					font-size: 13px;
-					font-weight: 600;
 					display: inline-flex;
 					align-items: center;
-					gap: 8px;
-					transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
+					gap: 4px;
+					padding: 0 4px 0 14px;
+					height: 36px;
+					border: 1px solid rgba(255, 255, 255, 0.12);
+					background: rgba(15, 15, 15, 0.88);
+					backdrop-filter: blur(8px);
+					-webkit-backdrop-filter: blur(8px);
+					color: #cfcfcf;
+					font-family: 'YouTube Sans', 'Roboto', sans-serif;
+					font-size: 13px;
+					font-weight: 500;
+					line-height: 1;
+					border-radius: 999px;
+					box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+					user-select: none;
+					transition: background 0.15s, color 0.15s,
+						border-color 0.15s, box-shadow 0.15s;
 				}
 				#${GEAR_ID}:hover {
-					transform: translateY(-1px);
-					box-shadow: 0 6px 20px rgba(62,166,255,0.55);
+					background: rgba(62, 166, 255, 0.18);
+					color: #fff;
+					border-color: rgba(62, 166, 255, 0.55);
+					box-shadow: 0 6px 22px rgba(62, 166, 255, 0.35);
 				}
 				#${GEAR_ID} .yourtube-gear-open {
 					display: inline-flex;
@@ -922,35 +933,48 @@
 					background: transparent;
 					color: inherit;
 					border: 0;
-					padding: 0 4px 0 0;
+					padding: 0;
+					margin: 0;
 					height: 100%;
 					font: inherit;
+					line-height: 1;
 					cursor: pointer;
 				}
+				#${GEAR_ID} .yourtube-gear-open:active {
+					transform: scale(0.97);
+				}
 				#${GEAR_ID} svg {
-					width: 18px;
-					height: 18px;
+					width: 16px;
+					height: 16px;
 					flex-shrink: 0;
+				}
+				#${GEAR_ID} .yourtube-gear-divider {
+					width: 1px;
+					height: 18px;
+					background: rgba(255, 255, 255, 0.12);
+					margin: 0 2px;
 				}
 				#${GEAR_ID} .yourtube-gear-close {
 					display: inline-flex;
 					align-items: center;
 					justify-content: center;
-					width: 26px;
-					height: 26px;
-					margin-left: 4px;
+					width: 24px;
+					height: 24px;
 					border-radius: 50%;
 					background: transparent;
-					color: #aaa;
+					color: #9a9a9a;
 					border: 0;
-					font-size: 18px;
+					padding: 0;
+					margin: 0;
+					font-size: 16px;
+					font-family: inherit;
 					line-height: 1;
 					cursor: pointer;
 					transition: background 0.12s ease-out, color 0.12s ease-out;
 				}
 				#${GEAR_ID} .yourtube-gear-close:hover {
-					background: rgba(255,80,80,0.18);
-					color: #ff6b6b;
+					background: rgba(255, 255, 255, 0.08);
+					color: #fff;
 				}
 
 				#${OVERLAY_ID} {
@@ -1247,35 +1271,31 @@
 		}
 
 		// Critical inline styles — used as a belt-and-suspenders fallback
-		// in case GM_addStyle is blocked or runs late. Without these, a
-		// failed stylesheet install would leave the pill as a flow-layout
-		// element invisible amid YouTube's content. The CSS class is the
-		// preferred path and wins over inline styles for hover/transition.
-		//
-		// Positioned at top of the viewport to match the only DOM mount
-		// strategy that survived YouTube's SPA churn in v1.1.2's debug
-		// probe (see DebugProbe "B (html)"). v1.1.3 mounted to
-		// documentElement but kept bottom-right coords — the element was
-		// still not visible on the user's setup. v1.1.4 moves it to the
-		// top, turning it into a header-style pill.
+		// in case GM_addStyle is blocked or runs late. The CSS class is
+		// the preferred path and wins over inline styles for hover /
+		// transition. Visual language matches ytm-desktop-handoff and
+		// ytm-data-panel: subtle border, blurred dark background, muted
+		// text, pill radius. Positioned at `top: 72px` to sit below
+		// YouTube's masthead rather than overlapping it.
 		const GEAR_INLINE_STYLE = [
 			'position: fixed',
-			'top: 14px',
-			'right: 24px',
+			'top: 72px',
+			'right: 16px',
 			'z-index: 2147483646',
-			'height: 40px',
-			'padding: 0 4px 0 14px',
-			'border-radius: 20px',
-			'background: #0f0f0f',
-			'color: #fff',
-			'border: 2px solid #3ea6ff',
-			'box-shadow: 0 4px 16px rgba(0,0,0,0.5)',
-			'font-family: Roboto, Arial, sans-serif',
-			'font-size: 13px',
-			'font-weight: 600',
 			'display: inline-flex',
 			'align-items: center',
-			'gap: 8px',
+			'gap: 4px',
+			'padding: 0 4px 0 14px',
+			'height: 36px',
+			'border: 1px solid rgba(255,255,255,0.12)',
+			'background: rgba(15,15,15,0.88)',
+			'color: #cfcfcf',
+			'font-family: "YouTube Sans", Roboto, Arial, sans-serif',
+			'font-size: 13px',
+			'font-weight: 500',
+			'line-height: 1',
+			'border-radius: 999px',
+			'box-shadow: 0 6px 20px rgba(0,0,0,0.5)',
 		].join('; ')
 
 		function mountGear() {
@@ -1305,13 +1325,14 @@
 			pill.setAttribute('aria-label', 'YourTube header')
 			pill.setAttribute('style', GEAR_INLINE_STYLE)
 			pill.innerHTML = `
-				<button type="button" class="yourtube-gear-open" aria-label="Open YourTube settings">
-					<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="width:18px;height:18px;flex-shrink:0;">
+				<button type="button" class="yourtube-gear-open" aria-label="Open YourTube settings" title="Open YourTube settings">
+					<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="width:16px;height:16px;flex-shrink:0;">
 						<path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
 					</svg>
 					<span>YourTube</span>
 				</button>
-				<button type="button" class="yourtube-gear-close" aria-label="Hide YourTube header" title="Hide header (use __yourtube_showHeader() in console to restore)">×</button>
+				<span class="yourtube-gear-divider" aria-hidden="true"></span>
+				<button type="button" class="yourtube-gear-close" aria-label="Hide YourTube header" title="Hide header (run __yourtube_showHeader() in console to restore)">×</button>
 			`
 			const openBtn = pill.querySelector('.yourtube-gear-open')
 			const closeBtn = pill.querySelector('.yourtube-gear-close')
