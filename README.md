@@ -13,6 +13,7 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
 - [Utility](#utility)
   - [`auto-focus-search/`](#auto-focus-search)
   - [`llm-stats-show-all/`](#llm-stats-show-all)
+  - [`yourtube/`](#yourtube)
 - [Gaming](#gaming)
   - [`barter-bundle-scorer/`](#barter-bundle-scorer)
   - [`fanatical-autoclaim/`](#fanatical-autoclaim)
@@ -77,6 +78,28 @@ A userscript for [llm-stats.com](https://llm-stats.com) leaderboard pages that a
 **Metadata update checks:**
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.meta.js`
+
+---
+
+### `yourtube/`
+
+A unified userscript for [YouTube](https://www.youtube.com) — "YouTube without the garbage." v1.0.0 is a scaffolding milestone: the shared duration parser is in place and the subscription-feed duration filter is registered as the first feature module, with DOM detection and UI landing in follow-up commits.
+
+**Features:**
+
+- Pure duration parser / formatter (HH:MM:SS ↔ seconds) — extractable, testable utility shared across features
+- Feature-module architecture — each feature is route-scoped and re-runs on `yt-navigate-finish` so it activates/deactivates as you move between YouTube pages
+- Duration Filter module (subscription feed) — scaffolded in v1.0.0; full DOM detection, filtering, and settings UI land in subsequent versions
+- Per-feature logging prefixes (`[YourTube]`, `[YourTube/Duration]`) for easy console scanning
+- Shared versioned settings blob (`yourtube_settings_v1`) keyed per-feature
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.meta.js`
 
 <a id="gaming"></a>
 
