@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.3.0
+// @version      1.3.1
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.3.0'
+	const SCRIPT_VERSION = '1.3.1'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =
@@ -330,12 +330,17 @@
 			}
 
 			/* ── Dropdown menu ── */
+			/*
+			 * Positioned fixed and attached to <body> rather than nested
+			 * inside the masthead button. Avoids two problems:
+			 *   1. <button> nested inside <button> (invalid HTML → Chrome
+			 *      swallows inner-button clicks on some builds).
+			 *   2. YouTube masthead ancestors use overflow:hidden, which
+			 *      would clip an absolute-positioned child dropdown.
+			 */
 			#${DROPDOWN_ID} {
 				display: none;
-				position: absolute;
-				top: 100%;
-				right: 0;
-				margin-top: 8px;
+				position: fixed;
 				min-width: 240px;
 				background: #282828;
 				border: 1px solid #444;
@@ -423,6 +428,7 @@
 			if (!dropdown) return
 			const isOpen = dropdown.classList.toggle('ytmr-visible')
 			btn.classList.toggle('ytmr-open', isOpen)
+			if (isOpen) positionDropdown(btn, dropdown)
 		})
 
 		// Close dropdown when clicking outside
@@ -432,7 +438,27 @@
 			btn.classList.remove('ytmr-open')
 		})
 
+		// Close on Escape
+		document.addEventListener('keydown', (e) => {
+			if (e.key !== 'Escape') return
+			const dropdown = document.getElementById(DROPDOWN_ID)
+			if (dropdown) dropdown.classList.remove('ytmr-visible')
+			btn.classList.remove('ytmr-open')
+		})
+
 		return btn
+	}
+
+	/**
+	 * Positions the dropdown below-right of the button. Runs on open
+	 * because the dropdown lives on <body>, not inside the button — so
+	 * CSS can't place it relative to the trigger.
+	 */
+	function positionDropdown(btn, dropdown) {
+		const rect = btn.getBoundingClientRect()
+		dropdown.style.top = `${rect.bottom + 8}px`
+		dropdown.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`
+		dropdown.style.left = 'auto'
 	}
 
 	function injectRedirectButton(videoId, channelId, channelName) {
@@ -504,9 +530,8 @@
 		dismissItem.addEventListener('click', () => removeRedirectButton())
 		dropdown.appendChild(dismissItem)
 
-		// Attach dropdown relative to the button
-		menuBtn.style.position = 'relative'
-		menuBtn.appendChild(dropdown)
+		// Attach to body (see CSS comment above for rationale)
+		document.body.appendChild(dropdown)
 
 		log('Redirect menu injected into masthead')
 	}
