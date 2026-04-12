@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YTM Desktop Handoff
 // @namespace    ytm-desktop-handoff
-// @version      3.0.0
+// @version      3.0.1
 // @description  Adds a pill button to YouTube Music /watch pages that hands off the current track to the YouTube Music Desktop App via the ytmd:// protocol (pauses this tab so the desktop app plays alone)
 // @match        *://music.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -21,7 +21,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YTM Handoff]'
-	const SCRIPT_VERSION = '3.0.0'
+	const SCRIPT_VERSION = '3.0.1'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.meta.js'
 	const DOWNLOAD_URL =
@@ -29,7 +29,6 @@
 
 	const UPDATE_BANNER_ID = 'ytmdh-update-banner'
 	const PILL_ID = 'ytmdh-pill'
-	const LAUNCHER_IFRAME_ID = 'ytmdh-launcher-frame'
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  LOGGING
@@ -114,19 +113,17 @@
 
 	/**
 	 * Launches a custom protocol URI without navigating the current tab.
-	 * A hidden iframe is the most reliable cross-browser way to trigger a
-	 * protocol handler — window.location.href risks replacing the tab in
-	 * some browser/protocol combinations.
+	 * A temporary <a> click is the most reliable cross-browser way to trigger
+	 * a protocol handler — modern Chromium blocks custom-scheme navigations
+	 * initiated from iframe src changes, so the iframe approach silently fails.
 	 */
 	function launchProtocol(uri) {
-		let iframe = document.getElementById(LAUNCHER_IFRAME_ID)
-		if (!iframe) {
-			iframe = document.createElement('iframe')
-			iframe.id = LAUNCHER_IFRAME_ID
-			iframe.style.display = 'none'
-			document.body.appendChild(iframe)
-		}
-		iframe.src = uri
+		const a = document.createElement('a')
+		a.href = uri
+		a.style.display = 'none'
+		document.body.appendChild(a)
+		a.click()
+		setTimeout(() => a.remove(), 1000)
 	}
 
 	/**
