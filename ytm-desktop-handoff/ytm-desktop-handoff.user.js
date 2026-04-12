@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YTM Desktop Handoff
 // @namespace    ytm-desktop-handoff
-// @version      3.1.0
+// @version      3.2.0
 // @description  Adds a pill button to YouTube Music /watch pages that hands off the current track to the YouTube Music Desktop App via its companion API (pauses this tab so the desktop app plays alone)
 // @match        *://music.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YTM Handoff]'
-	const SCRIPT_VERSION = '3.1.0'
+	const SCRIPT_VERSION = '3.2.0'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.meta.js'
 	const DOWNLOAD_URL =
@@ -273,29 +273,25 @@
 				background: #1976d2;
 			}
 
-			/* ── Single-click handoff pill — anchored in the top-right ── */
+			/* ── Handoff pill — sits inline after the Song/Video toggle ── */
 			#${PILL_ID} {
-				position: fixed;
-				top: 72px;
-				right: 16px;
-				z-index: 2147483647;
 				display: inline-flex;
 				align-items: center;
-				gap: 8px;
-				padding: 8px 18px;
+				align-self: center;
+				gap: 6px;
+				margin-left: 12px;
+				padding: 6px 14px;
 				border: 1px solid rgba(255, 255, 255, 0.12);
-				background: rgba(15, 15, 15, 0.88);
-				backdrop-filter: blur(8px);
-				-webkit-backdrop-filter: blur(8px);
-				color: #cfcfcf;
+				background: rgba(255, 255, 255, 0.06);
+				color: #aaaaaa;
 				font-family: 'YouTube Sans', 'Roboto', sans-serif;
 				font-size: 13px;
 				font-weight: 500;
 				line-height: 1;
 				cursor: pointer;
 				border-radius: 999px;
-				box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
 				user-select: none;
+				vertical-align: middle;
 				transition: background 0.15s, color 0.15s, transform 0.1s,
 					box-shadow 0.15s, border-color 0.15s;
 			}
@@ -372,7 +368,23 @@
 		}
 	}
 
-	function mountPill() {
+	/**
+	 * Resolves when `selector` appears in the DOM, or rejects after `timeout` ms.
+	 */
+	function waitForElement(selector, timeout = 5000) {
+		return new Promise((resolve, reject) => {
+			const existing = document.querySelector(selector)
+			if (existing) { resolve(existing); return }
+			const observer = new MutationObserver(() => {
+				const el = document.querySelector(selector)
+				if (el) { observer.disconnect(); resolve(el) }
+			})
+			observer.observe(document.body, { childList: true, subtree: true })
+			setTimeout(() => { observer.disconnect(); reject(new Error(`Timeout: ${selector}`)) }, timeout)
+		})
+	}
+
+	async function mountPill() {
 		injectStyles()
 		removePill()
 
@@ -384,7 +396,7 @@
 
 		const iconEl = document.createElement('span')
 		iconEl.className = 'ytmdh-pill-icon'
-		iconEl.textContent = '\u2197' // ↗ north-east arrow = "open externally"
+		iconEl.textContent = '\u2197' // ↗
 
 		const labelEl = document.createElement('span')
 		labelEl.className = 'ytmdh-pill-label'
@@ -402,7 +414,14 @@
 			})
 		})
 
-		document.body.appendChild(btn)
+		// Inject after the Song/Video toggle so it sits inline in that row.
+		try {
+			const pivotBar = await waitForElement('ytmusic-pivot-bar-renderer')
+			pivotBar.insertAdjacentElement('afterend', btn)
+		} catch {
+			warn('Pivot bar not found — appending to body as fallback')
+			document.body.appendChild(btn)
+		}
 
 		// Restore pending auth state after SPA navigation.
 		if (pendingAuthCode) setPillState('approve')

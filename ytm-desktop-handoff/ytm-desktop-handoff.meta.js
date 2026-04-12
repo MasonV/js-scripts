@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YTM Desktop Handoff
 // @namespace    ytm-desktop-handoff
-// @version      3.1.0
+// @version      3.2.0
 // @description  Adds a pill button to YouTube Music /watch pages that hands off the current track to the YouTube Music Desktop App via its companion API (pauses this tab so the desktop app plays alone)
 // @match        *://music.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
