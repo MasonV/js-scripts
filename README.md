@@ -166,6 +166,10 @@ A userscript for [Fanatical](https://www.fanatical.com) order pages that bulk-re
 
 A userscript for [itch.io](https://itch.io) bundle download pages that claims all unclaimed games in bulk, automatically paginating through every page of the bundle.
 
+Script refined from the following existing (and somewhat functional) scripts
+https://greasyfork.org/en/scripts/427686-itch-io-bundle-to-library
+https://greasyfork.org/en/scripts/405532-itch-io-autoclaim
+
 **Features:**
 
 - Claims all unclaimed games on the current page via `fetch()` POST — no DOM clicking, no page flicker
