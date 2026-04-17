@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.2.1
+// @version      0.4.0
 // @description  Bulk-reveal and bulk-redeem keys on Luna
 // @match        https://luna.amazon.com/claims/home*
+// @match        https://luna.amazon.com/claims/*/dp/*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js
@@ -18,7 +19,7 @@
 (function () {
   "use strict";
 
-  const SCRIPT_VERSION = "0.2.1";
+  const SCRIPT_VERSION = "0.4.0";
   const META_URL =
     "https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js";
   const DOWNLOAD_URL =
@@ -29,6 +30,11 @@
 
   const DEFAULT_REVEAL_DELAY_MS = 500;
   const DEFAULT_REDEEM_DELAY_MS = 800;
+
+  const DISABLED_STORES_KEY = "lac_disabled_stores_v1";
+
+  // All known stores in display order — used to build the settings list.
+  const KNOWN_STORES = ["Amazon Games", "Epic Games", "GOG", "Legacy Games"];
 
   // Mutable — updated by the UI input
   let revealDelayMs = DEFAULT_REVEAL_DELAY_MS;
@@ -44,11 +50,40 @@
   function warn(...args) {
     console.warn(LOG_PREFIX, ...args);
   }
-  function error(...args) {
-    console.error(LOG_PREFIX, ...args);
-  }
   function logItem(...args) {
     console.log(SHORT_PREFIX, ...args);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  STORE PREFS — persisted to localStorage
+  // ═══════════════════════════════════════════════════════════════════
+
+  function loadDisabledStores() {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(DISABLED_STORES_KEY) || "[]"));
+    } catch {
+      return new Set();
+    }
+  }
+
+  function saveDisabledStores(set) {
+    localStorage.setItem(DISABLED_STORES_KEY, JSON.stringify([...set]));
+  }
+
+  function isStoreDisabled(store) {
+    return loadDisabledStores().has(store);
+  }
+
+  // Toggles disabled state for a store. Returns the new disabled state (true = now disabled).
+  function toggleStoreDisabled(store) {
+    const set = loadDisabledStores();
+    if (set.has(store)) {
+      set.delete(store);
+    } else {
+      set.add(store);
+    }
+    saveDisabledStores(set);
+    return set.has(store);
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -97,18 +132,11 @@
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  /**
-   * Find all buttons whose visible text matches the given string (case-insensitive).
-   * Searches both <button> and <a> elements since Fanatical uses both.
-   */
   function findButtonsByText(text) {
     const candidates = document.querySelectorAll(
       '.item-card__claim-button a.tw-button[data-a-target="FGWPOffer"]',
     );
-    return Array.from(candidates).filter((el) => {
-      const elText = el.textContent.trim();
-      return elText === text;
-    });
+    return Array.from(candidates).filter((el) => el.textContent.trim() === text);
   }
 
   /**
@@ -122,8 +150,24 @@
     return h3 ? h3.getAttribute("title") : h3?.textContent?.trim() ?? "unknown";
   }
 
+  /**
+   * Detect which store the current claim page is for.
+   * Checks all p[title] elements to avoid false-positives from unrelated elements.
+   */
+  function detectStore() {
+    const pTitles = Array.from(document.querySelectorAll("p[title]")).map((p) =>
+      p.getAttribute("title"),
+    );
+    if (pTitles.some((t) => t.includes("on Amazon Games"))) return "Amazon Games";
+    if (pTitles.some((t) => t.includes("on GOG.com"))) return "GOG";
+    if (pTitles.some((t) => t.includes("on Legacy Games"))) return "Legacy Games";
+    const epicMsg = document.querySelector('[data-a-target="LinkAccountInfoMessage"]');
+    if (epicMsg?.textContent?.includes("Epic")) return "Epic Games";
+    return null;
+  }
+
   // ═══════════════════════════════════════════════════════════════════
-  //  CORE ACTIONS
+  //  CORE ACTIONS — HOME PAGE
   // ═══════════════════════════════════════════════════════════════════
 
   async function openAllClaims() {
@@ -147,33 +191,53 @@
 
       GM_openInTab(btn.href, { active: false });
 
-      // Wait for the reveal to process before clicking the next one
       if (i < claimButtons.length - 1) {
         await sleep(revealDelayMs);
       }
     }
 
-    // Wait a moment for the last reveal to render
     await sleep(revealDelayMs);
-    log("All keys claimed");
-    updateStatus(`Revealed ${claimButtons.length} key(s)`);
+    log("All claim pages opened");
+    updateStatus(`Opened ${claimButtons.length} claim page(s)`);
     setButtonsEnabled(true);
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  UI
+  //  CORE ACTIONS — CLAIM PAGE
+  // ═══════════════════════════════════════════════════════════════════
+
+  async function claimCurrentGame() {
+    const btn = document.querySelector('[data-a-target="buy-box_call-to-action"]');
+    if (!btn) {
+      warn("Claim button not found");
+      updateStatus("Claim button not found");
+      return;
+    }
+
+    const store = detectStore() ?? "Unknown store";
+    log(`Claiming via ${store}`);
+    updateStatus(`Claiming via ${store}…`);
+    setButtonsEnabled(false);
+
+    btn.click();
+
+    await sleep(redeemDelayMs);
+    log("Claim submitted");
+    updateStatus("Claim submitted");
+    setButtonsEnabled(true);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  UI — SHARED
   // ═══════════════════════════════════════════════════════════════════
 
   let statusEl = null;
   let claimBtn = null;
-  //   let redeemBtn = null
-  //   let revealAndRedeemBtn = null
 
   function updateStatus(text) {
     if (statusEl) statusEl.textContent = text;
   }
 
-  // leaving as for loop in case I add more buttons back
   function setButtonsEnabled(enabled) {
     [claimBtn].forEach((btn) => {
       if (!btn) return;
@@ -181,6 +245,29 @@
       btn.style.opacity = enabled ? "1" : "0.5";
       btn.style.pointerEvents = enabled ? "auto" : "none";
     });
+  }
+
+  function buildPanelShell(titleText) {
+    const panel = document.createElement("div");
+    panel.id = "lac-panel";
+
+    const header = document.createElement("div");
+    header.id = "lac-header";
+
+    const title = document.createElement("div");
+    title.id = "lac-title";
+    title.textContent = titleText;
+    header.appendChild(title);
+
+    const closeBtn = document.createElement("button");
+    closeBtn.id = "lac-close-btn";
+    closeBtn.textContent = "\u00D7";
+    closeBtn.title = "Close panel";
+    closeBtn.addEventListener("click", () => panel.remove());
+    header.appendChild(closeBtn);
+
+    panel.appendChild(header);
+    return panel;
   }
 
   function createDelayInput(labelText, defaultValue, onChange) {
@@ -213,26 +300,39 @@
     return row;
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  //  UI — HOME PAGE PANEL
+  // ═══════════════════════════════════════════════════════════════════
+
+  function createStoreToggleRow(storeName) {
+    const row = document.createElement("div");
+    row.className = "lac-store-row";
+
+    const label = document.createElement("span");
+    label.className = "lac-store-label";
+    label.textContent = storeName;
+
+    const toggle = document.createElement("button");
+    const disabled = isStoreDisabled(storeName);
+    toggle.className = `lac-store-toggle ${disabled ? "lac-store-toggle--off" : "lac-store-toggle--on"}`;
+    toggle.textContent = disabled ? "Skip" : "Claim";
+    toggle.title = `Click to ${disabled ? "enable" : "disable"} claiming for ${storeName}`;
+
+    toggle.addEventListener("click", () => {
+      const nowDisabled = toggleStoreDisabled(storeName);
+      toggle.className = `lac-store-toggle ${nowDisabled ? "lac-store-toggle--off" : "lac-store-toggle--on"}`;
+      toggle.textContent = nowDisabled ? "Skip" : "Claim";
+      toggle.title = `Click to ${nowDisabled ? "enable" : "disable"} claiming for ${storeName}`;
+      log(`${storeName}: ${nowDisabled ? "disabled" : "enabled"}`);
+    });
+
+    row.appendChild(label);
+    row.appendChild(toggle);
+    return row;
+  }
+
   function createPanel() {
-    const panel = document.createElement("div");
-    panel.id = "lac-panel";
-
-    const header = document.createElement("div");
-    header.id = "lac-header";
-
-    const title = document.createElement("div");
-    title.id = "lac-title";
-    title.textContent = "Autoclaim";
-    header.appendChild(title);
-
-    const closeBtn = document.createElement("button");
-    closeBtn.id = "lac-close-btn";
-    closeBtn.textContent = "\u00D7";
-    closeBtn.title = "Close panel";
-    closeBtn.addEventListener("click", () => panel.remove());
-    header.appendChild(closeBtn);
-
-    panel.appendChild(header);
+    const panel = buildPanelShell("Autoclaim");
 
     claimBtn = document.createElement("button");
     claimBtn.id = "lac-claim-btn";
@@ -244,7 +344,7 @@
     const delaySection = document.createElement("div");
     delaySection.id = "lac-delays";
     delaySection.appendChild(
-      createDelayInput("Reveal delay", DEFAULT_REVEAL_DELAY_MS, (v) => {
+      createDelayInput("Open delay", DEFAULT_REVEAL_DELAY_MS, (v) => {
         revealDelayMs = v;
       }),
     );
@@ -255,6 +355,15 @@
     );
     panel.appendChild(delaySection);
 
+    const storeSection = document.createElement("div");
+    storeSection.id = "lac-stores";
+    const storesLabel = document.createElement("div");
+    storesLabel.className = "lac-section-label";
+    storesLabel.textContent = "Stores";
+    storeSection.appendChild(storesLabel);
+    KNOWN_STORES.forEach((s) => storeSection.appendChild(createStoreToggleRow(s)));
+    panel.appendChild(storeSection);
+
     statusEl = document.createElement("div");
     statusEl.id = "lac-status";
     statusEl.textContent = "Ready";
@@ -262,6 +371,69 @@
 
     document.body.appendChild(panel);
   }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  UI — CLAIM PAGE PANEL
+  // ═══════════════════════════════════════════════════════════════════
+
+  function createClaimPagePanel(store) {
+    const panel = buildPanelShell("Autoclaim");
+
+    const storeEl = document.createElement("div");
+    storeEl.id = "lac-store";
+    storeEl.textContent = store ?? "Unknown store";
+    panel.appendChild(storeEl);
+
+    statusEl = document.createElement("div");
+    statusEl.id = "lac-status";
+    panel.appendChild(statusEl);
+
+    if (store && isStoreDisabled(store)) {
+      statusEl.textContent = "Store disabled — skipping";
+
+      // Allow re-enabling without going back to the home page.
+      const enableBtn = document.createElement("button");
+      enableBtn.className = "lac-btn";
+      enableBtn.textContent = `Enable ${store}`;
+      enableBtn.addEventListener("click", () => {
+        toggleStoreDisabled(store);
+        log(`${store} re-enabled`);
+        panel.remove();
+        createClaimPagePanel(store);
+        document.body.appendChild(document.getElementById("lac-panel"));
+      });
+      panel.appendChild(enableBtn);
+    } else {
+      statusEl.textContent = "Ready";
+
+      claimBtn = document.createElement("button");
+      claimBtn.id = "lac-claim-btn";
+      claimBtn.className = "lac-btn lac-btn-primary";
+      claimBtn.textContent = "Claim";
+      claimBtn.addEventListener("click", claimCurrentGame);
+      panel.appendChild(claimBtn);
+
+      if (store) {
+        const disableBtn = document.createElement("button");
+        disableBtn.className = "lac-btn lac-btn-danger";
+        disableBtn.textContent = `Skip ${store} always`;
+        disableBtn.addEventListener("click", () => {
+          toggleStoreDisabled(store);
+          log(`${store} disabled`);
+          panel.remove();
+          createClaimPagePanel(store);
+          document.body.appendChild(document.getElementById("lac-panel"));
+        });
+        panel.appendChild(disableBtn);
+      }
+    }
+
+    document.body.appendChild(panel);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  STYLES
+  // ═══════════════════════════════════════════════════════════════════
 
   function injectStyles() {
     GM_addStyle(`
@@ -313,8 +485,13 @@
                 font-family: inherit;
             }
 
-            #lac-close-btn:hover {
-                color: #eee;
+            #lac-close-btn:hover { color: #eee; }
+
+            #lac-store {
+                font-size: 12px;
+                color: #bdbdbd;
+                text-align: center;
+                padding: 2px 0;
             }
 
             .lac-btn {
@@ -330,9 +507,7 @@
                 font-family: inherit;
             }
 
-            .lac-btn:hover {
-                background: #616161;
-            }
+            .lac-btn:hover { background: #616161; }
 
             .lac-btn-primary {
                 background: #ff9800;
@@ -341,8 +516,19 @@
                 font-weight: 700;
             }
 
-            .lac-btn-primary:hover {
-                background: #ffb74d;
+            .lac-btn-primary:hover { background: #ffb74d; }
+
+            .lac-btn-danger {
+                background: transparent;
+                color: #ef5350;
+                border-color: #ef5350;
+                font-size: 11px;
+                padding: 4px 8px;
+            }
+
+            .lac-btn-danger:hover {
+                background: #ef5350;
+                color: #fff;
             }
 
             #lac-delays {
@@ -384,6 +570,67 @@
                 color: #757575;
             }
 
+            #lac-stores {
+                border-top: 1px solid #424242;
+                padding-top: 8px;
+                margin-top: 2px;
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }
+
+            .lac-section-label {
+                font-size: 10px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                color: #616161;
+                margin-bottom: 2px;
+            }
+
+            .lac-store-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 6px;
+            }
+
+            .lac-store-label {
+                font-size: 12px;
+                color: #9e9e9e;
+            }
+
+            .lac-store-toggle {
+                font-size: 10px;
+                padding: 2px 8px;
+                border-radius: 10px;
+                border: 1px solid;
+                cursor: pointer;
+                font-family: inherit;
+                font-weight: 600;
+                transition: background 0.15s ease;
+            }
+
+            .lac-store-toggle--on {
+                background: #1b5e20;
+                color: #a5d6a7;
+                border-color: #388e3c;
+            }
+
+            .lac-store-toggle--on:hover {
+                background: #2e7d32;
+            }
+
+            .lac-store-toggle--off {
+                background: #424242;
+                color: #757575;
+                border-color: #616161;
+            }
+
+            .lac-store-toggle--off:hover {
+                background: #616161;
+                color: #9e9e9e;
+            }
+
             #lac-status {
                 font-size: 12px;
                 color: #9e9e9e;
@@ -407,9 +654,7 @@
                 font-family: Lato, 'Open Sans', sans-serif;
             }
 
-            #lac-update-banner:hover {
-                background: #ffb74d;
-            }
+            #lac-update-banner:hover { background: #ffb74d; }
         `);
   }
 
@@ -417,10 +662,6 @@
   //  INITIALIZATION
   // ═══════════════════════════════════════════════════════════════════
 
-  /**
-   * Wait for the React app to render order content before injecting the panel.
-   * Polls for the presence of key-related buttons (REVEAL KEY or REDEEM ON STEAM).
-   */
   function waitForOrderContent(callback, maxWaitMs = 15000) {
     const startTime = Date.now();
     const interval = setInterval(() => {
@@ -434,7 +675,24 @@
       if (Date.now() - startTime > maxWaitMs) {
         clearInterval(interval);
         warn(`Timed out waiting for order content after ${maxWaitMs}ms`);
-        // Still inject the panel — the user might have a slow connection
+        callback();
+      }
+    }, 500);
+  }
+
+  function waitForClaimPageContent(callback, maxWaitMs = 15000) {
+    const startTime = Date.now();
+    const interval = setInterval(() => {
+      const hasButton = !!document.querySelector('[data-a-target="buy-box_call-to-action"]');
+      if (hasButton) {
+        clearInterval(interval);
+        log(`Claim page content detected (${Date.now() - startTime}ms)`);
+        callback();
+        return;
+      }
+      if (Date.now() - startTime > maxWaitMs) {
+        clearInterval(interval);
+        warn(`Timed out waiting for claim page content after ${maxWaitMs}ms`);
         callback();
       }
     }, 500);
@@ -444,14 +702,28 @@
     log(`v${SCRIPT_VERSION} loaded`);
     checkForUpdate();
 
-    waitForOrderContent(() => {
-      injectStyles();
-      createPanel();
+    const path = window.location.pathname;
 
-      const claimCount = findButtonsByText("Claim game").length;
-      log(`Found ${claimCount} to claim`);
-      updateStatus(`${claimCount} to claim`);
-    });
+    if (/\/claims\/home/.test(path)) {
+      waitForOrderContent(() => {
+        injectStyles();
+        createPanel();
+        const claimCount = findButtonsByText("Claim game").length;
+        log(`Found ${claimCount} to claim`);
+        updateStatus(`${claimCount} to claim`);
+      });
+      return;
+    }
+
+    if (/\/claims\/.+\/dp\//.test(path)) {
+      waitForClaimPageContent(() => {
+        const store = detectStore();
+        if (!store) warn("Store not recognised — defaulting panel to unknown");
+        log(`Store: ${store ?? "unknown"}`);
+        injectStyles();
+        createClaimPagePanel(store);
+      });
+    }
   }
 
   init();
