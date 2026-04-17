@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.2.0
+// @version      0.2.1
 // @description  Bulk-reveal and bulk-redeem keys on Luna
-// @match        https://luna.amazon.ca/claims/*
+// @match        https://luna.amazon.com/claims/home*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js
@@ -18,7 +18,7 @@
 (function () {
   "use strict";
 
-  const SCRIPT_VERSION = "0.2.0";
+  const SCRIPT_VERSION = "0.2.1";
   const META_URL =
     "https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js";
   const DOWNLOAD_URL =
@@ -82,8 +82,9 @@
   }
 
   function showUpdateBanner(version) {
+    const banner = document.createElement("div");
     banner.id = "lac-update-banner";
-    banner.textContent = `Fanatical Autoclaim v${version} available — click to update`;
+    banner.textContent = `Luna Autoclaim v${version} available — click to update`;
     banner.addEventListener("click", () => window.open(DOWNLOAD_URL, "_blank"));
     document.body.appendChild(banner);
   }
@@ -92,19 +93,33 @@
   //  DOM HELPERS
   // ═══════════════════════════════════════════════════════════════════
 
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   /**
    * Find all buttons whose visible text matches the given string (case-insensitive).
    * Searches both <button> and <a> elements since Fanatical uses both.
    */
   function findButtonsByText(text) {
-    const lowerText = text.toLowerCase().trim();
     const candidates = document.querySelectorAll(
-      'button, a[role="button"], a.btn, a[href*="steam"]',
+      '.item-card__claim-button a.tw-button[data-a-target="FGWPOffer"]',
     );
     return Array.from(candidates).filter((el) => {
-      const elText = el.textContent.trim().toLowerCase();
-      return elText === lowerText;
+      const elText = el.textContent.trim();
+      return elText === text;
     });
+  }
+
+  /**
+   * Walk up from a claim button to the card root, then find the title h3.
+   * Uses the `title` attribute which Luna sets to the exact game name.
+   */
+  function getGameName(btn) {
+    const card = btn.closest(".item-card-details");
+    if (!card) return "unknown";
+    const h3 = card.querySelector("h3[title]");
+    return h3 ? h3.getAttribute("title") : h3?.textContent?.trim() ?? "unknown";
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -125,14 +140,12 @@
 
     for (let i = 0; i < claimButtons.length; i++) {
       const btn = claimButtons[i];
+      const gameName = getGameName(btn);
 
-      // Todo add GameName search functionality by relative element mapping
-      // logItem(`claiming key ${i + 1}/${claimButtons.length}: ${gameName}`)
-      // updateStatus(`claiming ${i + 1}/${claimButtons.length}: ${gameName}`)
-      logItem(`claiming key ${i + 1}/${claimButtons.length}: game_name`);
-      updateStatus(`claiming ${i + 1}/${claimButtons.length}: game_name`);
+      logItem(`Opening ${i + 1}/${claimButtons.length}: ${gameName}`);
+      updateStatus(`Opening ${i + 1}/${claimButtons.length}: ${gameName}`);
 
-      btn.click();
+      GM_openInTab(btn.href, { active: false });
 
       // Wait for the reveal to process before clicking the next one
       if (i < claimButtons.length - 1) {
@@ -435,8 +448,7 @@
       injectStyles();
       createPanel();
 
-      const claimCount = findButtonsByText("Claim game").length > 0;
-      const keyCount = findRevealedKeys().length;
+      const claimCount = findButtonsByText("Claim game").length;
       log(`Found ${claimCount} to claim`);
       updateStatus(`${claimCount} to claim`);
     });
