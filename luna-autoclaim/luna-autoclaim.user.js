@@ -82,10 +82,29 @@
   }
 
   function showUpdateBanner(version) {
-    banner.id = "fac-update-banner";
+    banner.id = "lac-update-banner";
     banner.textContent = `Fanatical Autoclaim v${version} available — click to update`;
     banner.addEventListener("click", () => window.open(DOWNLOAD_URL, "_blank"));
     document.body.appendChild(banner);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  DOM HELPERS
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Find all buttons whose visible text matches the given string (case-insensitive).
+   * Searches both <button> and <a> elements since Fanatical uses both.
+   */
+  function findButtonsByText(text) {
+    const lowerText = text.toLowerCase().trim();
+    const candidates = document.querySelectorAll(
+      'button, a[role="button"], a.btn, a[href*="steam"]',
+    );
+    return Array.from(candidates).filter((el) => {
+      const elText = el.textContent.trim().toLowerCase();
+      return elText === lowerText;
+    });
   }
 
   function clickClaimButton() {
@@ -131,5 +150,300 @@
     clickNextButton();
   }
 
-  clickClaimButton();
-});
+  // ═══════════════════════════════════════════════════════════════════
+  //  UI
+  // ═══════════════════════════════════════════════════════════════════
+
+  let statusEl = null;
+  let claimBtn = null;
+  //   let redeemBtn = null
+  //   let revealAndRedeemBtn = null
+
+  function updateStatus(text) {
+    if (statusEl) statusEl.textContent = text;
+  }
+
+  // leaving as for loop in case I add more buttons back
+  function setButtonsEnabled(enabled) {
+    [claimBtn].forEach((btn) => {
+      if (!btn) return;
+      btn.disabled = !enabled;
+      btn.style.opacity = enabled ? "1" : "0.5";
+      btn.style.pointerEvents = enabled ? "auto" : "none";
+    });
+  }
+
+  function createDelayInput(labelText, defaultValue, onChange) {
+    const row = document.createElement("div");
+    row.className = "lac-delay-row";
+
+    const label = document.createElement("label");
+    label.className = "lac-delay-label";
+    label.textContent = labelText;
+
+    const input = document.createElement("input");
+    input.type = "number";
+    input.className = "lac-delay-input";
+    input.min = "100";
+    input.max = "10000";
+    input.step = "100";
+    input.value = defaultValue;
+    input.addEventListener("change", () => {
+      const val = parseInt(input.value, 10);
+      if (!isNaN(val) && val >= 100) onChange(val);
+    });
+
+    const unit = document.createElement("span");
+    unit.className = "lac-delay-unit";
+    unit.textContent = "ms";
+
+    row.appendChild(label);
+    row.appendChild(input);
+    row.appendChild(unit);
+    return row;
+  }
+
+  function createPanel() {
+    const panel = document.createElement("div");
+    panel.id = "lac-panel";
+
+    const header = document.createElement("div");
+    header.id = "lac-header";
+
+    const title = document.createElement("div");
+    title.id = "lac-title";
+    title.textContent = "Autoclaim";
+    header.appendChild(title);
+
+    const closeBtn = document.createElement("button");
+    closeBtn.id = "lac-close-btn";
+    closeBtn.textContent = "\u00D7";
+    closeBtn.title = "Close panel";
+    closeBtn.addEventListener("click", () => panel.remove());
+    header.appendChild(closeBtn);
+
+    panel.appendChild(header);
+
+    claimBtn = document.createElement("button");
+    claimBtn.id = "lac-claim-btn";
+    claimBtn.className = "lac-btn";
+    claimBtn.textContent = "Open All";
+    claimBtn.addEventListener("click", revealAllKeys);
+    panel.appendChild(claimBtn);
+
+    const delaySection = document.createElement("div");
+    delaySection.id = "lac-delays";
+    delaySection.appendChild(
+      createDelayInput("Reveal delay", DEFAULT_REVEAL_DELAY_MS, (v) => {
+        revealDelayMs = v;
+      }),
+    );
+    delaySection.appendChild(
+      createDelayInput("Redeem delay", DEFAULT_REDEEM_DELAY_MS, (v) => {
+        redeemDelayMs = v;
+      }),
+    );
+    panel.appendChild(delaySection);
+
+    statusEl = document.createElement("div");
+    statusEl.id = "lac-status";
+    statusEl.textContent = "Ready";
+    panel.appendChild(statusEl);
+
+    document.body.appendChild(panel);
+  }
+
+  function injectStyles() {
+    GM_addStyle(`
+            #lac-panel {
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                z-index: 10000;
+                background: #2b2b2b;
+                border: 1px solid #424242;
+                border-radius: 8px;
+                padding: 12px 16px;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                min-width: 200px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+                font-family: Lato, 'Open Sans', sans-serif;
+                font-size: 14px;
+                color: #eee;
+            }
+
+            #lac-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+
+            #lac-title {
+                font-weight: 700;
+                font-size: 13px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                color: #ff9800;
+                flex: 1;
+                text-align: center;
+                padding-left: 20px;
+            }
+
+            #lac-close-btn {
+                background: none;
+                border: none;
+                color: #757575;
+                font-size: 18px;
+                cursor: pointer;
+                padding: 0;
+                line-height: 1;
+                width: 20px;
+                font-family: inherit;
+            }
+
+            #lac-close-btn:hover {
+                color: #eee;
+            }
+
+            .lac-btn {
+                background: #424242;
+                color: #eee;
+                border: 1px solid #616161;
+                border-radius: 4px;
+                padding: 8px 12px;
+                font-size: 13px;
+                font-weight: 400;
+                cursor: pointer;
+                transition: background 0.15s ease, opacity 0.15s ease;
+                font-family: inherit;
+            }
+
+            .lac-btn:hover {
+                background: #616161;
+            }
+
+            .lac-btn-primary {
+                background: #ff9800;
+                color: #212121;
+                border-color: #ff9800;
+                font-weight: 700;
+            }
+
+            .lac-btn-primary:hover {
+                background: #ffb74d;
+            }
+
+            #lac-delays {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+                border-top: 1px solid #424242;
+                padding-top: 8px;
+                margin-top: 2px;
+            }
+
+            .lac-delay-row {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+
+            .lac-delay-label {
+                font-size: 11px;
+                color: #9e9e9e;
+                flex: 1;
+                margin: 0;
+            }
+
+            .lac-delay-input {
+                width: 60px;
+                background: #333;
+                color: #eee;
+                border: 1px solid #616161;
+                border-radius: 3px;
+                padding: 2px 4px;
+                font-size: 12px;
+                font-family: inherit;
+                text-align: right;
+            }
+
+            .lac-delay-unit {
+                font-size: 11px;
+                color: #757575;
+            }
+
+            #lac-status {
+                font-size: 12px;
+                color: #9e9e9e;
+                text-align: center;
+                min-height: 16px;
+            }
+
+            #lac-update-banner {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                z-index: 10001;
+                background: #ff9800;
+                color: #212121;
+                text-align: center;
+                padding: 8px 16px;
+                font-weight: 700;
+                font-size: 14px;
+                cursor: pointer;
+                font-family: Lato, 'Open Sans', sans-serif;
+            }
+
+            #lac-update-banner:hover {
+                background: #ffb74d;
+            }
+        `);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  INITIALIZATION
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * Wait for the React app to render order content before injecting the panel.
+   * Polls for the presence of key-related buttons (REVEAL KEY or REDEEM ON STEAM).
+   */
+  function waitForOrderContent(callback, maxWaitMs = 15000) {
+    const startTime = Date.now();
+    const interval = setInterval(() => {
+      const hasClaim = findButtonsByText("Claim game").length > 0;
+      if (hasClaim) {
+        clearInterval(interval);
+        log(`Order content detected (${Date.now() - startTime}ms)`);
+        callback();
+        return;
+      }
+      if (Date.now() - startTime > maxWaitMs) {
+        clearInterval(interval);
+        warn(`Timed out waiting for order content after ${maxWaitMs}ms`);
+        // Still inject the panel — the user might have a slow connection
+        callback();
+      }
+    }, 500);
+  }
+
+  function init() {
+    log(`v${SCRIPT_VERSION} loaded`);
+    checkForUpdate();
+
+    waitForOrderContent(() => {
+      injectStyles();
+      createPanel();
+
+      const claimCount = findButtonsByText("Claim game").length > 0;
+      const keyCount = findRevealedKeys().length;
+      log(`Found ${claimCount} to claim`);
+      updateStatus(`${claimCount} to claim`);
+    });
+  }
+
+  init();
+})();
