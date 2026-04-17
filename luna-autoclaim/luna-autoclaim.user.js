@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.4.0
+// @version      0.4.1
 // @description  Bulk-reveal and bulk-redeem keys on Luna
 // @match        https://luna.amazon.com/claims/home*
 // @match        https://luna.amazon.com/claims/*/dp/*
@@ -19,7 +19,7 @@
 (function () {
   "use strict";
 
-  const SCRIPT_VERSION = "0.4.0";
+  const SCRIPT_VERSION = "0.4.1";
   const META_URL =
     "https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js";
   const DOWNLOAD_URL =
@@ -35,6 +35,14 @@
 
   // All known stores in display order — used to build the settings list.
   const KNOWN_STORES = ["Amazon Games", "Epic Games", "GOG", "Legacy Games"];
+
+  // Maps the title-attribute suffix to the canonical store name.
+  const STORE_PATTERNS = [
+    ["on Amazon Games", "Amazon Games"],
+    ["on Epic Games Store", "Epic Games"],
+    ["on GOG.com", "GOG"],
+    ["on Legacy Games", "Legacy Games"],
+  ];
 
   // Mutable — updated by the UI input
   let revealDelayMs = DEFAULT_REVEAL_DELAY_MS;
@@ -158,12 +166,8 @@
     const pTitles = Array.from(document.querySelectorAll("p[title]")).map((p) =>
       p.getAttribute("title"),
     );
-    if (pTitles.some((t) => t.includes("on Amazon Games"))) return "Amazon Games";
-    if (pTitles.some((t) => t.includes("on GOG.com"))) return "GOG";
-    if (pTitles.some((t) => t.includes("on Legacy Games"))) return "Legacy Games";
-    const epicMsg = document.querySelector('[data-a-target="LinkAccountInfoMessage"]');
-    if (epicMsg?.textContent?.includes("Epic")) return "Epic Games";
-    return null;
+    const match = STORE_PATTERNS.find(([pattern]) => pTitles.some((t) => t.includes(pattern)));
+    return match ? match[1] : null;
   }
 
   // ═══════════════════════════════════════════════════════════════════
