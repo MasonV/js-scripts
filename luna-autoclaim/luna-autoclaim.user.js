@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Luna Autoclaim
-// @namespace    luna-autocla
+// @namespace    luna-autoclaim
 // @version      1.0.0
 // @description  Bulk-reveal and bulk-redeem keys on Luna
 // @match        https://luna.amazon.ca/claims/*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
-// @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.meta.js
-// @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.user.js
+// @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js
+// @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_openInTab
@@ -20,12 +20,12 @@
 
   const SCRIPT_VERSION = "1.0.0";
   const META_URL =
-    "https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.meta.js";
+    "https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js";
   const DOWNLOAD_URL =
-    "https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.user.js";
+    "https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.user.js";
 
   const LOG_PREFIX = "[Luna Autoclaim]";
-  const SHORT_PREFIX = "[FAC]";
+  const SHORT_PREFIX = "[LAC]";
 
   const DEFAULT_REVEAL_DELAY_MS = 500;
   const DEFAULT_REDEEM_DELAY_MS = 800;
