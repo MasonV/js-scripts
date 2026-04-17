@@ -9,7 +9,8 @@
       "Bash(curl -s https://lichess.org/)",
       "Bash(gh pr:*)",
       "Bash(git cherry-pick:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "WebSearch"
     ]
   }
 }
