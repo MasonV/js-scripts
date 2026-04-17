@@ -130,4 +130,6 @@
     // Start the process
     clickNextButton();
   }
+
+  clickClaimButton();
 });
