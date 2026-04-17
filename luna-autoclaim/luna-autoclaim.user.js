@@ -1,10 +1,9 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.5.0
+// @version      0.5.1
 // @description  Bulk-reveal and bulk-redeem keys on Luna
-// @match        https://luna.amazon.com/claims/home*
-// @match        https://luna.amazon.com/claims/*/dp/*
+// @include      /^https:\/\/luna\.amazon\.[a-z.]{2,6}\/claims\/(home|[^\/]+\/dp\/)/
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js
@@ -16,10 +15,14 @@
 // @run-at       document-idle
 // ==/UserScript==
 
+// @include regex: luna.amazon.<TLD> where TLD is 2–6 chars (covers .com, .ca, .co.uk, etc.)
+// Path arm 1 — home listing:  /claims/home…
+// Path arm 2 — claim detail:  /claims/<slug>/dp/…
+
 (function () {
   "use strict";
 
-  const SCRIPT_VERSION = "0.5.0";
+  const SCRIPT_VERSION = "0.5.1";
   const META_URL =
     "https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js";
   const DOWNLOAD_URL =
