@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      1.0.0
+// @version      0.2.0
 // @description  Bulk-reveal and bulk-redeem keys on Luna
 // @match        https://luna.amazon.ca/claims/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -18,7 +18,7 @@
 (function () {
   "use strict";
 
-  const SCRIPT_VERSION = "1.0.0";
+  const SCRIPT_VERSION = "0.2.0";
   const META_URL =
     "https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js";
   const DOWNLOAD_URL =
@@ -107,47 +107,44 @@
     });
   }
 
-  function clickClaimButton() {
-    // Select all potential claim buttons based on the original selector
-    const claimButtonSelector =
-      '.item-card__claim-button a.tw-button[data-a-target="FGWPOffer"]';
-    const claimButtons = document.querySelectorAll(claimButtonSelector);
+  // ═══════════════════════════════════════════════════════════════════
+  //  CORE ACTIONS
+  // ═══════════════════════════════════════════════════════════════════
 
+  async function openAllClaims() {
+    const claimButtons = findButtonsByText("Claim game");
     if (claimButtons.length === 0) {
-      console.error(
-        "No claim buttons found with the specified selector:",
-        claimButtonSelector,
-      );
+      log('No "Claim Game" buttons found — all keys may already be redeemed');
+      updateStatus("No keys to reveal");
       return;
     }
 
-    console.log(
-      `Found ${claimButtons.length} claim button(s). Attempting to click sequentially...`,
-    );
+    log(`Found ${claimButtons.length} key(s) to claim`);
+    updateStatus(`Claiming 0/${claimButtons.length}...`);
+    setButtonsEnabled(false);
 
-    let index = 0;
-    const clickNextButton = () => {
-      if (index >= claimButtons.length) {
-        console.log("Finished attempting to click all found claim buttons.");
-        return;
+    for (let i = 0; i < claimButtons.length; i++) {
+      const btn = claimButtons[i];
+
+      // Todo add GameName search functionality by relative element mapping
+      // logItem(`claiming key ${i + 1}/${claimButtons.length}: ${gameName}`)
+      // updateStatus(`claiming ${i + 1}/${claimButtons.length}: ${gameName}`)
+      logItem(`claiming key ${i + 1}/${claimButtons.length}: game_name`);
+      updateStatus(`claiming ${i + 1}/${claimButtons.length}: game_name`);
+
+      btn.click();
+
+      // Wait for the reveal to process before clicking the next one
+      if (i < claimButtons.length - 1) {
+        await sleep(revealDelayMs);
       }
+    }
 
-      const claimButton = claimButtons[index];
-      console.log(
-        `Attempting to click button ${index + 1}/${claimButtons.length}...`,
-      );
-
-      // Programmatically trigger a click event
-      claimButton.click();
-      console.log("Click event dispatched.");
-
-      index++;
-      // Recursively call after a short delay to mimic user behavior/allow DOM updates
-      setTimeout(clickNextButton, 100);
-    };
-
-    // Start the process
-    clickNextButton();
+    // Wait a moment for the last reveal to render
+    await sleep(revealDelayMs);
+    log("All keys claimed");
+    updateStatus(`Revealed ${claimButtons.length} key(s)`);
+    setButtonsEnabled(true);
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -228,7 +225,7 @@
     claimBtn.id = "lac-claim-btn";
     claimBtn.className = "lac-btn";
     claimBtn.textContent = "Open All";
-    claimBtn.addEventListener("click", revealAllKeys);
+    claimBtn.addEventListener("click", openAllClaims);
     panel.appendChild(claimBtn);
 
     const delaySection = document.createElement("div");
