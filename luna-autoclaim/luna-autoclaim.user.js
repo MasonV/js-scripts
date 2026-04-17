@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.4.1
+// @version      0.5.0
 // @description  Bulk-reveal and bulk-redeem keys on Luna
 // @match        https://luna.amazon.com/claims/home*
 // @match        https://luna.amazon.com/claims/*/dp/*
@@ -19,7 +19,7 @@
 (function () {
   "use strict";
 
-  const SCRIPT_VERSION = "0.4.1";
+  const SCRIPT_VERSION = "0.5.0";
   const META_URL =
     "https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js";
   const DOWNLOAD_URL =
@@ -174,7 +174,7 @@
   //  CORE ACTIONS — HOME PAGE
   // ═══════════════════════════════════════════════════════════════════
 
-  async function openAllClaims() {
+  async function openAllClaims({ autoClaim = false } = {}) {
     const claimButtons = findButtonsByText("Claim game");
     if (claimButtons.length === 0) {
       log('No "Claim Game" buttons found — all keys may already be redeemed');
@@ -182,8 +182,8 @@
       return;
     }
 
-    log(`Found ${claimButtons.length} key(s) to claim`);
-    updateStatus(`Claiming 0/${claimButtons.length}...`);
+    log(`Found ${claimButtons.length} key(s) to claim (autoClaim=${autoClaim})`);
+    updateStatus(`Opening 0/${claimButtons.length}...`);
     setButtonsEnabled(false);
 
     for (let i = 0; i < claimButtons.length; i++) {
@@ -193,7 +193,9 @@
       logItem(`Opening ${i + 1}/${claimButtons.length}: ${gameName}`);
       updateStatus(`Opening ${i + 1}/${claimButtons.length}: ${gameName}`);
 
-      GM_openInTab(btn.href, { active: false });
+      const url = new URL(btn.href);
+      if (autoClaim) url.searchParams.set("lac_autoclaim", "1");
+      GM_openInTab(url.toString(), { active: false });
 
       if (i < claimButtons.length - 1) {
         await sleep(revealDelayMs);
@@ -237,13 +239,14 @@
 
   let statusEl = null;
   let claimBtn = null;
+  let autoClaimBtn = null;
 
   function updateStatus(text) {
     if (statusEl) statusEl.textContent = text;
   }
 
   function setButtonsEnabled(enabled) {
-    [claimBtn].forEach((btn) => {
+    [claimBtn, autoClaimBtn].forEach((btn) => {
       if (!btn) return;
       btn.disabled = !enabled;
       btn.style.opacity = enabled ? "1" : "0.5";
@@ -338,11 +341,18 @@
   function createPanel() {
     const panel = buildPanelShell("Autoclaim");
 
+    autoClaimBtn = document.createElement("button");
+    autoClaimBtn.id = "lac-auto-claim-btn";
+    autoClaimBtn.className = "lac-btn lac-btn-primary";
+    autoClaimBtn.textContent = "Auto Claim All";
+    autoClaimBtn.addEventListener("click", () => openAllClaims({ autoClaim: true }));
+    panel.appendChild(autoClaimBtn);
+
     claimBtn = document.createElement("button");
     claimBtn.id = "lac-claim-btn";
     claimBtn.className = "lac-btn";
     claimBtn.textContent = "Open All";
-    claimBtn.addEventListener("click", openAllClaims);
+    claimBtn.addEventListener("click", () => openAllClaims());
     panel.appendChild(claimBtn);
 
     const delaySection = document.createElement("div");
@@ -726,6 +736,18 @@
         log(`Store: ${store ?? "unknown"}`);
         injectStyles();
         createClaimPagePanel(store);
+
+        const autoClaimParam =
+          new URLSearchParams(window.location.search).get("lac_autoclaim") === "1";
+        if (autoClaimParam) {
+          if (store && isStoreDisabled(store)) {
+            log(`Auto-claim skipped — ${store} is disabled`);
+          } else {
+            log("Auto-claim triggered by URL param");
+            // Brief delay so the page's own JS finishes binding before we click.
+            sleep(redeemDelayMs).then(claimCurrentGame);
+          }
+        }
       });
     }
   }
