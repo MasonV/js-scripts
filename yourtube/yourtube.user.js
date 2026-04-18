@@ -1,9 +1,11 @@
 // ==UserScript==
 // @name         YourTube
 // @namespace    yourtube
-// @version      1.1.1
+// @version      1.1.6
 // @description  YouTube without the garbage — duration filtering, and more features to come
 // @match        *://www.youtube.com/*
+// @match        *://youtube.com/*
+// @match        *://m.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.meta.js
@@ -24,7 +26,7 @@
 
 	const LOG_PREFIX = '[YourTube]'
 	const LOG_PREFIX_DURATION = '[YourTube/Duration]'
-	const SCRIPT_VERSION = '1.1.1'
+	const SCRIPT_VERSION = '1.1.6'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.meta.js'
 	const DOWNLOAD_URL =
@@ -563,12 +565,15 @@
 
 		function watchGrid() {
 			if (observer) observer.disconnect()
-			// Watch the whole body — YouTube swaps out the grid container on
-			// SPA navigation and narrow observers fall off. The mutation
-			// callback filters down to tile-related records so we don't burn
-			// cycles on every internal mutation.
+			// Watch the document root (documentElement) — YouTube swaps out
+			// the grid container on SPA navigation and narrow observers
+			// fall off. We observe the root instead of body because body
+			// itself can be replaced on this user's YT variant (see the
+			// v1.1.2 debug probe diagnosis). The mutation callback filters
+			// down to tile-related records so we don't burn cycles on
+			// every internal mutation.
 			observer = new MutationObserver(onMutations)
-			observer.observe(document.body, { childList: true, subtree: true })
+			observer.observe(document.documentElement, { childList: true, subtree: true })
 			flog.log('Observer installed')
 		}
 
@@ -615,6 +620,251 @@
 	//  Next milestone: dual-handle slider with user notches table.
 	// ═══════════════════════════════════════════════════════════════════
 
+	// ═══════════════════════════════════════════════════════════════════
+	//  DEBUG PROBE — multi-variant UI mount test
+	//
+	//  The v1.1.1 production UI isn't appearing for the user. This probe
+	//  mounts five highly-visible debug markers using different DOM mount
+	//  strategies so we can see which approach survives on their specific
+	//  YouTube setup. When the user reports which markers are visible
+	//  (and which aren't), we'll know exactly which mount strategy to
+	//  adopt for the real gear button.
+	//
+	//  Variants:
+	//    A (red)     — document.body.appendChild (current strategy)
+	//    B (orange)  — document.documentElement.appendChild (sibling of body)
+	//    C (yellow)  — ytd-app.appendChild (into YouTube's app shell)
+	//    D (green)   — Shadow DOM (impervious to YT's CSS leakage)
+	//    E (purple)  — full-width top bar, prepended to body
+	//
+	//  Each marker is inline-styled (no GM_addStyle dependency), placed at
+	//  fixed position with max-int z-index, and clickable. Clicking any
+	//  marker pops an alert() — if that works, event wiring is intact.
+	//  The probe retries every 500ms for the first ~10s and audits the
+	//  DOM every 2s for 30s, logging which markers survived.
+	// ═══════════════════════════════════════════════════════════════════
+
+	const DebugProbe = (() => {
+		const dlog = makeLogger('[YourTube/Debug]')
+		const PROBE_PREFIX = 'yourtube-debug-probe-'
+
+		// Fires BEFORE any deferred work. If this line is missing from the
+		// console, the script didn't even reach the probe definition.
+		dlog.log('⭐ MODULE LOADED at', new Date().toISOString())
+
+		// Creates a fixed-position badge element. Uses setAttribute('style')
+		// rather than style.cssText so it's impossible for YT's CSS or our
+		// own stylesheet to override critical positioning.
+		function makeBadge(id, label, bg, color, posCss) {
+			const el = document.createElement('div')
+			el.id = PROBE_PREFIX + id
+			el.textContent = label
+			el.setAttribute(
+				'style',
+				[
+					'position: fixed',
+					posCss,
+					`background: ${bg}`,
+					`color: ${color}`,
+					'padding: 8px 14px',
+					'font: bold 13px/1 monospace',
+					'z-index: 2147483647',
+					'border-radius: 6px',
+					'border: 2px solid #fff',
+					'box-shadow: 0 2px 12px rgba(0,0,0,0.7)',
+					'cursor: pointer',
+					'pointer-events: auto',
+					'user-select: none',
+				].join('; '),
+			)
+			el.addEventListener('click', () => {
+				dlog.log(`Marker ${id} clicked`)
+				try {
+					alert(`[YourTube Debug] Marker ${id} is alive and clickable.`)
+				} catch (_) {}
+			})
+			return el
+		}
+
+		function tryA_Body() {
+			try {
+				if (document.getElementById(PROBE_PREFIX + 'A')) return
+				if (!document.body) {
+					dlog.warn('A (body): document.body missing')
+					return
+				}
+				document.body.appendChild(
+					makeBadge('A', 'A: BODY', '#e53935', '#fff', 'top: 8px; left: 8px'),
+				)
+				dlog.log('✅ A (body): mounted')
+			} catch (e) {
+				dlog.warn('A (body): failed', e)
+			}
+		}
+
+		function tryB_DocElement() {
+			try {
+				if (document.getElementById(PROBE_PREFIX + 'B')) return
+				document.documentElement.appendChild(
+					makeBadge('B', 'B: HTML', '#fb8c00', '#fff', 'top: 8px; left: 130px'),
+				)
+				dlog.log('✅ B (html): mounted')
+			} catch (e) {
+				dlog.warn('B (html): failed', e)
+			}
+		}
+
+		function tryC_YtdApp() {
+			try {
+				if (document.getElementById(PROBE_PREFIX + 'C')) return
+				const host = document.querySelector('ytd-app')
+				if (!host) {
+					dlog.warn('C (ytd-app): ytd-app element not found')
+					return
+				}
+				host.appendChild(
+					makeBadge('C', 'C: YTD-APP', '#fdd835', '#000', 'top: 8px; left: 260px'),
+				)
+				dlog.log('✅ C (ytd-app): mounted')
+			} catch (e) {
+				dlog.warn('C (ytd-app): failed', e)
+			}
+		}
+
+		function tryD_Shadow() {
+			try {
+				if (document.getElementById(PROBE_PREFIX + 'D-host')) return
+				if (!document.body) {
+					dlog.warn('D (shadow): document.body missing')
+					return
+				}
+				const host = document.createElement('div')
+				host.id = PROBE_PREFIX + 'D-host'
+				host.setAttribute(
+					'style',
+					'position: fixed; top: 8px; left: 400px; z-index: 2147483647;',
+				)
+				const root = host.attachShadow({ mode: 'open' })
+				const style = document.createElement('style')
+				style.textContent = `
+					.marker {
+						background: #43a047;
+						color: #fff;
+						padding: 8px 14px;
+						font: bold 13px/1 monospace;
+						border-radius: 6px;
+						border: 2px solid #fff;
+						box-shadow: 0 2px 12px rgba(0,0,0,0.7);
+						cursor: pointer;
+						user-select: none;
+					}
+				`
+				const badge = document.createElement('div')
+				badge.className = 'marker'
+				badge.textContent = 'D: SHADOW'
+				badge.addEventListener('click', () => {
+					dlog.log('Marker D clicked')
+					try {
+						alert('[YourTube Debug] Marker D (shadow DOM) is alive.')
+					} catch (_) {}
+				})
+				root.appendChild(style)
+				root.appendChild(badge)
+				document.body.appendChild(host)
+				dlog.log('✅ D (shadow): mounted')
+			} catch (e) {
+				dlog.warn('D (shadow): failed', e)
+			}
+		}
+
+		function tryE_TopBar() {
+			try {
+				if (document.getElementById(PROBE_PREFIX + 'E')) return
+				if (!document.body) {
+					dlog.warn('E (top-bar): document.body missing')
+					return
+				}
+				const el = document.createElement('div')
+				el.id = PROBE_PREFIX + 'E'
+				el.textContent =
+					'[YourTube DEBUG] v1.1.2 LOADED — click this bar to confirm script is running'
+				el.setAttribute(
+					'style',
+					[
+						'position: fixed',
+						'top: 0',
+						'left: 0',
+						'right: 0',
+						'background: #6a1b9a',
+						'color: #fff',
+						'padding: 12px 16px',
+						'font: bold 14px/1.2 sans-serif',
+						'z-index: 2147483647',
+						'text-align: center',
+						'border-bottom: 3px solid #fff',
+						'box-shadow: 0 2px 20px rgba(0,0,0,0.8)',
+						'cursor: pointer',
+						'pointer-events: auto',
+						'user-select: none',
+					].join('; '),
+				)
+				el.addEventListener('click', () => {
+					dlog.log('Marker E clicked')
+					try {
+						alert('[YourTube Debug] Marker E (top bar) is alive.')
+					} catch (_) {}
+				})
+				document.body.appendChild(el)
+				dlog.log('✅ E (top-bar): mounted')
+			} catch (e) {
+				dlog.warn('E (top-bar): failed', e)
+			}
+		}
+
+		function audit(label) {
+			const present = []
+			const missing = []
+			for (const id of ['A', 'B', 'C', 'D', 'E']) {
+				const lookup = id === 'D' ? PROBE_PREFIX + 'D-host' : PROBE_PREFIX + id
+				if (document.getElementById(lookup)) {
+					present.push(id)
+				} else {
+					missing.push(id)
+				}
+			}
+			dlog.log(
+				`📊 AUDIT [${label}] present: [${present.join(', ') || 'none'}] | missing: [${missing.join(', ') || 'none'}]`,
+			)
+		}
+
+		function mountAll() {
+			tryA_Body()
+			tryB_DocElement()
+			tryC_YtdApp()
+			tryD_Shadow()
+			tryE_TopBar()
+		}
+
+		function init() {
+			dlog.log('init() called — launching probes')
+			mountAll()
+			// Retry cadence: catches cases where body/ytd-app appear after
+			// our first attempt, or where YT clobbers our mount.
+			const retries = [200, 500, 1000, 2000, 4000, 7000, 10000]
+			for (const delay of retries) {
+				setTimeout(() => {
+					mountAll()
+					audit(`${delay}ms`)
+				}, delay)
+			}
+			// Long-running audit to see if YT removes our markers later.
+			setTimeout(() => audit('15s'), 15000)
+			setTimeout(() => audit('30s'), 30000)
+		}
+
+		return { init, mountAll, audit }
+	})()
+
 	const SettingsUI = (() => {
 		const ulog = makeLogger('[YourTube/UI]')
 
@@ -641,36 +891,93 @@
 			if (stylesInstalled) return
 			try {
 				addStyle(`
+				/* ── Header pill — anchored top-right below YouTube's masthead ──
+				   Visual language matches ytm-desktop-handoff and ytm-data-panel:
+				   subtle border, blurred dark background, muted text, pill
+				   radius, accent on hover. */
 				#${GEAR_ID} {
 					position: fixed;
-					bottom: 24px;
-					right: 24px;
+					top: 72px;
+					right: 16px;
 					z-index: 2147483646;
-					min-width: 56px;
-					height: 56px;
-					padding: 0 20px 0 16px;
-					border-radius: 28px;
-					background: #0f0f0f;
-					color: #fff;
-					border: 2px solid #3ea6ff;
-					box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-					font-family: Roboto, "YouTube Sans", Arial, sans-serif;
-					font-size: 14px;
-					font-weight: 600;
-					cursor: pointer;
-					display: flex;
+					display: inline-flex;
 					align-items: center;
-					gap: 10px;
-					transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
+					gap: 4px;
+					padding: 0 4px 0 14px;
+					height: 36px;
+					border: 1px solid rgba(255, 255, 255, 0.12);
+					background: rgba(15, 15, 15, 0.88);
+					backdrop-filter: blur(8px);
+					-webkit-backdrop-filter: blur(8px);
+					color: #cfcfcf;
+					font-family: 'YouTube Sans', 'Roboto', sans-serif;
+					font-size: 13px;
+					font-weight: 500;
+					line-height: 1;
+					border-radius: 999px;
+					box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+					user-select: none;
+					transition: background 0.15s, color 0.15s,
+						border-color 0.15s, box-shadow 0.15s;
 				}
 				#${GEAR_ID}:hover {
-					transform: translateY(-2px);
-					box-shadow: 0 8px 24px rgba(62,166,255,0.55);
+					background: rgba(62, 166, 255, 0.18);
+					color: #fff;
+					border-color: rgba(62, 166, 255, 0.55);
+					box-shadow: 0 6px 22px rgba(62, 166, 255, 0.35);
 				}
-				#${GEAR_ID} svg {
-					width: 22px;
-					height: 22px;
+				#${GEAR_ID} .yourtube-gear-open {
+					display: inline-flex;
+					align-items: center;
+					gap: 8px;
+					background: transparent;
+					color: inherit;
+					border: 0;
+					padding: 0;
+					margin: 0;
+					height: 100%;
+					font: inherit;
+					line-height: 1;
+					cursor: pointer;
+				}
+				#${GEAR_ID} .yourtube-gear-open:active {
+					transform: scale(0.97);
+				}
+				#${GEAR_ID} .yourtube-gear-icon {
+					font-size: 16px;
+					line-height: 1;
 					flex-shrink: 0;
+				}
+				#${GEAR_ID} .yourtube-gear-label {
+					line-height: 1;
+				}
+				#${GEAR_ID} .yourtube-gear-divider {
+					width: 1px;
+					height: 18px;
+					background: rgba(255, 255, 255, 0.12);
+					margin: 0 2px;
+				}
+				#${GEAR_ID} .yourtube-gear-close {
+					display: inline-flex;
+					align-items: center;
+					justify-content: center;
+					width: 24px;
+					height: 24px;
+					border-radius: 50%;
+					background: transparent;
+					color: #9a9a9a;
+					border: 0;
+					padding: 0;
+					margin: 0;
+					font-size: 16px;
+					font-family: inherit;
+					line-height: 1;
+					cursor: pointer;
+					transition: background 0.12s ease-out, color 0.12s ease-out;
+				}
+				#${GEAR_ID} .yourtube-gear-close:hover {
+					background: rgba(255, 255, 255, 0.08);
+					color: #fff;
 				}
 
 				#${OVERLAY_ID} {
@@ -939,77 +1246,240 @@
 
 		// ── Gear button ────────────────────────────────────────────────
 
-		// Critical inline styles — used as a belt-and-suspenders fallback in
-		// case GM_addStyle is blocked or runs late. Without these, a failed
-		// stylesheet install would leave the button as a flow-layout element
-		// invisible amid YouTube's content. The CSS class is the preferred
-		// path and wins over inline styles for hover/transition.
+		// localStorage key that remembers whether the user dismissed the
+		// header pill. When set, mountGear() is a no-op and the self-heal
+		// observer won't remount — the user explicitly said "hide me". A
+		// dev-exposed `__yourtube_showHeader()` clears the flag so the
+		// user can recover from the console if they want the pill back.
+		const HEADER_HIDDEN_KEY = 'yourtube_header_hidden_v1'
+
+		function isHeaderHidden() {
+			try {
+				return localStorage.getItem(HEADER_HIDDEN_KEY) === '1'
+			} catch (_) {
+				return false
+			}
+		}
+
+		function setHeaderHidden(hidden) {
+			try {
+				if (hidden) {
+					localStorage.setItem(HEADER_HIDDEN_KEY, '1')
+				} else {
+					localStorage.removeItem(HEADER_HIDDEN_KEY)
+				}
+			} catch (e) {
+				ulog.warn('setHeaderHidden: localStorage write failed:', e)
+			}
+		}
+
+		// Critical inline styles — used as a belt-and-suspenders fallback
+		// in case GM_addStyle is blocked or runs late. The CSS class is
+		// the preferred path and wins over inline styles for hover /
+		// transition. Visual language matches ytm-desktop-handoff and
+		// ytm-data-panel: subtle border, blurred dark background, muted
+		// text, pill radius. Positioned at `top: 72px` to sit below
+		// YouTube's masthead rather than overlapping it.
 		const GEAR_INLINE_STYLE = [
 			'position: fixed',
-			'bottom: 24px',
-			'right: 24px',
+			'top: 72px',
+			'right: 16px',
 			'z-index: 2147483646',
-			'min-width: 56px',
-			'height: 56px',
-			'padding: 0 20px 0 16px',
-			'border-radius: 28px',
-			'background: #0f0f0f',
-			'color: #fff',
-			'border: 2px solid #3ea6ff',
-			'box-shadow: 0 4px 16px rgba(0,0,0,0.5)',
-			'font-family: Roboto, Arial, sans-serif',
-			'font-size: 14px',
-			'font-weight: 600',
-			'cursor: pointer',
-			'display: flex',
+			'display: inline-flex',
 			'align-items: center',
-			'gap: 10px',
+			'gap: 4px',
+			'padding: 0 4px 0 14px',
+			'height: 36px',
+			'border: 1px solid rgba(255,255,255,0.12)',
+			'background: rgba(15,15,15,0.88)',
+			'color: #cfcfcf',
+			'font-family: "YouTube Sans", Roboto, Arial, sans-serif',
+			'font-size: 13px',
+			'font-weight: 500',
+			'line-height: 1',
+			'border-radius: 999px',
+			'box-shadow: 0 6px 20px rgba(0,0,0,0.5)',
 		].join('; ')
 
 		function mountGear() {
 			if (document.getElementById(GEAR_ID)) return false
-			if (!document.body) {
-				ulog.warn('mountGear: document.body not ready, deferring')
+			// Respect the "dismissed" flag — if the user explicitly closed
+			// the pill, don't fight them by remounting. Recovery path is
+			// __yourtube_showHeader() from the devtools console.
+			if (isHeaderHidden()) return false
+			// Mount target is document.documentElement (the <html> element),
+			// not document.body. The v1.1.2 debug probe proved that YouTube
+			// wipes or replaces body-level children we add — only children
+			// appended to documentElement survive YT's SPA churn on this
+			// user's setup. See DebugProbe "B (html)" for the original
+			// diagnosis.
+			const root = document.documentElement
+			if (!root) {
+				ulog.warn('mountGear: document.documentElement not ready, deferring')
 				return false
 			}
-			const btn = document.createElement('button')
-			btn.id = GEAR_ID
-			btn.type = 'button'
-			btn.setAttribute('aria-label', 'Open YourTube settings')
-			btn.setAttribute('style', GEAR_INLINE_STYLE)
-			btn.innerHTML = `
-				<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="width:22px;height:22px;flex-shrink:0;">
-					<path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
-				</svg>
-				<span>YourTube</span>
-			`
-			btn.addEventListener('click', openPanel)
-			document.body.appendChild(btn)
-			ulog.log('Gear mounted')
+			// The pill is a <div> container rather than a <button> so the
+			// inner open-button and close-button don't nest (invalid HTML)
+			// and so click events on the close-button don't bubble-fire the
+			// open-button at the same time.
+			//
+			// Everything is built via createElement + appendChild +
+			// textContent — NOT innerHTML. YouTube ships a Trusted Types
+			// CSP (`require-trusted-types-for 'script'`) which throws
+			// `Sink type mismatch violation` on every `.innerHTML = ...`
+			// assignment. The SVG gear was also dropped in favour of the
+			// ⚙ unicode glyph to avoid createElementNS ceremony and match
+			// the lightweight icon approach in ytm-desktop-handoff (↗).
+			const pill = document.createElement('div')
+			pill.id = GEAR_ID
+			pill.setAttribute('role', 'group')
+			pill.setAttribute('aria-label', 'YourTube header')
+			pill.setAttribute('style', GEAR_INLINE_STYLE)
+
+			const openBtn = document.createElement('button')
+			openBtn.type = 'button'
+			openBtn.className = 'yourtube-gear-open'
+			openBtn.setAttribute('aria-label', 'Open YourTube settings')
+			openBtn.setAttribute('title', 'Open YourTube settings')
+
+			const iconEl = document.createElement('span')
+			iconEl.className = 'yourtube-gear-icon'
+			iconEl.setAttribute('aria-hidden', 'true')
+			iconEl.textContent = '\u2699' // ⚙
+
+			const labelEl = document.createElement('span')
+			labelEl.className = 'yourtube-gear-label'
+			labelEl.textContent = 'YourTube'
+
+			openBtn.appendChild(iconEl)
+			openBtn.appendChild(labelEl)
+
+			const divider = document.createElement('span')
+			divider.className = 'yourtube-gear-divider'
+			divider.setAttribute('aria-hidden', 'true')
+
+			const closeBtn = document.createElement('button')
+			closeBtn.type = 'button'
+			closeBtn.className = 'yourtube-gear-close'
+			closeBtn.setAttribute('aria-label', 'Hide YourTube header')
+			closeBtn.setAttribute(
+				'title',
+				'Hide header (run __yourtube_showHeader() in console to restore)',
+			)
+			closeBtn.textContent = '\u00d7' // ×
+
+			pill.appendChild(openBtn)
+			pill.appendChild(divider)
+			pill.appendChild(closeBtn)
+
+			openBtn.addEventListener('click', openPanel)
+			closeBtn.addEventListener('click', (e) => {
+				e.stopPropagation()
+				setHeaderHidden(true)
+				pill.remove()
+				ulog.log('Header hidden — restore with __yourtube_showHeader()')
+			})
+			root.appendChild(pill)
+			ulog.log('Gear mounted (header pill)')
 			return true
+		}
+
+		/**
+		 * Clears the hidden flag and force-remounts the pill. Used by the
+		 * dev expose `__yourtube_showHeader()` for console-based recovery
+		 * if the user dismissed the header and wants it back.
+		 */
+		function showHeader() {
+			setHeaderHidden(false)
+			const existing = document.getElementById(GEAR_ID)
+			if (existing) existing.remove()
+			mountGear()
+			ulog.log('Header restored')
 		}
 
 		// ── Panel ──────────────────────────────────────────────────────
 
-		function breakerMarkup(id, label, icon) {
-			return `
-				<div class="yourtube-breaker" data-breaker-target="${id}">
-					<div class="yourtube-breaker-label">
-						<span class="yourtube-breaker-icon">${icon}</span>
-						<span>${label}</span>
-					</div>
-					<div class="yourtube-switch" id="${id}" role="switch" aria-checked="false" tabindex="0">
-						<span class="yourtube-switch-label yourtube-on-label">ON</span>
-						<span class="yourtube-switch-label yourtube-off-label">OFF</span>
-					</div>
-				</div>
-			`
+		/**
+		 * Builds one labelled text-input row for the Duration Filter
+		 * section (label + text input + live-preview echo). Returns the
+		 * wrapping .yourtube-field element.
+		 */
+		function buildDurationField(inputId, labelText, placeholder) {
+			const field = document.createElement('div')
+			field.className = 'yourtube-field'
+
+			const label = document.createElement('label')
+			label.setAttribute('for', inputId)
+			label.textContent = labelText
+
+			const input = document.createElement('input')
+			input.id = inputId
+			input.type = 'text'
+			input.spellcheck = false
+			input.setAttribute('autocomplete', 'off')
+			input.placeholder = placeholder
+
+			const preview = document.createElement('div')
+			preview.className = 'yourtube-preview'
+			preview.setAttribute('data-preview-for', inputId)
+
+			field.appendChild(label)
+			field.appendChild(input)
+			field.appendChild(preview)
+			return field
+		}
+
+		/**
+		 * Builds a circuit-breaker row as a DOM subtree. Returns the
+		 * outer .yourtube-breaker element ready to be appended.
+		 *
+		 * Previously returned an HTML string, but YouTube's Trusted Types
+		 * CSP (`require-trusted-types-for 'script'`) blocks every
+		 * `.innerHTML = ...` assignment, so the whole SettingsUI builds
+		 * its DOM via createElement + textContent instead.
+		 */
+		function buildBreaker(id, label, icon) {
+			const row = document.createElement('div')
+			row.className = 'yourtube-breaker'
+			row.setAttribute('data-breaker-target', id)
+
+			const labelWrap = document.createElement('div')
+			labelWrap.className = 'yourtube-breaker-label'
+			const iconSpan = document.createElement('span')
+			iconSpan.className = 'yourtube-breaker-icon'
+			iconSpan.textContent = icon
+			const textSpan = document.createElement('span')
+			textSpan.textContent = label
+			labelWrap.appendChild(iconSpan)
+			labelWrap.appendChild(textSpan)
+
+			const sw = document.createElement('div')
+			sw.className = 'yourtube-switch'
+			sw.id = id
+			sw.setAttribute('role', 'switch')
+			sw.setAttribute('aria-checked', 'false')
+			sw.setAttribute('tabindex', '0')
+			const onLabel = document.createElement('span')
+			onLabel.className = 'yourtube-switch-label yourtube-on-label'
+			onLabel.textContent = 'ON'
+			const offLabel = document.createElement('span')
+			offLabel.className = 'yourtube-switch-label yourtube-off-label'
+			offLabel.textContent = 'OFF'
+			sw.appendChild(onLabel)
+			sw.appendChild(offLabel)
+
+			row.appendChild(labelWrap)
+			row.appendChild(sw)
+			return row
 		}
 
 		function buildPanel() {
 			if (panelBuilt && document.getElementById(PANEL_ID)) return false
-			if (!document.body) {
-				ulog.warn('buildPanel: document.body not ready, deferring')
+			// Same reasoning as mountGear: mount to documentElement, not
+			// body. See SettingsUI.mountGear for context.
+			const root = document.documentElement
+			if (!root) {
+				ulog.warn('buildPanel: document.documentElement not ready, deferring')
 				return false
 			}
 			// Reset the flag if we're rebuilding after YouTube removed
@@ -1020,46 +1490,96 @@
 			overlay.id = OVERLAY_ID
 			overlay.addEventListener('click', closePanel)
 
+			// Built via DOM APIs rather than innerHTML because YouTube's
+			// Trusted Types CSP (`require-trusted-types-for 'script'`)
+			// blocks every `.innerHTML = ...` assignment with a "Sink
+			// type mismatch violation". See buildBreaker above.
 			const panel = document.createElement('div')
 			panel.id = PANEL_ID
 			panel.setAttribute('role', 'dialog')
 			panel.setAttribute('aria-label', 'YourTube settings')
-			panel.innerHTML = `
-				<div class="yourtube-header">
-					<h2>YourTube Settings</h2>
-					<button class="yourtube-close" type="button" aria-label="Close settings">×</button>
-				</div>
-				<div class="yourtube-body">
-					<section class="yourtube-section">
-						<h3>Duration filter</h3>
-						<div class="yourtube-field">
-							<label for="${FIELD_SHORTER}">Hide videos shorter than</label>
-							<input id="${FIELD_SHORTER}" type="text" spellcheck="false" autocomplete="off" placeholder="e.g. 5m, 1h30m, 3m 30s — leave blank for no minimum" />
-							<div class="yourtube-preview" data-preview-for="${FIELD_SHORTER}"></div>
-						</div>
-						<div class="yourtube-field">
-							<label for="${FIELD_LONGER}">Hide videos longer than</label>
-							<input id="${FIELD_LONGER}" type="text" spellcheck="false" autocomplete="off" placeholder="e.g. 20m, 1h — leave blank for no maximum" />
-							<div class="yourtube-preview" data-preview-for="${FIELD_LONGER}"></div>
-						</div>
-					</section>
-					<section class="yourtube-section">
-						<h3>Hide these kinds of tiles</h3>
-						<div class="yourtube-toggles">
-							${breakerMarkup(BREAKER_SHORTS, 'Shorts', '▶')}
-							${breakerMarkup(BREAKER_LIVE, 'Live streams', '●')}
-							${breakerMarkup(BREAKER_PREMIERES, 'Premieres', '◈')}
-						</div>
-					</section>
-				</div>
-				<div class="yourtube-footer">
-					<button class="yourtube-btn yourtube-primary" data-action="apply" type="button">Apply</button>
-					<button class="yourtube-btn" data-action="reset" type="button">Reset</button>
-					<button class="yourtube-btn yourtube-danger" data-action="defaults" type="button">Defaults</button>
-				</div>
-			`
 
-			panel.querySelector('.yourtube-close').addEventListener('click', closePanel)
+			// ── Header ─────────────────────────────────────────────
+			const header = document.createElement('div')
+			header.className = 'yourtube-header'
+			const headerTitle = document.createElement('h2')
+			headerTitle.textContent = 'YourTube Settings'
+			const headerClose = document.createElement('button')
+			headerClose.className = 'yourtube-close'
+			headerClose.type = 'button'
+			headerClose.setAttribute('aria-label', 'Close settings')
+			headerClose.textContent = '\u00d7' // ×
+			header.appendChild(headerTitle)
+			header.appendChild(headerClose)
+
+			// ── Body ───────────────────────────────────────────────
+			const body = document.createElement('div')
+			body.className = 'yourtube-body'
+
+			// Duration filter section
+			const durationSection = document.createElement('section')
+			durationSection.className = 'yourtube-section'
+			const durationH3 = document.createElement('h3')
+			durationH3.textContent = 'Duration filter'
+			durationSection.appendChild(durationH3)
+			durationSection.appendChild(
+				buildDurationField(
+					FIELD_SHORTER,
+					'Hide videos shorter than',
+					'e.g. 5m, 1h30m, 3m 30s — leave blank for no minimum',
+				),
+			)
+			durationSection.appendChild(
+				buildDurationField(
+					FIELD_LONGER,
+					'Hide videos longer than',
+					'e.g. 20m, 1h — leave blank for no maximum',
+				),
+			)
+
+			// Circuit-breaker section
+			const breakerSection = document.createElement('section')
+			breakerSection.className = 'yourtube-section'
+			const breakerH3 = document.createElement('h3')
+			breakerH3.textContent = 'Hide these kinds of tiles'
+			breakerSection.appendChild(breakerH3)
+			const toggles = document.createElement('div')
+			toggles.className = 'yourtube-toggles'
+			toggles.appendChild(buildBreaker(BREAKER_SHORTS, 'Shorts', '\u25b6')) // ▶
+			toggles.appendChild(buildBreaker(BREAKER_LIVE, 'Live streams', '\u25cf')) // ●
+			toggles.appendChild(buildBreaker(BREAKER_PREMIERES, 'Premieres', '\u25c8')) // ◈
+			breakerSection.appendChild(toggles)
+
+			body.appendChild(durationSection)
+			body.appendChild(breakerSection)
+
+			// ── Footer ─────────────────────────────────────────────
+			const footer = document.createElement('div')
+			footer.className = 'yourtube-footer'
+			const applyBtn = document.createElement('button')
+			applyBtn.className = 'yourtube-btn yourtube-primary'
+			applyBtn.setAttribute('data-action', 'apply')
+			applyBtn.type = 'button'
+			applyBtn.textContent = 'Apply'
+			const resetBtn = document.createElement('button')
+			resetBtn.className = 'yourtube-btn'
+			resetBtn.setAttribute('data-action', 'reset')
+			resetBtn.type = 'button'
+			resetBtn.textContent = 'Reset'
+			const defaultsBtn = document.createElement('button')
+			defaultsBtn.className = 'yourtube-btn yourtube-danger'
+			defaultsBtn.setAttribute('data-action', 'defaults')
+			defaultsBtn.type = 'button'
+			defaultsBtn.textContent = 'Defaults'
+			footer.appendChild(applyBtn)
+			footer.appendChild(resetBtn)
+			footer.appendChild(defaultsBtn)
+
+			panel.appendChild(header)
+			panel.appendChild(body)
+			panel.appendChild(footer)
+
+			headerClose.addEventListener('click', closePanel)
 
 			// Wire live-preview on the two text inputs. Parsing happens on
 			// every keystroke so the user sees their input being understood.
@@ -1089,8 +1609,8 @@
 			panel.querySelector('[data-action="reset"]').addEventListener('click', onReset)
 			panel.querySelector('[data-action="defaults"]').addEventListener('click', onDefaults)
 
-			document.body.appendChild(overlay)
-			document.body.appendChild(panel)
+			root.appendChild(overlay)
+			root.appendChild(panel)
 			ulog.log('Panel built')
 			return true
 		}
@@ -1237,7 +1757,6 @@
 		// ── Mount lifecycle ────────────────────────────────────────────
 
 		let healObserver = null
-		let bodyWaitObserver = null
 		// Debounce for heal checks — YT's DOM churns constantly; we check
 		// at most once per animation frame.
 		let healPending = false
@@ -1290,33 +1809,26 @@
 		}
 
 		/**
-		 * YouTube scripts sometimes run at document-start, before body exists.
-		 * If we land in that window we observe the root for body insertion,
-		 * then kick init once it arrives. No-ops if body is already there.
+		 * We mount onto document.documentElement (the <html> element),
+		 * which exists essentially as soon as the page parser starts.
+		 * This helper is kept for symmetry and as a safety net — in the
+		 * degenerate case where documentElement isn't yet present, we
+		 * schedule a microtask retry.
 		 */
-		function waitForBody(cb) {
-			if (document.body) {
+		function waitForRoot(cb) {
+			if (document.documentElement) {
 				cb()
 				return
 			}
-			if (bodyWaitObserver) return
-			ulog.log('Waiting for document.body...')
-			bodyWaitObserver = new MutationObserver(() => {
-				if (document.body) {
-					bodyWaitObserver.disconnect()
-					bodyWaitObserver = null
-					ulog.log('document.body is now available')
-					cb()
-				}
-			})
-			bodyWaitObserver.observe(document.documentElement, {
-				childList: true,
-			})
+			ulog.log('Waiting for document.documentElement...')
+			// documentElement is parsed extremely early; if it's missing
+			// we must be pre-parse. A microtask retry is enough.
+			queueMicrotask(() => waitForRoot(cb))
 		}
 
 		function init() {
 			try {
-				waitForBody(() => {
+				waitForRoot(() => {
 					installStyles()
 					ensureMounted()
 					startSelfHeal()
@@ -1326,14 +1838,31 @@
 			}
 		}
 
-		return { init, openPanel, closePanel, ensureMounted }
+		return { init, openPanel, closePanel, ensureMounted, showHeader }
 	})()
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  ROUTING / INIT
 	// ═══════════════════════════════════════════════════════════════════
 
+	// Opt-in flag: set `localStorage.setItem('yourtube_debug_probe_v1', '1')`
+	// in the devtools console and reload to enable the DebugProbe for UI
+	// mount diagnostics. Defaults to off so the markers don't clutter the
+	// page in normal use.
+	function isDebugProbeEnabled() {
+		try {
+			return localStorage.getItem('yourtube_debug_probe_v1') === '1'
+		} catch (_) {
+			return false
+		}
+	}
+
 	function runFeatures() {
+		if (isDebugProbeEnabled()) {
+			// Probe runs FIRST so we see mount results even if the
+			// real SettingsUI mount crashes later in the chain.
+			DebugProbe.init()
+		}
 		SettingsUI.init()
 		DurationFilter.init()
 		// Future features register here.
@@ -1372,7 +1901,10 @@
 		}
 	}, 2000)
 
-	log(`Initialized v${SCRIPT_VERSION} — click the YourTube button bottom-right to open settings`)
+	log(
+		`Initialized v${SCRIPT_VERSION} — look for the "YourTube" pill top-right of the page. ` +
+			`Click × on the pill to hide it; run __yourtube_showHeader() in this console to restore.`,
+	)
 
 	// Dev-only exposes for in-browser inspection. Removed before shipping.
 	// Firefox's content script sandbox wraps function references crossing the
@@ -1390,4 +1922,42 @@
 	devExpose('__yourtube_formatDuration', formatDuration)
 	devExpose('__yourtube_getSettings', getSettings)
 	devExpose('__yourtube_applyFilter', DurationFilter.applyFilter)
+
+	// Recovery command: if the user dismissed the header pill and wants
+	// it back, they can run `__yourtube_showHeader()` from the devtools
+	// console. Not a "dev-only" expose — this is the only re-entry point
+	// once the pill is hidden, so it ships with the script.
+	devExpose('__yourtube_showHeader', () => {
+		try {
+			SettingsUI.showHeader()
+			console.log('[YourTube] Header restored')
+		} catch (e) {
+			console.warn('[YourTube] Failed to restore header:', e)
+		}
+	})
+
+	// Toggles for the UI-mount debug probe. Use from devtools console:
+	//   __yourtube_enableDebugProbe()  then reload
+	//   __yourtube_disableDebugProbe() then reload
+	// The probe mounts labeled test badges using five different DOM
+	// strategies so we can diagnose future UI insertion failures on
+	// YouTube variants or page layouts where our current approach breaks.
+	devExpose('__yourtube_enableDebugProbe', () => {
+		try {
+			localStorage.setItem('yourtube_debug_probe_v1', '1')
+			console.log('[YourTube] Debug probe ENABLED — reload the page')
+		} catch (e) {
+			console.warn('[YourTube] Failed to enable debug probe:', e)
+		}
+	})
+	devExpose('__yourtube_disableDebugProbe', () => {
+		try {
+			localStorage.removeItem('yourtube_debug_probe_v1')
+			console.log('[YourTube] Debug probe DISABLED — reload the page')
+		} catch (e) {
+			console.warn('[YourTube] Failed to disable debug probe:', e)
+		}
+	})
+	// Also allow invoking the probe one-shot without persisting the flag.
+	devExpose('__yourtube_runDebugProbe', () => DebugProbe.init())
 })()

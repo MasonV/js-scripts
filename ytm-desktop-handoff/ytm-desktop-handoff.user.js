@@ -10,6 +10,7 @@
 // @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.user.js
 // @grant        GM_xmlhttpRequest
 // @connect      raw.githubusercontent.com
+// @connect      localhost
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -29,7 +30,14 @@
 
 	const UPDATE_BANNER_ID = 'ytmdh-update-banner'
 	const PILL_ID = 'ytmdh-pill'
-	const LAUNCHER_IFRAME_ID = 'ytmdh-launcher-frame'
+
+	// YTM Desktop companion API (ytmdesktop/ytmdesktop).
+	// Default port is 9863. If you changed it in the app settings, update this.
+	const API_PORT = 9863
+	const APP_ID = 'ytm-desktop-handoff'
+	const APP_NAME = 'YTM Desktop Handoff'
+
+	const AUTH_TOKEN_KEY = 'ytmdh_auth_token_v1'
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  LOGGING
@@ -97,37 +105,52 @@
 		return new URLSearchParams(window.location.search).get('list')
 	}
 
+	// ═══════════════════════════════════════════════════════════════════
+	//  COMPANION API
+	// ═══════════════════════════════════════════════════════════════════
+
 	/**
-	 * Builds the ytmd:// URI for the currently-watched track.
-	 * Format per YTMDesktop wiki: ytmd://play/<VideoId>[/<PlaylistId>]
+	 * Wraps GM_xmlhttpRequest as a Promise.
+	 * Resolves with parsed JSON on 2xx, rejects with { status, body } otherwise.
 	 */
-	function buildHandoffUri() {
-		const videoId = getVideoId()
-		if (!videoId) return null
-		const playlistId = getPlaylistId()
-		return playlistId ? `ytmd://play/${videoId}/${playlistId}` : `ytmd://play/${videoId}`
+	function apiRequest(method, path, body, token) {
+		return new Promise((resolve, reject) => {
+			const headers = { 'Content-Type': 'application/json' }
+			if (token) headers['Authorization'] = token
+			GM_xmlhttpRequest({
+				method,
+				url: `http://localhost:${API_PORT}/api/v1${path}`,
+				headers,
+				data: body ? JSON.stringify(body) : undefined,
+				onload(resp) {
+					if (resp.status >= 200 && resp.status < 300) {
+						try {
+							resolve(JSON.parse(resp.responseText))
+						} catch {
+							resolve({})
+						}
+					} else {
+						reject({ status: resp.status, body: resp.responseText })
+					}
+				},
+				onerror(err) {
+					reject({ status: 0, err })
+				},
+			})
+		})
+	}
+
+	function getStoredToken() {
+		return localStorage.getItem(AUTH_TOKEN_KEY)
+	}
+
+	function storeToken(token) {
+		localStorage.setItem(AUTH_TOKEN_KEY, token)
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  HANDOFF
 	// ═══════════════════════════════════════════════════════════════════
-
-	/**
-	 * Launches a custom protocol URI without navigating the current tab.
-	 * A hidden iframe is the most reliable cross-browser way to trigger a
-	 * protocol handler — window.location.href risks replacing the tab in
-	 * some browser/protocol combinations.
-	 */
-	function launchProtocol(uri) {
-		let iframe = document.getElementById(LAUNCHER_IFRAME_ID)
-		if (!iframe) {
-			iframe = document.createElement('iframe')
-			iframe.id = LAUNCHER_IFRAME_ID
-			iframe.style.display = 'none'
-			document.body.appendChild(iframe)
-		}
-		iframe.src = uri
-	}
 
 	/**
 	 * Pauses the YT Music browser player. Pausing the underlying <video>
@@ -142,16 +165,83 @@
 		}
 	}
 
-	function handoff() {
-		const uri = buildHandoffUri()
-		if (!uri) {
-			warn('No track in URL — nothing to hand off')
+	// Code received from /auth/requestcode, waiting for user to approve in YTMD.
+	let pendingAuthCode = null
+
+	async function handoff() {
+		const videoId = getVideoId()
+		if (!videoId) {
+			warn('No video ID in URL — nothing to hand off')
 			return
 		}
-		log(`Handoff → ${uri}`)
-		launchProtocol(uri)
-		// Small delay so the protocol handler fires before we pause —
-		// avoids any race with YTM's own playback state reconciliation.
+
+		// Phase 2: there's a pending code — user has been asked to approve in YTMD.
+		if (pendingAuthCode) {
+			try {
+				const { token } = await apiRequest('POST', '/auth/request', {
+					appId: APP_ID,
+					code: pendingAuthCode,
+				})
+				storeToken(token)
+				pendingAuthCode = null
+				log('Auth token acquired')
+				await sendToDesktop(videoId, getPlaylistId(), token)
+			} catch (e) {
+				warn(`Auth exchange failed (${e.status}) — did you approve the request in YTMDesktop?`)
+				// Keep the pill in 'approve' state so the user can try clicking again.
+				setPillState('approve')
+			}
+			return
+		}
+
+		// Phase 1a: try the existing stored token.
+		const token = getStoredToken()
+		if (token) {
+			try {
+				await sendToDesktop(videoId, getPlaylistId(), token)
+				return
+			} catch (e) {
+				if (e.status === 401) {
+					localStorage.removeItem(AUTH_TOKEN_KEY)
+					log('Token expired — re-authenticating')
+					// Fall through to request a new code below.
+				} else if (e.status === 0) {
+					warn('Could not reach YTMDesktop — is it running with companion server enabled?')
+					setPillState('error')
+					return
+				} else {
+					warn('Handoff failed:', e.status, e.body)
+					setPillState('error')
+					return
+				}
+			}
+		}
+
+		// Phase 1b: no valid token — request an auth code from YTMD.
+		try {
+			const { code } = await apiRequest('POST', '/auth/requestcode', {
+				appId: APP_ID,
+				appName: APP_NAME,
+				appVersion: SCRIPT_VERSION,
+			})
+			pendingAuthCode = code
+			setPillState('approve')
+			log('Auth code requested — waiting for approval in YTMDesktop')
+		} catch (e) {
+			warn(`Could not reach YTMDesktop API (${e.status}) — is the companion server enabled in settings?`)
+			setPillState('error')
+		}
+	}
+
+	async function sendToDesktop(videoId, playlistId, token) {
+		await apiRequest(
+			'POST',
+			'/command',
+			{ command: 'changeVideo', data: { videoId, playlistId: playlistId || null } },
+			token,
+		)
+		log(`Sent to YTMDesktop: videoId=${videoId}`)
+		setPillState('success')
 		setTimeout(pauseYtmPlayback, 120)
 	}
 

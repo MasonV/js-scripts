@@ -17,6 +17,7 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
 - [Gaming](#gaming)
   - [`barter-bundle-scorer/`](#barter-bundle-scorer)
   - [`fanatical-autoclaim/`](#fanatical-autoclaim)
+  - [`itch-bundle-autoclaim/`](#itch-bundle-autoclaim)
   - [`lichess-declutter/`](#lichess-declutter)
 - [Work](#work)
   - [`google-address-autocomplete-ca/`](#google-address-autocomplete-ca)
@@ -158,6 +159,34 @@ A userscript for [Fanatical](https://www.fanatical.com) order pages that bulk-re
 **Metadata update checks:**
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.meta.js`
+
+---
+
+### `itch-bundle-autoclaim/`
+
+A userscript for [itch.io](https://itch.io) bundle download pages that claims all unclaimed games in bulk, automatically paginating through every page of the bundle.
+
+Script refined from the following existing (and somewhat functional) scripts
+https://greasyfork.org/en/scripts/427686-itch-io-bundle-to-library
+https://greasyfork.org/en/scripts/405532-itch-io-autoclaim
+
+**Features:**
+
+- Claims all unclaimed games on the current page via `fetch()` POST — no DOM clicking, no page flicker
+- Automatically advances to the next page after finishing each page and resumes claiming seamlessly
+- Survives page navigation using `sessionStorage` so the run continues uninterrupted across as many pages as the bundle has
+- Stops automatically when no claimable games are found (end of bundle)
+- Floating dark panel with "Claim All Pages" (full run) and "Claim This Page" (single page) buttons
+- Live status line showing current game name and position (e.g. "Claiming 3/12: Celeste")
+- Running claimed-total counter persisted across pages
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/itch-bundle-autoclaim/itch-bundle-autoclaim.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/itch-bundle-autoclaim/itch-bundle-autoclaim.meta.js`
 
 ---
 
