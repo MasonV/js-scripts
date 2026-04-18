@@ -6,9 +6,10 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
 
 Each script lives in its own folder with two files:
 
+- `<name>.dev.res` — resources used during development (e.g., source HTML)
 - `<name>.user.js` — full script with Tampermonkey metadata block
 - `<name>.meta.js` — metadata-only file for lightweight update checks
-
+- `<name>.todo.md` — list of things to do, in Markdown format
 Scripts are single-file by design. Organize sections with visual dividers:
 
 ```js
