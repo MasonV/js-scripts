@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YTM Desktop Handoff
 // @namespace    ytm-desktop-handoff
-// @version      3.2.0
-// @description  Adds a pill button to YouTube Music /watch pages that hands off the current track to the YouTube Music Desktop App via its companion API (pauses this tab so the desktop app plays alone)
+// @version      4.0.0
+// @description  Adds a handoff button to YouTube Music /watch pages that sends the current track to the YouTube Music Desktop App via the ytmd:// protocol (pauses this tab so the desktop app plays alone)
 // @match        *://music.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
@@ -22,7 +22,7 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YTM Handoff]'
-	const SCRIPT_VERSION = '3.2.0'
+	const SCRIPT_VERSION = '4.0.0'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.meta.js'
 	const DOWNLOAD_URL =
@@ -273,62 +273,75 @@
 				background: #1976d2;
 			}
 
-			/* ── Handoff pill — sits inline after the Song/Video toggle ── */
+			/* ── Inline pill — sits inside .av-toggle alongside Song/Video ── */
 			#${PILL_ID} {
 				display: inline-flex;
 				align-items: center;
-				align-self: center;
 				gap: 6px;
-				margin-left: 12px;
-				padding: 6px 14px;
-				border: 1px solid rgba(255, 255, 255, 0.12);
-				background: rgba(255, 255, 255, 0.06);
-				color: #aaaaaa;
+				padding: 0 14px;
+				height: 32px;
+				margin-left: 8px;
+				border: 1px solid rgba(255, 255, 255, 0.15);
+				background: transparent;
+				color: rgba(255, 255, 255, 0.7);
 				font-family: 'YouTube Sans', 'Roboto', sans-serif;
 				font-size: 13px;
 				font-weight: 500;
 				line-height: 1;
 				cursor: pointer;
-				border-radius: 999px;
+				border-radius: 2px;
 				user-select: none;
 				vertical-align: middle;
+				transition: background 0.15s, color 0.15s, border-color 0.15s;
+				/* Reset any inherited button styles from YTM */
+				outline: none;
+				box-shadow: none;
+				-webkit-appearance: none;
+				appearance: none;
+			}
+			#${PILL_ID}:hover {
+				background: rgba(255, 78, 122, 0.18);
+				color: #ff4e7a;
+				border-color: rgba(255, 78, 122, 0.5);
+			}
+			#${PILL_ID}:active {
+				transform: scale(0.97);
+			}
+			#${PILL_ID} .ytmdh-pill-icon {
+				font-size: 14px;
+				line-height: 1;
+			}
+			#${PILL_ID} .ytmdh-pill-label {
+				line-height: 1;
+			}
+
+			/* ── Fixed fallback — used when .av-toggle is not found ── */
+			#${PILL_ID}.ytmdh-fixed {
+				position: fixed;
+				top: 72px;
+				right: 16px;
+				z-index: 2147483647;
+				margin-left: 0;
+				padding: 8px 18px;
+				height: auto;
+				background: rgba(15, 15, 15, 0.88);
+				backdrop-filter: blur(8px);
+				-webkit-backdrop-filter: blur(8px);
+				color: #cfcfcf;
+				border-radius: 999px;
+				border-color: rgba(255, 255, 255, 0.12);
+				box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
 				transition: background 0.15s, color 0.15s, transform 0.1s,
 					box-shadow 0.15s, border-color 0.15s;
 			}
-			#${PILL_ID}:hover {
+			#${PILL_ID}.ytmdh-fixed:hover {
 				background: #ff4e7a;
 				color: #fff;
 				border-color: rgba(255, 255, 255, 0.24);
 				box-shadow: 0 6px 22px rgba(255, 78, 122, 0.45);
 			}
-			#${PILL_ID}:active {
-				transform: scale(0.97);
-			}
-			#${PILL_ID}[data-state="approve"] {
-				background: rgba(255, 180, 0, 0.18);
-				border-color: rgba(255, 180, 0, 0.45);
-				color: #ffd166;
-			}
-			#${PILL_ID}[data-state="approve"]:hover {
-				background: rgba(255, 180, 0, 0.32);
-				box-shadow: 0 6px 22px rgba(255, 180, 0, 0.3);
-			}
-			#${PILL_ID}[data-state="success"] {
-				background: rgba(46, 213, 115, 0.18);
-				border-color: rgba(46, 213, 115, 0.45);
-				color: #2ed573;
-			}
-			#${PILL_ID}[data-state="error"] {
-				background: rgba(255, 71, 87, 0.18);
-				border-color: rgba(255, 71, 87, 0.45);
-				color: #ff6b81;
-			}
-			#${PILL_ID} .ytmdh-pill-icon {
+			#${PILL_ID}.ytmdh-fixed .ytmdh-pill-icon {
 				font-size: 15px;
-				line-height: 1;
-			}
-			#${PILL_ID} .ytmdh-pill-label {
-				line-height: 1;
 			}
 		`
 		document.head.appendChild(style)
@@ -338,56 +351,7 @@
 	//  UI — HANDOFF PILL
 	// ═══════════════════════════════════════════════════════════════════
 
-	function setPillState(state) {
-		const pill = document.getElementById(PILL_ID)
-		if (!pill) return
-		const icon = pill.querySelector('.ytmdh-pill-icon')
-		const label = pill.querySelector('.ytmdh-pill-label')
-
-		pill.dataset.state = state
-
-		switch (state) {
-			case 'approve':
-				icon.textContent = '⏳'
-				label.textContent = 'Approve in YTMDesktop, then click again'
-				break
-			case 'success':
-				icon.textContent = '✓'
-				label.textContent = 'Sent!'
-				setTimeout(() => setPillState('default'), 2000)
-				break
-			case 'error':
-				icon.textContent = '✗'
-				label.textContent = 'Check YTMDesktop is running'
-				setTimeout(() => setPillState('default'), 4000)
-				break
-			default:
-				icon.textContent = '\u2197'
-				label.textContent = 'YTMDesktop'
-				break
-		}
-	}
-
-	/**
-	 * Resolves when `selector` appears in the DOM, or rejects after `timeout` ms.
-	 */
-	function waitForElement(selector, timeout = 5000) {
-		return new Promise((resolve, reject) => {
-			const existing = document.querySelector(selector)
-			if (existing) { resolve(existing); return }
-			const observer = new MutationObserver(() => {
-				const el = document.querySelector(selector)
-				if (el) { observer.disconnect(); resolve(el) }
-			})
-			observer.observe(document.body, { childList: true, subtree: true })
-			setTimeout(() => { observer.disconnect(); reject(new Error(`Timeout: ${selector}`)) }, timeout)
-		})
-	}
-
-	async function mountPill() {
-		injectStyles()
-		removePill()
-
+	function buildPillButton() {
 		const btn = document.createElement('button')
 		btn.id = PILL_ID
 		btn.type = 'button'
@@ -408,25 +372,32 @@
 		btn.addEventListener('click', (e) => {
 			e.preventDefault()
 			e.stopPropagation()
-			handoff().catch((err) => {
-				warn('Unexpected error:', err)
-				setPillState('error')
-			})
+			handoff()
 		})
 
-		// Inject after the Song/Video toggle so it sits inline in that row.
-		try {
-			const pivotBar = await waitForElement('ytmusic-pivot-bar-renderer')
-			pivotBar.insertAdjacentElement('afterend', btn)
-		} catch {
-			warn('Pivot bar not found — appending to body as fallback')
+		return btn
+	}
+
+	function mountPill() {
+		injectStyles()
+		removePill()
+
+		const btn = buildPillButton()
+
+		// Prefer embedding inline inside the av-toggle group (Song / Video / ↗ YTMDesktop).
+		// The av-toggle renders into the regular (light) DOM even under ShadyDOM so a
+		// standard querySelector finds it. If Polymer hasn't stamped it yet (race at
+		// first load), we fall back to a fixed-position overlay and a MutationObserver
+		// will re-try once the element appears.
+		const avToggle = document.querySelector('.av-toggle')
+		if (avToggle) {
+			avToggle.appendChild(btn)
+			log('Handoff pill mounted in av-toggle')
+		} else {
+			btn.classList.add('ytmdh-fixed')
 			document.body.appendChild(btn)
+			log('Handoff pill mounted (fixed fallback — av-toggle not found)')
 		}
-
-		// Restore pending auth state after SPA navigation.
-		if (pendingAuthCode) setPillState('approve')
-
-		log('Handoff pill mounted')
 	}
 
 	function removePill() {
@@ -438,15 +409,49 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	/**
-	 * The companion API requires a video ID, so the pill only makes sense
-	 * on /watch routes. On other YTM routes we remove the pill entirely.
+	 * The ytmd:// scheme requires a video ID, so the button only makes sense
+	 * on /watch routes where the URL exposes `v` (and optionally `list`).
+	 * On other YTM routes we remove the button entirely.
 	 */
 	function handleRoute() {
 		if (window.location.pathname === '/watch' && getVideoId()) {
 			mountPill()
+
+			// av-toggle is stamped by Polymer after the page shell renders.
+			// If mountPill() fell back to fixed, watch for av-toggle to appear
+			// and re-mount inline once it does.
+			const existing = document.getElementById(PILL_ID)
+			if (existing && existing.classList.contains('ytmdh-fixed')) {
+				waitForAvToggle()
+			}
 		} else {
 			removePill()
 		}
+	}
+
+	/**
+	 * Observes the DOM for .av-toggle to appear, then re-mounts the pill
+	 * inline. Disconnects after the first successful re-mount or after the
+	 * user navigates away.
+	 */
+	function waitForAvToggle() {
+		const observer = new MutationObserver(() => {
+			const avToggle = document.querySelector('.av-toggle')
+			if (!avToggle) return
+			observer.disconnect()
+
+			// Only re-mount if the pill is still in fixed-fallback mode.
+			const pill = document.getElementById(PILL_ID)
+			if (pill && pill.classList.contains('ytmdh-fixed')) {
+				log('av-toggle appeared — re-mounting pill inline')
+				mountPill()
+			}
+		})
+
+		observer.observe(document.body, { childList: true, subtree: true })
+
+		// Bail if the user navigates away before av-toggle appears.
+		document.addEventListener('yt-navigate-start', () => observer.disconnect(), { once: true })
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
