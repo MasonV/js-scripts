@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YTM Desktop Handoff
 // @namespace    ytm-desktop-handoff
-// @version      4.0.2
+// @version      4.0.3
 // @description  Adds a handoff button to YouTube Music /watch pages that sends the current track to the YouTube Music Desktop App via the ytmd:// protocol (pauses this tab so the desktop app plays alone)
 // @match        *://music.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -243,6 +243,22 @@
 		log(`Sent to YTMDesktop: videoId=${videoId}`)
 		setPillState('success')
 		setTimeout(pauseYtmPlayback, 120)
+	}
+
+	const PILL_STATES = {
+		idle:    { icon: '\u2197', label: 'YTMDesktop' },
+		approve: { icon: '\u23F3', label: 'Approve in app' },
+		success: { icon: '\u2713',  label: 'Sent!' },
+		error:   { icon: '\u2717',  label: 'Failed' },
+	}
+
+	function setPillState(state) {
+		const pill = document.getElementById(PILL_ID)
+		if (!pill) return
+		const { icon, label } = PILL_STATES[state] ?? PILL_STATES.idle
+		pill.querySelector('.ytmdh-pill-icon').textContent = icon
+		pill.querySelector('.ytmdh-pill-label').textContent = label
+		if (state === 'success') setTimeout(() => setPillState('idle'), 2000)
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
