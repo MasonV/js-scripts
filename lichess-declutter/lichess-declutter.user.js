@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lichess Declutter
 // @namespace    lichess-declutter
-// @version      1.4.0
+// @version      1.4.1
 // @description  Strips the lichess homepage down to essentials: quick play, puzzle, and articles in a single screen
 // @match        *://lichess.org/
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,10 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[Lichess Declutter]'
-	const SCRIPT_VERSION = '1.4.0'
+	const SCRIPT_VERSION =
+		typeof GM_info !== 'undefined' && GM_info.script?.version
+			? GM_info.script.version
+			: '__DEV__'
 	const STORAGE_KEY = 'lichess_declutter_hidden_pools_v1'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/lichess-declutter/lichess-declutter.meta.js'

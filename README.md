@@ -378,7 +378,7 @@ A userscript for [Bonjourr](https://bonjourr.fr) new tab pages that provides a q
 ---
 
 1. Edit the script's `.user.js` file.
-2. Bump `@version` in **both** the `.user.js` and `.meta.js` files (and the `SCRIPT_VERSION` constant in the script body). They must all match.
+2. Bump `@version` in **both** the `.user.js` and `.meta.js` files. Copy the metadata block manually; `SCRIPT_VERSION` reads from `GM_info.script.version`.
 3. Keep `@updateURL` pointed at `.meta.js` and `@downloadURL` pointed at `.user.js`.
 4. Run `node tools/check-metadata.mjs` before publishing.
 5. Merge to `main` — scripts are served via raw GitHub URLs from the `main` branch, so merging is deployment.

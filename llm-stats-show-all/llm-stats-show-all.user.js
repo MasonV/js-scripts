@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LLM Stats Show All Models
 // @namespace    https://tampermonkey.net/
-// @version      1.7.1
+// @version      1.7.2
 // @description  Automatically paginates through all models on the llm-stats.com leaderboard and displays them in a single table.
 // @match        *://llm-stats.com/*
 // @match        *://*.llm-stats.com/*
@@ -19,7 +19,10 @@
   'use strict';
 
   const LOG = '[LLM Show All]';
-  const SCRIPT_VERSION = '1.7.1';
+  const SCRIPT_VERSION =
+    typeof GM_info !== 'undefined' && GM_info.script?.version
+      ? GM_info.script.version
+      : '__DEV__';
   const META_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.meta.js';
   const DOWNLOAD_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.user.js';
   const PAGE_SIZE = 30;

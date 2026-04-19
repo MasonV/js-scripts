@@ -92,7 +92,7 @@ function sameValues(left, right, key) {
 }
 
 function literalScriptVersion(text) {
-  return text.match(/\bSCRIPT_VERSION\s*=\s*['"]([^'"]+)['"]/)?.[1] || null
+  return /\bSCRIPT_VERSION\s*=\s*['"][^'"]+['"]/.test(text)
 }
 
 function usesGmInfoVersion(text) {
@@ -123,13 +123,11 @@ for (const [group, files] of groupedScripts(walk(ROOT))) {
         }
       }
 
-      const version = values(user.meta, 'version')[0]
-      const scriptVersion = literalScriptVersion(user.text)
-      if (scriptVersion && scriptVersion !== version) {
-        groupErrors.push(`SCRIPT_VERSION ${scriptVersion} does not match @version ${version}`)
+      if (literalScriptVersion(user.text)) {
+        groupErrors.push('SCRIPT_VERSION should read GM_info.script.version instead of a literal version')
       }
-      if (!scriptVersion && !usesGmInfoVersion(user.text)) {
-        groupWarnings.push('no literal SCRIPT_VERSION constant or GM_info.script.version fallback')
+      if (!usesGmInfoVersion(user.text)) {
+        groupErrors.push('SCRIPT_VERSION should use GM_info.script.version')
       }
 
       const updateUrl = values(user.meta, 'updateURL')[0] || ''

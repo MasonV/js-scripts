@@ -4,7 +4,7 @@ This repo intentionally ships each userscript as one installable file. Prefer co
 
 ## Metadata Pair
 
-Keep the metadata block in `<name>.user.js` and `<name>.meta.js` identical except that the `.meta.js` file has no script body.
+Keep the metadata block in `<name>.user.js` and `<name>.meta.js` identical except that the `.meta.js` file has no script body. Copy it manually after metadata changes; this repo intentionally does not auto-generate metadata files.
 
 ```js
 // ==UserScript==
@@ -28,7 +28,10 @@ Keep the metadata block in `<name>.user.js` and `<name>.meta.js` identical excep
 
 ```js
 const LOG_PREFIX = '[Example Script]'
-const SCRIPT_VERSION = '1.0.0'
+const SCRIPT_VERSION =
+  typeof GM_info !== 'undefined' && GM_info.script?.version
+    ? GM_info.script.version
+    : '__DEV__'
 const META_URL =
   'https://raw.githubusercontent.com/MasonV/js-scripts/main/example-script/example-script.meta.js'
 const DOWNLOAD_URL =

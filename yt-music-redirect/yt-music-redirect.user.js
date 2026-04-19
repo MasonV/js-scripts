@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.3.12
+// @version      1.3.13
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -22,7 +22,10 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[YT Music Redirect]'
-	const SCRIPT_VERSION = '1.3.12'
+	const SCRIPT_VERSION =
+		typeof GM_info !== 'undefined' && GM_info.script?.version
+			? GM_info.script.version
+			: '__DEV__'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js'
 	const DOWNLOAD_URL =

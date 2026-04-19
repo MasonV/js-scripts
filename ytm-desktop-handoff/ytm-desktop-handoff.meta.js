@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YTM Desktop Handoff
 // @namespace    ytm-desktop-handoff
-// @version      4.1.0
+// @version      4.1.1
 // @description  Adds a handoff button to YouTube Music /watch pages that sends the current track to the YouTube Music Desktop App via the ytmd:// protocol (pauses this tab so the desktop app plays alone)
 // @match        *://music.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts

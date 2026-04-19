@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Focus Search
 // @namespace    auto-focus-search
-// @version      1.0.2
+// @version      1.0.3
 // @description  Automatically detects and focuses search input fields on any webpage
 // @match        *://*/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -24,7 +24,10 @@
 
     const LOG_PREFIX = '[Auto Focus Search]'
     const SHORT_PREFIX = '[AFS]'
-    const SCRIPT_VERSION = '1.0.2'
+    const SCRIPT_VERSION =
+        typeof GM_info !== 'undefined' && GM_info.script?.version
+            ? GM_info.script.version
+            : '__DEV__'
     const META_URL =
         'https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.meta.js'
     const DOWNLOAD_URL =

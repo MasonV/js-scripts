@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Address Autocomplete — Canada Bias
 // @namespace    google-address-autocomplete-ca
-// @version      1.0.0
+// @version      1.0.1
 // @description  Restricts Google Places Autocomplete results to Canada on Odoo
 // @match        https://*.odoo.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
