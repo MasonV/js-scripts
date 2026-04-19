@@ -1,9 +1,10 @@
 luna-autoclaim/luna-autoclaim.todo.md
 
-Claim Pipeline Completness
-- Epic redemption flawless.
-- Only 1 game direct on luna so difficult to evaluate
-- GOG stops after exposing the keys. Recoverable state. New step needed to redeem key on GOG site.
-- Legacy Games stops after exposing keys. Recoverable state. Will not be pursueing development actively. If wanting support please submit request or PR for review.
+Claim Pipeline Completeness
 
-- Rate limit testing to done to confirm if there are notable rate limits on autoclaiming
+- Epic redemption flawless.
+- Only one direct Luna game available so far, so direct-claim behavior is hard to evaluate.
+- GOG stops after exposing the keys. Recoverable state. New step needed to redeem key on GOG site.
+- Legacy Games stops after exposing keys. Recoverable state. Will not be pursuing development actively. If support is wanted, submit a request or PR for review.
+
+- Rate-limit testing still needed to confirm whether autoclaiming hits notable limits.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YTM Data Panel
 // @namespace    ytm-data-panel
-// @version      1.0.0
+// @version      1.0.1
 // @description  Shows a data-rich floating panel on YouTube Music /watch pages — description, views, publish date, tags, and auto-detected chapters parsed from the YouTube video metadata
 // @match        *://music.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts

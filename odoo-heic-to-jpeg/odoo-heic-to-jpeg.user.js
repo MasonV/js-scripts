@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Odoo HEIC to JPEG
 // @namespace    odoo-heic-to-jpeg
-// @version      1.3.0
+// @version      1.3.1
 // @description  Converts HEIC/HEIF images to JPEG client-side before Odoo uploads them
 // @match        *://*.odoo.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -21,7 +21,10 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[Odoo HEIC→JPEG]'
-	const SCRIPT_VERSION = '1.3.0'
+	const SCRIPT_VERSION =
+		typeof GM_info !== 'undefined' && GM_info.script?.version
+			? GM_info.script.version
+			: '__DEV__'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/odoo-heic-to-jpeg/odoo-heic-to-jpeg.meta.js'
 	const DOWNLOAD_URL =

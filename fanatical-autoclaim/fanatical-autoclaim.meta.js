@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Fanatical Autoclaim
 // @namespace    fanatical-autoclaim
-// @version      1.2.0
+// @version      1.2.1
 // @description  Bulk-reveal and bulk-redeem Steam keys on Fanatical order pages
 // @match        https://www.fanatical.com/en/orders/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -12,4 +12,5 @@
 // @grant        GM_addStyle
 // @grant        GM_openInTab
 // @connect      raw.githubusercontent.com
+// @run-at       document-idle
 // ==/UserScript==

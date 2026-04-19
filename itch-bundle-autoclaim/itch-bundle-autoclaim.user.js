@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Itch Bundle Autoclaim
 // @namespace    itch-bundle-autoclaim
-// @version      1.0.0
+// @version      1.0.1
 // @description  Claims all unclaimed games on an itch.io bundle download page, with automatic pagination
 // @match        https://itch.io/bundle/download/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -21,7 +21,10 @@
     //  CONSTANTS
     // ═══════════════════════════════════════════════════════════════════
 
-    const SCRIPT_VERSION = '1.0.0'
+    const SCRIPT_VERSION =
+        typeof GM_info !== 'undefined' && GM_info.script?.version
+            ? GM_info.script.version
+            : '__DEV__'
     const META_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/itch-bundle-autoclaim/itch-bundle-autoclaim.meta.js'
     const DOWNLOAD_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/itch-bundle-autoclaim/itch-bundle-autoclaim.user.js'
     const LOG_PREFIX = '[Itch Autoclaim]'

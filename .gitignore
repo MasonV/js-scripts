@@ -1,2 +1,16 @@
 # Container entrypoint script
 enter
+
+# Local AI/tooling state
+.claude/settings.local.json
+.claude/worktrees/
+
+# Userscript development captures and scratch resources
+**/*.dev.resources/
+**/*.dev.res/
+
+# Common local scratch/output
+node_modules/
+coverage/
+*.log
+*.tmp

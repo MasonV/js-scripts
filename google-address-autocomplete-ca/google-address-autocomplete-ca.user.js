@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Address Autocomplete — Canada Bias
 // @namespace    google-address-autocomplete-ca
-// @version      1.0.0
+// @version      1.0.1
 // @description  Restricts Google Places Autocomplete results to Canada on Odoo
 // @match        https://*.odoo.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -21,7 +21,10 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	const LOG_PREFIX = '[Places CA]'
-	const SCRIPT_VERSION = '1.0.0'
+	const SCRIPT_VERSION =
+		typeof GM_info !== 'undefined' && GM_info.script?.version
+			? GM_info.script.version
+			: '__DEV__'
 	const META_URL =
 		'https://raw.githubusercontent.com/MasonV/js-scripts/main/google-address-autocomplete-ca/google-address-autocomplete-ca.meta.js'
 	const DOWNLOAD_URL =

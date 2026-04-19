@@ -6,10 +6,11 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
 
 Each script lives in its own folder with two files:
 
-- `<name>.dev.res` — resources used during development (e.g., source HTML)
+- `<name>.dev.resources/` or `<name>.dev.res/` — local resources used during development (e.g., source HTML captures, screenshots); ignored by git by default
 - `<name>.user.js` — full script with Tampermonkey metadata block
 - `<name>.meta.js` — metadata-only file for lightweight update checks
 - `<name>.todo.md` — list of things to do, in Markdown format
+- `diagnostics/` — optional per-script folder for throwaway/debug userscripts that are not normal install targets
 Scripts are single-file by design. Organize sections with visual dividers:
 
 ```js
@@ -78,7 +79,10 @@ All scripts should include an in-page update check that runs on load. This uses 
 Standard implementation pattern:
 
 ```js
-const SCRIPT_VERSION = '1.0.0'
+const SCRIPT_VERSION =
+    typeof GM_info !== 'undefined' && GM_info.script?.version
+        ? GM_info.script.version
+        : '__DEV__'
 const META_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/<name>/<name>.meta.js'
 const DOWNLOAD_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/<name>/<name>.user.js'
 
@@ -116,7 +120,7 @@ Call `checkForUpdate()` at the top of the initialization block. The banner shoul
 **Every commit that changes a script MUST bump the version.** No exceptions. This is how Tampermonkey detects updates — if the version doesn't change, users don't get the fix.
 
 1. Edit the `.user.js` file.
-2. Bump `@version` in **both** `.user.js` and `.meta.js` — they must match. Also update the `SCRIPT_VERSION` constant in the script body.
+2. Bump `@version` in **both** `.user.js` and `.meta.js` — they must match. `SCRIPT_VERSION` reads from `GM_info.script.version`; do not hard-code it.
 3. Use semver: patch for bug fixes, minor for new features, major for breaking changes.
 4. `@updateURL` → `.meta.js` (lightweight version check).
 5. `@downloadURL` → `.user.js` (full script delivery).
@@ -134,11 +138,20 @@ No test framework is set up. The scripts are heavily DOM-dependent (operating on
 
 When writing **pure functions** (math, scoring, data transformation), keep them extractable and testable. If a test framework is added later, these are the first candidates.
 
+Before publishing a userscript change, run:
+
+```sh
+node tools/check-metadata.mjs
+```
+
+This validates `.user.js` / `.meta.js` pairs while skipping archives, diagnostics, and local dev resources.
+
 ## Adding a New Script
 
 1. Create a folder: `<script-name>/`
 2. Add `<script-name>.user.js` with a complete Tampermonkey metadata block (`@name`, `@version`, `@match`, `@grant GM_xmlhttpRequest`, `@connect raw.githubusercontent.com`, `@updateURL`, `@downloadURL`).
-3. Add `<script-name>.meta.js` with matching metadata (no script body).
+3. Add `<script-name>.meta.js` with matching metadata (no script body). Copy the header manually from `.user.js`; do not auto-generate it.
 4. Include the in-page update check pattern (see above).
 5. Update `README.md` with install/update URLs and a brief description.
-6. Use the section divider and logging prefix conventions documented above.
+6. Use `templates/userscript-template.md` for standard metadata and update-check boilerplate.
+7. Use the section divider and logging prefix conventions documented above.

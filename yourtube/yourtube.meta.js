@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YourTube
 // @namespace    yourtube
-// @version      1.1.6
+// @version      1.1.7
 // @description  YouTube without the garbage — duration filtering, and more features to come
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -12,6 +12,7 @@
 // @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
+// @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==

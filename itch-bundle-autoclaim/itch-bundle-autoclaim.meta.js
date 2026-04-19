@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Itch Bundle Autoclaim
 // @namespace    itch-bundle-autoclaim
-// @version      1.0.0
+// @version      1.0.1
 // @description  Claims all unclaimed games on an itch.io bundle download page, with automatic pagination
 // @match        https://itch.io/bundle/download/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -11,4 +11,5 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @connect      raw.githubusercontent.com
+// @run-at       document-idle
 // ==/UserScript==
