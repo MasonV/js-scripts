@@ -17,6 +17,7 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
 - [Gaming](#gaming)
   - [`barter-bundle-scorer/`](#barter-bundle-scorer)
   - [`fanatical-autoclaim/`](#fanatical-autoclaim)
+  - [`luna-autoclaim/`](#luna-autoclaim)
   - [`itch-bundle-autoclaim/`](#itch-bundle-autoclaim)
   - [`lichess-declutter/`](#lichess-declutter)
 - [Work](#work)
@@ -159,6 +160,29 @@ A userscript for [Fanatical](https://www.fanatical.com) order pages that bulk-re
 **Metadata update checks:**
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.meta.js`
+
+---
+
+### `luna-autoclaim/`
+
+A userscript for [Amazon Luna](https://luna.amazon.com) claim pages that opens available Prime Gaming claim pages and redeems exposed keys with optional per-store filtering.
+
+**Features:**
+
+- Floating control panel on Luna claim pages with reveal/open and auto-claim controls
+- Opens claim pages in background tabs with configurable pacing
+- Auto-claim handoff via URL flag so newly opened claim tabs can continue the flow
+- Store detection for Amazon Games, Epic Games, GOG, and Legacy Games
+- Per-store enable/disable settings persisted in `localStorage`
+- Update banner using the repo's metadata check pattern
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js`
 
 ---
 
@@ -356,4 +380,7 @@ A userscript for [Bonjourr](https://bonjourr.fr) new tab pages that provides a q
 1. Edit the script's `.user.js` file.
 2. Bump `@version` in **both** the `.user.js` and `.meta.js` files (and the `SCRIPT_VERSION` constant in the script body). They must all match.
 3. Keep `@updateURL` pointed at `.meta.js` and `@downloadURL` pointed at `.user.js`.
-4. Merge to `main` — scripts are served via raw GitHub URLs from the `main` branch, so merging is deployment.
+4. Run `node tools/check-metadata.mjs` before publishing.
+5. Merge to `main` — scripts are served via raw GitHub URLs from the `main` branch, so merging is deployment.
+
+For new scripts or repeated boilerplate, see [`templates/userscript-template.md`](templates/userscript-template.md).

@@ -11,4 +11,5 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @connect      raw.githubusercontent.com
+// @run-at       document-idle
 // ==/UserScript==

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LLM Stats Show All Models
 // @namespace    https://tampermonkey.net/
-// @version      1.7.0
+// @version      1.7.1
 // @description  Automatically paginates through all models on the llm-stats.com leaderboard and displays them in a single table.
 // @match        *://llm-stats.com/*
 // @match        *://*.llm-stats.com/*
@@ -10,6 +10,8 @@
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.meta.js
 // @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.user.js
 // @grant        GM_addStyle
+// @grant        GM_xmlhttpRequest
+// @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -17,6 +19,9 @@
   'use strict';
 
   const LOG = '[LLM Show All]';
+  const SCRIPT_VERSION = '1.7.1';
+  const META_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.meta.js';
+  const DOWNLOAD_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.user.js';
   const PAGE_SIZE = 30;
   const SETTLE_DELAY_MS = 150; // short pause after MutationObserver confirms change
   const WAIT_TIMEOUT_MS = 3000; // max wait for a page transition
@@ -55,7 +60,65 @@
       border-radius: 2px;
       transition: width 0.3s ease;
     }
+    .llm-show-all-update-banner {
+      position: fixed;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10001;
+      border: 1px solid #f4c542;
+      border-radius: 8px;
+      background: #2d260b;
+      color: #fff4c2;
+      padding: 10px 14px;
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.35);
+    }
   `);
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  UPDATE CHECK
+  // ═══════════════════════════════════════════════════════════════════
+
+  function checkForUpdate() {
+    try {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: META_URL + '?_=' + Date.now(),
+        onload(resp) {
+          if (resp.status !== 200) return;
+          const match = resp.responseText.match(/@version\s+(\S+)/);
+          if (!match) return;
+
+          const remote = match[1];
+          if (remote !== SCRIPT_VERSION) {
+            console.log(LOG, `Update available: v${SCRIPT_VERSION} -> v${remote}`);
+            showUpdateBanner(remote);
+          } else {
+            console.log(LOG, `Up to date (v${SCRIPT_VERSION})`);
+          }
+        },
+        onerror() {
+          console.warn(LOG, 'Update check failed (network error)');
+        },
+      });
+    } catch (err) {
+      console.warn(LOG, 'Update check unavailable:', err);
+    }
+  }
+
+  function showUpdateBanner(version) {
+    if (document.querySelector('.llm-show-all-update-banner')) return;
+
+    const banner = document.createElement('button');
+    banner.type = 'button';
+    banner.className = 'llm-show-all-update-banner';
+    banner.textContent = `LLM Stats Show All v${version} available - click to update`;
+    banner.addEventListener('click', () => window.open(DOWNLOAD_URL, '_blank'));
+    document.body.appendChild(banner);
+  }
 
   // ═══════════════════════════════════════════════════════════════════
   //  DOM HELPERS
@@ -848,6 +911,8 @@
       running = false;
     }
   }
+
+  checkForUpdate();
 
   // Run immediately if already on a leaderboard page
   tryRun();

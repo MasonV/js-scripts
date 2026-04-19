@@ -12,4 +12,5 @@
 // @grant        GM_addStyle
 // @grant        GM_openInTab
 // @connect      raw.githubusercontent.com
+// @run-at       document-idle
 // ==/UserScript==

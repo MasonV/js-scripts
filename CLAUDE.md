@@ -6,10 +6,11 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
 
 Each script lives in its own folder with two files:
 
-- `<name>.dev.res` — resources used during development (e.g., source HTML)
+- `<name>.dev.resources/` or `<name>.dev.res/` — local resources used during development (e.g., source HTML captures, screenshots); ignored by git by default
 - `<name>.user.js` — full script with Tampermonkey metadata block
 - `<name>.meta.js` — metadata-only file for lightweight update checks
 - `<name>.todo.md` — list of things to do, in Markdown format
+- `diagnostics/` — optional per-script folder for throwaway/debug userscripts that are not normal install targets
 Scripts are single-file by design. Organize sections with visual dividers:
 
 ```js
@@ -134,6 +135,14 @@ No test framework is set up. The scripts are heavily DOM-dependent (operating on
 
 When writing **pure functions** (math, scoring, data transformation), keep them extractable and testable. If a test framework is added later, these are the first candidates.
 
+Before publishing a userscript change, run:
+
+```sh
+node tools/check-metadata.mjs
+```
+
+This validates `.user.js` / `.meta.js` pairs while skipping archives, diagnostics, and local dev resources.
+
 ## Adding a New Script
 
 1. Create a folder: `<script-name>/`
@@ -141,4 +150,5 @@ When writing **pure functions** (math, scoring, data transformation), keep them 
 3. Add `<script-name>.meta.js` with matching metadata (no script body).
 4. Include the in-page update check pattern (see above).
 5. Update `README.md` with install/update URLs and a brief description.
-6. Use the section divider and logging prefix conventions documented above.
+6. Use `templates/userscript-template.md` for standard metadata and update-check boilerplate.
+7. Use the section divider and logging prefix conventions documented above.
