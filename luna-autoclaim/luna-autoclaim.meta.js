@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.5.2
+// @version      0.6.0
 // @description  Bulk-reveal and bulk-redeem keys on Luna
-// @include      /^https:\/\/luna\.amazon\.[a-z.]{2,6}\/claims\/(home|[^\/]+\/dp\/)/
+// @include      /^https:\/\/luna\.amazon\.[a-z.]{2,6}\//
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js
