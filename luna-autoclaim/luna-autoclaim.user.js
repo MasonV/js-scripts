@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.5.2
+// @version      0.6.0
 // @description  Bulk-reveal and bulk-redeem keys on Luna
-// @include      /^https:\/\/luna\.amazon\.[a-z.]{2,6}\/claims\/(home|[^\/]+\/dp\/)/
+// @include      /^https:\/\/luna\.amazon\.[a-z.]{2,6}\//
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js
@@ -16,6 +16,13 @@
 // ==/UserScript==
 
 // @include regex: luna.amazon.<TLD> where TLD is 2–6 chars (covers .com, .ca, .co.uk, etc.)
+// Matches the whole site, not just the claim paths — Luna is a single-page
+// app that swaps routes via client-side (fake) navigation, so Tampermonkey
+// may never inject the script if it only matches /claims/home or
+// /claims/.../dp/ and the user first lands somewhere else. Route-specific
+// behavior is handled internally by handleRoute(), which also re-runs on
+// SPA navigation (see "SPA NAVIGATION" below) instead of relying on a full
+// page load.
 // Path arm 1 — home listing:  /claims/home…
 // Path arm 2 — claim detail:  /claims/<slug>/dp/…
 
@@ -718,14 +725,53 @@
     }, 500);
   }
 
-  function init() {
-    log(`v${SCRIPT_VERSION} loaded`);
-    checkForUpdate();
+  // ═══════════════════════════════════════════════════════════════════
+  //  SPA NAVIGATION
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // Luna swaps routes client-side without a full page load, so the panel
+  // has to be (re)built on navigation rather than only once at document-idle.
+  // `routeGeneration` invalidates any in-flight waitFor*Content() callback
+  // from a route we've since navigated away from (e.g. hopping between two
+  // different claim pages before the first one's content ever appeared).
 
+  let currentPanelRoute = null; // 'home' | 'claim' | null
+  let routeGeneration = 0;
+
+  function teardownPanel() {
+    const panel = document.getElementById("lac-panel");
+    if (panel) panel.remove();
+    statusEl = null;
+    claimBtn = null;
+    autoClaimBtn = null;
+  }
+
+  function handleRoute() {
     const path = window.location.pathname;
+    const isHome = /\/claims\/home/.test(path);
+    const isClaim = /\/claims\/.+\/dp\//.test(path);
 
-    if (/\/claims\/home/.test(path)) {
+    if (!isHome && !isClaim) {
+      if (currentPanelRoute !== null) {
+        routeGeneration++;
+        teardownPanel();
+        currentPanelRoute = null;
+      }
+      return;
+    }
+
+    const newRoute = isHome ? "home" : "claim";
+    // A claim page always re-runs even if the previous route was also
+    // "claim" — it's a different game/store, not the same page re-rendering.
+    if (newRoute === currentPanelRoute && newRoute === "home") return;
+
+    const generation = ++routeGeneration;
+    teardownPanel();
+    currentPanelRoute = newRoute;
+
+    if (isHome) {
       waitForOrderContent(() => {
+        if (generation !== routeGeneration) return;
         injectStyles();
         createPanel();
         const claimCount = findButtonsByText("Claim game").length;
@@ -735,27 +781,72 @@
       return;
     }
 
-    if (/\/claims\/.+\/dp\//.test(path)) {
-      waitForClaimPageContent(() => {
-        const store = detectStore();
-        if (!store) warn("Store not recognised — defaulting panel to unknown");
-        log(`Store: ${store ?? "unknown"}`);
-        injectStyles();
-        createClaimPagePanel(store);
+    waitForClaimPageContent(() => {
+      if (generation !== routeGeneration) return;
+      const store = detectStore();
+      if (!store) warn("Store not recognised — defaulting panel to unknown");
+      log(`Store: ${store ?? "unknown"}`);
+      injectStyles();
+      createClaimPagePanel(store);
 
-        const autoClaimParam =
-          new URLSearchParams(window.location.search).get("lac_autoclaim") === "1";
-        if (autoClaimParam) {
-          if (store && isStoreDisabled(store)) {
-            log(`Auto-claim skipped — ${store} is disabled`);
-          } else {
-            log("Auto-claim triggered by URL param");
-            // Brief delay so the page's own JS finishes binding before we click.
-            sleep(redeemDelayMs).then(claimCurrentGame);
-          }
+      const autoClaimParam =
+        new URLSearchParams(window.location.search).get("lac_autoclaim") === "1";
+      if (autoClaimParam) {
+        if (store && isStoreDisabled(store)) {
+          log(`Auto-claim skipped — ${store} is disabled`);
+        } else {
+          log("Auto-claim triggered by URL param");
+          // Brief delay so the page's own JS finishes binding before we click.
+          sleep(redeemDelayMs).then(claimCurrentGame);
         }
+      }
+    });
+  }
+
+  function watchForNavigation() {
+    let lastPath = window.location.pathname;
+
+    const onLocationChange = () => {
+      if (window.location.pathname === lastPath) return;
+      lastPath = window.location.pathname;
+      log(`Navigation detected → ${lastPath}`);
+      handleRoute();
+    };
+
+    // Modern browsers: fires on SPA (pushState/replaceState-driven) navigation.
+    if (typeof window.navigation !== "undefined") {
+      window.navigation.addEventListener("navigate", () => {
+        // The path isn't always updated yet when this fires — defer a tick.
+        setTimeout(onLocationChange, 0);
       });
     }
+
+    // Fallback for browsers without the Navigation API, and belt-and-braces
+    // in case Luna's router doesn't fire "navigate" reliably.
+    for (const method of ["pushState", "replaceState"]) {
+      const original = history[method];
+      history[method] = function (...args) {
+        const result = original.apply(this, args);
+        onLocationChange();
+        return result;
+      };
+    }
+    window.addEventListener("popstate", onLocationChange);
+
+    // Last-resort fallback: catch route changes that don't touch history at
+    // all. The check inside onLocationChange is a cheap string compare, so
+    // this is safe to run on every DOM mutation.
+    new MutationObserver(onLocationChange).observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
+  function init() {
+    log(`v${SCRIPT_VERSION} loaded`);
+    checkForUpdate();
+    watchForNavigation();
+    handleRoute();
   }
 
   init();
