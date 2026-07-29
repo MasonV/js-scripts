@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 
 const ROOT = process.cwd()
 const SKIP_DIRS = new Set([
@@ -99,6 +100,26 @@ function usesGmInfoVersion(text) {
   return /\bGM_info\.script\.version\b/.test(text)
 }
 
+// The update check is mandatory (see CLAUDE.md). Declaring it isn't enough —
+// yourtube shipped for several versions with the constants but no call.
+function definesUpdateCheck(text) {
+  return /\bfunction checkForUpdate\s*\(/.test(text)
+}
+
+function callsUpdateCheck(text) {
+  return /^[^\S\n]*checkForUpdate\(\)/m.test(text)
+}
+
+function hasUpdateCheckMarkers(text) {
+  return text.includes('// <update-check>') && text.includes('// </update-check>')
+}
+
+// Everything after the metadata block — where a granted API has to be used.
+function scriptBody(text) {
+  const end = text.indexOf('// ==/UserScript==')
+  return end === -1 ? text : text.slice(end)
+}
+
 let errors = 0
 let warnings = 0
 
@@ -134,6 +155,27 @@ for (const [group, files] of groupedScripts(walk(ROOT))) {
       const downloadUrl = values(user.meta, 'downloadURL')[0] || ''
       if (!updateUrl.endsWith('.meta.js')) groupErrors.push('@updateURL should point at .meta.js')
       if (!downloadUrl.endsWith('.user.js')) groupErrors.push('@downloadURL should point at .user.js')
+
+      if (!hasUpdateCheckMarkers(user.text)) {
+        groupErrors.push('missing // <update-check> … // </update-check> region (run: node tools/sync-update-check.mjs)')
+      }
+      if (!definesUpdateCheck(user.text)) groupErrors.push('no checkForUpdate() defined')
+      if (!callsUpdateCheck(user.text)) groupErrors.push('checkForUpdate() is defined but never called')
+
+      const grants = values(user.meta, 'grant')
+      const body = scriptBody(user.text)
+
+      if (grants.includes('GM_xmlhttpRequest') && !values(user.meta, 'connect').includes('raw.githubusercontent.com')) {
+        groupErrors.push('@grant GM_xmlhttpRequest requires @connect raw.githubusercontent.com')
+      }
+
+      // unsafeWindow is a scope switch, not a callable API, so it's exempt.
+      for (const grant of grants) {
+        if (grant === 'unsafeWindow' || grant === 'none') continue
+        if (!new RegExp(`\\b${grant}\\b`).test(body)) {
+          groupErrors.push(`@grant ${grant} is never used`)
+        }
+      }
     }
   }
 
@@ -145,6 +187,19 @@ for (const [group, files] of groupedScripts(walk(ROOT))) {
 
   errors += groupErrors.length
   warnings += groupWarnings.length
+}
+
+// The generated update-check region is owned by sync-update-check.mjs, so
+// ask it whether any file has drifted from the template.
+const sync = spawnSync(process.execPath, [path.join('tools', 'sync-update-check.mjs'), '--check'], {
+  cwd: ROOT,
+  encoding: 'utf8',
+})
+
+if (sync.status !== 0) {
+  console.log(`\nupdate-check blocks out of sync:`)
+  console.log(sync.stdout.trimEnd())
+  errors++
 }
 
 if (errors || warnings) {

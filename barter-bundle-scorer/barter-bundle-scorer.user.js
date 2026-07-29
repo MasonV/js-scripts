@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      6.5.1
+// @version      6.6.0
 // @description  Full-page bundle evaluation dashboard with per-game scoring, card grid, stats dashboard, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -16,54 +16,176 @@
 // ==/UserScript==
 (function () {
   'use strict';
+  const LOG_PREFIX = '[BVG Scorer]';
+  const SHORT_PREFIX = '[BVG]';
   const SCRIPT_VERSION =
     typeof GM_info !== 'undefined' && GM_info.script?.version
       ? GM_info.script.version
       : '__DEV__';
-  console.log(`[BVG Scorer] v${SCRIPT_VERSION} loaded on`, location.href);
 
   // ═══════════════════════════════════════
-  // UPDATE CHECK
+  // LOGGING
   // ═══════════════════════════════════════
-  function checkForUpdate() {
-    const META_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/barter-bundle-scorer/barter-bundle-scorer.meta.js';
+  function log(...args) { console.log(LOG_PREFIX, ...args); }
+  function warn(...args) { console.warn(LOG_PREFIX, ...args); }
+  function error(...args) { console.error(LOG_PREFIX, ...args); }
+  function logVerbose(...args) { console.log(SHORT_PREFIX, ...args); }
+
+  log(`v${SCRIPT_VERSION} loaded on`, location.href);
+
+  // <update-check>
+  // ═══════════════════════════════════════════════════════════════════
+  //  UPDATE CHECK
+  //  Generated from tools/update-check.template.js — do not edit here.
+  //  Change the template, then run: node tools/sync-update-check.mjs
+  // ═══════════════════════════════════════════════════════════════════
+
+  const UPDATE_BANNER_ID = 'barter-bundle-scorer-update-banner'
+  const UPDATE_DISMISS_KEY = 'barter_bundle_scorer_update_dismissed_v'
+
+  // Tampermonkey exposes the script's own metadata block, so these URLs
+  // don't have to be hand-maintained in two places. Greasemonkey 4 does
+  // not expose them, hence the literal fallbacks.
+  const META_URL =
+    (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.updateURL) ||
+    'https://raw.githubusercontent.com/MasonV/js-scripts/main/barter-bundle-scorer/barter-bundle-scorer.meta.js'
+  const DOWNLOAD_URL =
+    (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.downloadURL) ||
+    'https://raw.githubusercontent.com/MasonV/js-scripts/main/barter-bundle-scorer/barter-bundle-scorer.user.js'
+
+  // Numeric per-segment compare. True only when `remote` is strictly newer,
+  // so a local build that's ahead of main never nags. Non-numeric versions
+  // (e.g. a tagged pre-release) fall back to plain inequality.
+  function isNewerVersion(remote, local) {
+    const r = String(remote).split('.').map(Number)
+    const l = String(local).split('.').map(Number)
+    if (r.some(Number.isNaN) || l.some(Number.isNaN)) return remote !== local
+    for (let i = 0; i < Math.max(r.length, l.length); i++) {
+      const a = r[i] || 0
+      const b = l[i] || 0
+      if (a > b) return true
+      if (a < b) return false
+    }
+    return false
+  }
+
+  // Dismissal is scoped to the session *and* to the version being offered,
+  // so a newer release re-surfaces the banner instead of staying hidden.
+  function isUpdateDismissed(remote) {
     try {
-      GM_xmlhttpRequest({
-        method: 'GET',
-        url: META_URL + '?_=' + Date.now(), // cache bust
-        onload(resp) {
-          if (resp.status !== 200) return;
-          const match = resp.responseText.match(/@version\s+(\S+)/);
-          if (!match) return;
-          const remote = match[1];
-          if (remote !== SCRIPT_VERSION) {
-            console.log(`[BVG Scorer] Update available: v${SCRIPT_VERSION} → v${remote}`);
-            showUpdateBanner(remote);
-          } else {
-            console.log(`[BVG Scorer] Up to date (v${SCRIPT_VERSION})`);
-          }
-        },
-        onerror() { console.warn('[BVG Scorer] Update check failed (network error)'); },
-      });
-    } catch (e) {
-      console.warn('[BVG Scorer] Update check unavailable:', e);
+      return sessionStorage.getItem(UPDATE_DISMISS_KEY + remote) === '1'
+    } catch {
+      return false
     }
   }
 
-  function showUpdateBanner(remoteVersion) {
-    const downloadURL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/barter-bundle-scorer/barter-bundle-scorer.user.js';
-    const anchor = document.getElementById('bvg-app');
-    if (!anchor) return;
-    const banner = document.createElement('div');
-    banner.className = 'bvg-update-banner';
-    banner.innerHTML = `
-      <span>Update available: <strong>v${SCRIPT_VERSION}</strong> → <strong>v${remoteVersion}</strong>
-        — <a href="${downloadURL}" target="_blank">Install update</a></span>
-      <button class="bvg-update-dismiss" title="Dismiss">&times;</button>
-    `;
-    banner.querySelector('.bvg-update-dismiss').addEventListener('click', () => banner.remove());
-    anchor.prepend(banner);
+  function dismissUpdate(remote) {
+    try {
+      sessionStorage.setItem(UPDATE_DISMISS_KEY + remote, '1')
+    } catch {
+      /* private mode — the dismissal just won't persist */
+    }
   }
+
+  function checkForUpdate() {
+    // A dev install has no GM_info version to compare against, so every
+    // remote version would look like an update.
+    if (SCRIPT_VERSION === '__DEV__') {
+      console.log(`${LOG_PREFIX} Dev build — skipping update check.`)
+      return
+    }
+    try {
+      GM_xmlhttpRequest({
+        method: 'GET',
+        url: META_URL + '?_=' + Date.now(),
+        onload(resp) {
+          if (resp.status !== 200) return
+          const match = resp.responseText.match(/@version\s+(\S+)/)
+          if (!match) return
+          const remote = match[1]
+          if (isNewerVersion(remote, SCRIPT_VERSION)) {
+            console.log(`${LOG_PREFIX} Update available: v${SCRIPT_VERSION} → v${remote}`)
+            showUpdateBanner(remote)
+          } else {
+            console.log(`${LOG_PREFIX} Up to date (v${SCRIPT_VERSION}).`)
+          }
+        },
+        onerror() {
+          console.warn(`${LOG_PREFIX} Update check failed (network error)`)
+        },
+      })
+    } catch (e) {
+      console.warn(`${LOG_PREFIX} Update check unavailable:`, e)
+    }
+  }
+
+  function showUpdateBanner(remote) {
+    if (isUpdateDismissed(remote)) return
+
+    function inject() {
+      if (document.getElementById(UPDATE_BANNER_ID)) return
+
+      // Styled inline rather than via a stylesheet so the banner works
+      // the same in every script, including the ones with no GM_addStyle
+      // grant and the ones running at document-start.
+      const banner = document.createElement('div')
+      banner.id = UPDATE_BANNER_ID
+      Object.assign(banner.style, {
+        position: 'fixed',
+        top: '0',
+        left: '0',
+        right: '0',
+        zIndex: '2147483647',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '12px',
+        padding: '8px 16px',
+        background: '#3b82f6',
+        color: '#fff',
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '13px',
+        lineHeight: '1.4',
+        boxShadow: '0 1px 4px rgba(0, 0, 0, 0.3)',
+      })
+
+      const name = LOG_PREFIX.replace(/^\[|\]$/g, '')
+
+      const message = document.createElement('span')
+      message.textContent = `⬆ ${name} v${remote} available (you have v${SCRIPT_VERSION}) — click to update`
+      Object.assign(message.style, { cursor: 'pointer', textDecoration: 'underline' })
+      message.addEventListener('click', () => {
+        window.open(DOWNLOAD_URL, '_blank')
+      })
+
+      const dismiss = document.createElement('button')
+      dismiss.type = 'button'
+      dismiss.textContent = '✕ Dismiss'
+      Object.assign(dismiss.style, {
+        flex: '0 0 auto',
+        padding: '2px 10px',
+        border: '1px solid rgba(255, 255, 255, 0.6)',
+        borderRadius: '4px',
+        background: 'transparent',
+        color: '#fff',
+        font: 'inherit',
+        cursor: 'pointer',
+      })
+      dismiss.addEventListener('click', () => {
+        dismissUpdate(remote)
+        banner.remove()
+        console.log(`${LOG_PREFIX} Update notice dismissed for this session.`)
+      })
+
+      banner.append(message, dismiss)
+      document.body.prepend(banner)
+    }
+
+    // document-start scripts run before <body> exists.
+    if (document.body) inject()
+    else document.addEventListener('DOMContentLoaded', inject)
+  }
+  // </update-check>
 
   // Fire update check immediately on load
   checkForUpdate();
@@ -92,26 +214,6 @@
     #bvg-app strong { color: #e6edf3; }
     #bvg-app a { color: #58a6ff; text-decoration: none; }
     #bvg-app a:hover { text-decoration: underline; }
-
-    /* ── Update banner ── */
-    .bvg-update-banner {
-      background: #1a2332;
-      border: 1px solid #58a6ff;
-      border-radius: 8px;
-      padding: 8px 12px;
-      margin-bottom: 10px;
-      font-size: 12px;
-      color: #c9d1d9;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-    }
-    .bvg-update-banner a { color: #58a6ff; font-weight: 600; }
-    .bvg-update-dismiss {
-      background: none; border: none; color: #8b949e;
-      cursor: pointer; font-size: 14px; padding: 0 4px;
-    }
 
     /* ── Header bar ── */
     .bvg-header {
@@ -557,7 +659,7 @@
       localStorage.removeItem(testKey);
     } catch (e) {
       _storageAvailable = false;
-      console.warn('[BVG Scorer] localStorage unavailable — settings will not persist.', e.message || e);
+      warn('localStorage unavailable — settings will not persist.', e.message || e);
     }
   })();
 
@@ -570,7 +672,7 @@
     } catch (e) {
       if (!_storageWarningShown) {
         _storageWarningShown = true;
-        console.warn(`[BVG Scorer] Failed to write "${key}" — quota exceeded or storage blocked.`, e.message || e);
+        warn(`Failed to write "${key}" — quota exceeded or storage blocked.`, e.message || e);
         showStorageWarning();
       }
     }
@@ -657,13 +759,13 @@
     const presets = loadPresets();
     presets[name] = clone(settings);
     savePresets(presets);
-    console.log(`[BVG Scorer] Saved preset: "${name}"`);
+    log(`Saved preset: "${name}"`);
   }
   function deletePreset(name) {
     const presets = loadPresets();
     delete presets[name];
     savePresets(presets);
-    console.log(`[BVG Scorer] Deleted preset: "${name}"`);
+    log(`Deleted preset: "${name}"`);
   }
 
   // ═══════════════════════════════════════
@@ -816,7 +918,7 @@
           games: [],
         };
         tiers.push(currentTier);
-        console.log(`[BVG Scorer] Tier detected: "${label}" price=$${tierPrice} from text: "${text.substring(0, 120)}"`);
+        log(`Tier detected: "${label}" price=$${tierPrice} from text: "${text.substring(0, 120)}"`);
       } else if (type === ROW_GAME && currentTier) {
         currentTier.games.push(tr);
         tr.dataset.bvgTier = currentTier.name;
@@ -953,7 +1055,7 @@
     // Extract Steam store link if available (for per-card Steam button)
     const steamA = tr.querySelector('a[href*="store.steampowered.com/app/"]');
     const steamUrl = steamA ? steamA.href : null;
-    console.log(`[BVG] ${title}: type=${itemType} wish=${wishlistedDOM} rating=${ratingPct}% reviews=${reviews} msrp=${msrp} bundled=${bundledTimes}`);
+    logVerbose(`${title}: type=${itemType} wish=${wishlistedDOM} rating=${ratingPct}% reviews=${reviews} msrp=${msrp} bundled=${bundledTimes}`);
     return { title, ratingPct, reviews, msrp, bundledTimes, ownedDOM, wishlistedDOM, itemType, tr, reviewCell, imgSrc, steamUrl };
   }
 
@@ -1166,14 +1268,14 @@
       }
       const val = parseFloat(input.value);
       if (!Number.isFinite(val)) {
-        console.warn(`[BVG Scorer] Invalid value for ${key}: "${input.value}", skipping`);
+        warn(`Invalid value for ${key}: "${input.value}", skipping`);
         return;
       }
       const min = input.hasAttribute('min') ? parseFloat(input.min) : -Infinity;
       const max = input.hasAttribute('max') ? parseFloat(input.max) : Infinity;
       const clamped = Math.max(min, Math.min(max, val));
       if (clamped !== val) {
-        console.warn(`[BVG Scorer] Clamped ${key}: ${val} → ${clamped}`);
+        warn(`Clamped ${key}: ${val} → ${clamped}`);
         input.value = clamped;
       }
       if (key.startsWith('w.')) SETTINGS.weights[key.slice(2)] = clamped;
@@ -1681,7 +1783,7 @@
         if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.innerHTML = '&#128203; Copy Summary', 1500); }
       }).catch(() => {
         if (btn) { btn.textContent = 'Copy failed'; setTimeout(() => btn.innerHTML = '&#128203; Copy Summary', 2000); }
-        console.warn('[BVG Scorer] Clipboard write denied — page may not be in a secure context');
+        warn('Clipboard write denied — page may not be in a secure context');
       });
     });
 
@@ -1727,7 +1829,7 @@
         if (btn) { btn.textContent = 'Copied!'; setTimeout(() => btn.innerHTML = '{ } Export JSON', 1500); }
       }).catch(() => {
         if (btn) { btn.textContent = 'Copy failed'; setTimeout(() => btn.innerHTML = '{ } Export JSON', 2000); }
-        console.warn('[BVG Scorer] Clipboard write denied — page may not be in a secure context');
+        warn('Clipboard write denied — page may not be in a secure context');
       });
     });
 
@@ -1797,7 +1899,7 @@
         saveSettings(SETTINGS);
         const panel = modal.querySelector('#bvg-settings-panel');
         if (panel) panel.innerHTML = buildSettingsHTML();
-        console.log(`[BVG Scorer] Loaded preset: "${name}"`);
+        log(`Loaded preset: "${name}"`);
       } else if (id === 'bvg-preset-save') {
         const nameInput = modal.querySelector('#bvg-preset-name');
         const name = nameInput?.value.trim();
@@ -2043,18 +2145,18 @@
   // MAIN
   // ═══════════════════════════════════════
   function run() {
-    console.log('[BVG Scorer] Scanning...');
+    log('Scanning...');
     const table = findItemTable();
-    if (!table) { console.warn('[BVG Scorer] No game table found.'); return; }
+    if (!table) { warn('No game table found.'); return; }
     const rows = findGameRows(table);
-    if (!rows.length) { console.warn('[BVG Scorer] No game rows.'); return; }
-    console.log(`[BVG Scorer] Found ${rows.length} games.`);
+    if (!rows.length) { warn('No game rows.'); return; }
+    log(`Found ${rows.length} games.`);
 
     // Detect tiers BEFORE any DOM modifications
     const tiers = detectTiers(table);
-    if (tiers.length) console.log(`[BVG Scorer] Detected ${tiers.length} tier(s):`, tiers.map(t => t.name));
+    if (tiers.length) log(`Detected ${tiers.length} tier(s):`, tiers.map(t => t.name));
     CURRENT_BUNDLE_COST = detectBundleCost(table);
-    console.log('[BVG Scorer] Bundle cost detected:', CURRENT_BUNDLE_COST);
+    log('Bundle cost detected:', CURRENT_BUNDLE_COST);
 
     // Build owned set: merge DOM-detected + manually toggled
     const manualOwned = loadOwnedSet();
@@ -2097,15 +2199,15 @@
     if (_bvgObserver) {
       _bvgObserver.disconnect();
       _bvgObserver = null;
-      console.log('[BVG Scorer] Cleaned up previous MutationObserver');
+      log('Cleaned up previous MutationObserver');
     }
-    try { run(); } catch (e) { console.error('[BVG Scorer] Error:', e); }
+    try { run(); } catch (e) { error('Error:', e); }
     let debounce = null;
     _bvgObserver = new MutationObserver(() => {
       clearTimeout(debounce);
       debounce = setTimeout(() => {
         if (!document.querySelector('#bvg-app')) {
-          try { run(); } catch (e) { console.error('[BVG Scorer] Rerun error:', e); }
+          try { run(); } catch (e) { error('Rerun error:', e); }
         }
       }, 400);
     });
