@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Focus Search
 // @namespace    auto-focus-search
-// @version      1.0.3
+// @version      1.1.0
 // @description  Automatically detects and focuses search input fields on any webpage
 // @match        *://*/*
 // @homepageURL  https://github.com/MasonV/js-scripts

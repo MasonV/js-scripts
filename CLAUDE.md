@@ -76,44 +76,27 @@ All scripts should include an in-page update check that runs on load. This uses 
 
 **Sandbox caveat:** Any `@grant` other than `none` puts the script in Tampermonkey's sandbox. If the script also accesses page-context globals (e.g., YouTube's `ytInitialPlayerResponse`), add `// @grant unsafeWindow` and use `unsafeWindow` instead of `window` for those accesses.
 
-Standard implementation pattern:
+**Do not hand-write this block.** It lives in one place — `tools/update-check.template.js` — and is copied into each script by `tools/sync-update-check.mjs`. In the `.user.js`, mark the region and let the tool fill it:
 
 ```js
-const SCRIPT_VERSION =
-    typeof GM_info !== 'undefined' && GM_info.script?.version
-        ? GM_info.script.version
-        : '__DEV__'
-const META_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/<name>/<name>.meta.js'
-const DOWNLOAD_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/<name>/<name>.user.js'
-
-function checkForUpdate() {
-    try {
-        GM_xmlhttpRequest({
-            method: 'GET',
-            url: META_URL + '?_=' + Date.now(),
-            onload(resp) {
-                if (resp.status !== 200) return
-                const match = resp.responseText.match(/@version\s+(\S+)/)
-                if (!match) return
-                const remote = match[1]
-                if (remote !== SCRIPT_VERSION) {
-                    log(`Update available: v${SCRIPT_VERSION} → v${remote}`)
-                    showUpdateBanner(remote)
-                } else {
-                    log(`Up to date (v${SCRIPT_VERSION})`)
-                }
-            },
-            onerror() {
-                warn('Update check failed (network error)')
-            },
-        })
-    } catch (e) {
-        warn('Update check unavailable:', e)
-    }
-}
+// <update-check>
+// </update-check>
 ```
 
-Call `checkForUpdate()` at the top of the initialization block. The banner should be a fixed-position element at the top of the page that opens `DOWNLOAD_URL` on click. Cache-bust the meta fetch with `?_=` + timestamp.
+Then run:
+
+```sh
+node tools/sync-update-check.mjs
+```
+
+The generated block owns `UPDATE_BANNER_ID`, `META_URL`, `DOWNLOAD_URL`, `checkForUpdate()` and `showUpdateBanner()`. It expects two constants to already exist in the enclosing scope:
+
+- `SCRIPT_VERSION` — read from `GM_info.script.version`, falling back to `'__DEV__'`
+- `LOG_PREFIX` — e.g. `'[Script Name]'`; the banner strips the brackets to name the script
+
+Everything else is handled for you: the update URLs are read from `GM_info.script.updateURL`/`downloadURL` (with literal fallbacks for Greasemonkey), versions are compared numerically so a local build ahead of `main` never nags, dev builds skip the check entirely, the banner de-duplicates itself, and it carries a `✕ Dismiss` control scoped to the session and the offered version.
+
+Call `checkForUpdate()` at the top of the initialization block. `node tools/check-metadata.mjs` fails the build if a script is missing the markers, never calls `checkForUpdate()`, or has let its block drift from the template.
 
 ## Version & Deployment
 
@@ -134,9 +117,15 @@ Call `checkForUpdate()` at the top of the initialization block. The banner shoul
 
 ## Testing
 
-No test framework is set up. The scripts are heavily DOM-dependent (operating on third-party page structure), which makes traditional unit testing non-trivial.
+The scripts are heavily DOM-dependent (operating on third-party page structure), so most of the code isn't unit-testable. **Pure functions** (math, scoring, data transformation) are the exception — keep them extractable and cover them.
 
-When writing **pure functions** (math, scoring, data transformation), keep them extractable and testable. If a test framework is added later, these are the first candidates.
+Tests use the built-in Node runner, no dependencies:
+
+```sh
+node --test barter-bundle-scorer/scoring.test.js
+```
+
+`scoring.test.js` mirrors the pure scoring functions out of the userscript, because there's no module system to import them through. **When you change the MATH or SCORING sections of `barter-bundle-scorer.user.js`, update the copies in the test file too** — nothing enforces this automatically yet.
 
 Before publishing a userscript change, run:
 
@@ -144,14 +133,15 @@ Before publishing a userscript change, run:
 node tools/check-metadata.mjs
 ```
 
-This validates `.user.js` / `.meta.js` pairs while skipping archives, diagnostics, and local dev resources.
+This validates `.user.js` / `.meta.js` pairs — matching metadata, correct update/download URLs, a wired-up update check, no unused `@grant`s, and no drift in the generated update-check block — while skipping archives, diagnostics, and local dev resources.
 
 ## Adding a New Script
 
 1. Create a folder: `<script-name>/`
 2. Add `<script-name>.user.js` with a complete Tampermonkey metadata block (`@name`, `@version`, `@match`, `@grant GM_xmlhttpRequest`, `@connect raw.githubusercontent.com`, `@updateURL`, `@downloadURL`).
 3. Add `<script-name>.meta.js` with matching metadata (no script body). Copy the header manually from `.user.js`; do not auto-generate it.
-4. Include the in-page update check pattern (see above).
+4. Define `SCRIPT_VERSION` and `LOG_PREFIX`, add the `// <update-check>` / `// </update-check>` markers, and run `node tools/sync-update-check.mjs` to fill them in. Call `checkForUpdate()` from the init block.
 5. Update `README.md` with install/update URLs and a brief description.
-6. Use `templates/userscript-template.md` for standard metadata and update-check boilerplate.
+6. Use `templates/userscript-template.md` for standard metadata boilerplate.
 7. Use the section divider and logging prefix conventions documented above.
+8. Run `node tools/check-metadata.mjs` — it should report `ok` before you commit.

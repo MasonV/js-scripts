@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LLM Stats Show All Models
 // @namespace    https://tampermonkey.net/
-// @version      1.7.2
+// @version      1.8.0
 // @description  Automatically paginates through all models on the llm-stats.com leaderboard and displays them in a single table.
 // @match        *://llm-stats.com/*
 // @match        *://*.llm-stats.com/*
@@ -18,17 +18,24 @@
 (function () {
   'use strict';
 
-  const LOG = '[LLM Show All]';
+  const LOG_PREFIX = '[LLM Show All]';
   const SCRIPT_VERSION =
     typeof GM_info !== 'undefined' && GM_info.script?.version
       ? GM_info.script.version
       : '__DEV__';
-  const META_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.meta.js';
-  const DOWNLOAD_URL = 'https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.user.js';
+
   const PAGE_SIZE = 30;
   const SETTLE_DELAY_MS = 150; // short pause after MutationObserver confirms change
   const WAIT_TIMEOUT_MS = 3000; // max wait for a page transition
   const MAX_PAGES = 20; // safety cap: 20 * 30 = 600 models max
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  LOGGING
+  // ═══════════════════════════════════════════════════════════════════
+
+  function log(...args) { console.log(LOG_PREFIX, ...args); }
+  function warn(...args) { console.warn(LOG_PREFIX, ...args); }
+  function error(...args) { console.error(LOG_PREFIX, ...args); }
 
   // ═══════════════════════════════════════════════════════════════════
   //  STYLES
@@ -63,65 +70,161 @@
       border-radius: 2px;
       transition: width 0.3s ease;
     }
-    .llm-show-all-update-banner {
-      position: fixed;
-      top: 12px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 10001;
-      border: 1px solid #f4c542;
-      border-radius: 8px;
-      background: #2d260b;
-      color: #fff4c2;
-      padding: 10px 14px;
-      font-family: system-ui, sans-serif;
-      font-size: 13px;
-      cursor: pointer;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.35);
-    }
   `);
 
+  // <update-check>
   // ═══════════════════════════════════════════════════════════════════
   //  UPDATE CHECK
+  //  Generated from tools/update-check.template.js — do not edit here.
+  //  Change the template, then run: node tools/sync-update-check.mjs
   // ═══════════════════════════════════════════════════════════════════
 
+  const UPDATE_BANNER_ID = 'llm-stats-show-all-update-banner'
+  const UPDATE_DISMISS_KEY = 'llm_stats_show_all_update_dismissed_v'
+
+  // Tampermonkey exposes the script's own metadata block, so these URLs
+  // don't have to be hand-maintained in two places. Greasemonkey 4 does
+  // not expose them, hence the literal fallbacks.
+  const META_URL =
+    (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.updateURL) ||
+    'https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.meta.js'
+  const DOWNLOAD_URL =
+    (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.downloadURL) ||
+    'https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.user.js'
+
+  // Numeric per-segment compare. True only when `remote` is strictly newer,
+  // so a local build that's ahead of main never nags. Non-numeric versions
+  // (e.g. a tagged pre-release) fall back to plain inequality.
+  function isNewerVersion(remote, local) {
+    const r = String(remote).split('.').map(Number)
+    const l = String(local).split('.').map(Number)
+    if (r.some(Number.isNaN) || l.some(Number.isNaN)) return remote !== local
+    for (let i = 0; i < Math.max(r.length, l.length); i++) {
+      const a = r[i] || 0
+      const b = l[i] || 0
+      if (a > b) return true
+      if (a < b) return false
+    }
+    return false
+  }
+
+  // Dismissal is scoped to the session *and* to the version being offered,
+  // so a newer release re-surfaces the banner instead of staying hidden.
+  function isUpdateDismissed(remote) {
+    try {
+      return sessionStorage.getItem(UPDATE_DISMISS_KEY + remote) === '1'
+    } catch {
+      return false
+    }
+  }
+
+  function dismissUpdate(remote) {
+    try {
+      sessionStorage.setItem(UPDATE_DISMISS_KEY + remote, '1')
+    } catch {
+      /* private mode — the dismissal just won't persist */
+    }
+  }
+
   function checkForUpdate() {
+    // A dev install has no GM_info version to compare against, so every
+    // remote version would look like an update.
+    if (SCRIPT_VERSION === '__DEV__') {
+      console.log(`${LOG_PREFIX} Dev build — skipping update check.`)
+      return
+    }
     try {
       GM_xmlhttpRequest({
         method: 'GET',
         url: META_URL + '?_=' + Date.now(),
         onload(resp) {
-          if (resp.status !== 200) return;
-          const match = resp.responseText.match(/@version\s+(\S+)/);
-          if (!match) return;
-
-          const remote = match[1];
-          if (remote !== SCRIPT_VERSION) {
-            console.log(LOG, `Update available: v${SCRIPT_VERSION} -> v${remote}`);
-            showUpdateBanner(remote);
+          if (resp.status !== 200) return
+          const match = resp.responseText.match(/@version\s+(\S+)/)
+          if (!match) return
+          const remote = match[1]
+          if (isNewerVersion(remote, SCRIPT_VERSION)) {
+            console.log(`${LOG_PREFIX} Update available: v${SCRIPT_VERSION} → v${remote}`)
+            showUpdateBanner(remote)
           } else {
-            console.log(LOG, `Up to date (v${SCRIPT_VERSION})`);
+            console.log(`${LOG_PREFIX} Up to date (v${SCRIPT_VERSION}).`)
           }
         },
         onerror() {
-          console.warn(LOG, 'Update check failed (network error)');
+          console.warn(`${LOG_PREFIX} Update check failed (network error)`)
         },
-      });
-    } catch (err) {
-      console.warn(LOG, 'Update check unavailable:', err);
+      })
+    } catch (e) {
+      console.warn(`${LOG_PREFIX} Update check unavailable:`, e)
     }
   }
 
-  function showUpdateBanner(version) {
-    if (document.querySelector('.llm-show-all-update-banner')) return;
+  function showUpdateBanner(remote) {
+    if (isUpdateDismissed(remote)) return
 
-    const banner = document.createElement('button');
-    banner.type = 'button';
-    banner.className = 'llm-show-all-update-banner';
-    banner.textContent = `LLM Stats Show All v${version} available - click to update`;
-    banner.addEventListener('click', () => window.open(DOWNLOAD_URL, '_blank'));
-    document.body.appendChild(banner);
+    function inject() {
+      if (document.getElementById(UPDATE_BANNER_ID)) return
+
+      // Styled inline rather than via a stylesheet so the banner works
+      // the same in every script, including the ones with no GM_addStyle
+      // grant and the ones running at document-start.
+      const banner = document.createElement('div')
+      banner.id = UPDATE_BANNER_ID
+      Object.assign(banner.style, {
+        position: 'fixed',
+        top: '0',
+        left: '0',
+        right: '0',
+        zIndex: '2147483647',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '12px',
+        padding: '8px 16px',
+        background: '#3b82f6',
+        color: '#fff',
+        fontFamily: 'system-ui, sans-serif',
+        fontSize: '13px',
+        lineHeight: '1.4',
+        boxShadow: '0 1px 4px rgba(0, 0, 0, 0.3)',
+      })
+
+      const name = LOG_PREFIX.replace(/^\[|\]$/g, '')
+
+      const message = document.createElement('span')
+      message.textContent = `⬆ ${name} v${remote} available (you have v${SCRIPT_VERSION}) — click to update`
+      Object.assign(message.style, { cursor: 'pointer', textDecoration: 'underline' })
+      message.addEventListener('click', () => {
+        window.open(DOWNLOAD_URL, '_blank')
+      })
+
+      const dismiss = document.createElement('button')
+      dismiss.type = 'button'
+      dismiss.textContent = '✕ Dismiss'
+      Object.assign(dismiss.style, {
+        flex: '0 0 auto',
+        padding: '2px 10px',
+        border: '1px solid rgba(255, 255, 255, 0.6)',
+        borderRadius: '4px',
+        background: 'transparent',
+        color: '#fff',
+        font: 'inherit',
+        cursor: 'pointer',
+      })
+      dismiss.addEventListener('click', () => {
+        dismissUpdate(remote)
+        banner.remove()
+        console.log(`${LOG_PREFIX} Update notice dismissed for this session.`)
+      })
+
+      banner.append(message, dismiss)
+      document.body.prepend(banner)
+    }
+
+    // document-start scripts run before <body> exists.
+    if (document.body) inject()
+    else document.addEventListener('DOMContentLoaded', inject)
   }
+  // </update-check>
 
   // ═══════════════════════════════════════════════════════════════════
   //  DOM HELPERS
@@ -179,7 +282,7 @@
       const text = (el.innerText || el.textContent || '').trim();
       const match = text.match(weakRe);
       if (match) {
-        console.log(LOG, 'Weak pagination match found:', text);
+        log('Weak pagination match found:', text);
         // Try to extract start-end from the same text
         const rangeMatch = text.match(/(\d+)\s*[–\-]\s*(\d+)/);
         return {
@@ -481,11 +584,11 @@
           tbody.appendChild(row);
         }
 
-        console.log(LOG, `Sorted by column ${colIndex} (${th.textContent.trim()}), dir=${currentSortDir === 1 ? 'asc' : 'desc'}`);
+        log(`Sorted by column ${colIndex} (${th.textContent.trim()}), dir=${currentSortDir === 1 ? 'asc' : 'desc'}`);
       });
     });
 
-    console.log(LOG, `Sorting enabled on ${ths.length} columns.`);
+    log(`Sorting enabled on ${ths.length} columns.`);
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -616,7 +719,7 @@
       a.click();
       URL.revokeObjectURL(url);
       flashFeedback(toolbar, `Exported ${grid.length - 1} rows`);
-      console.log(LOG, `CSV exported: ${grid.length - 1} rows.`);
+      log(`CSV exported: ${grid.length - 1} rows.`);
     });
 
     // Copy to clipboard button (TSV for spreadsheet paste compatibility)
@@ -628,10 +731,10 @@
       try {
         await navigator.clipboard.writeText(tsv);
         flashFeedback(toolbar, `Copied ${grid.length - 1} rows`);
-        console.log(LOG, `Table copied to clipboard: ${grid.length - 1} rows.`);
+        log(`Table copied to clipboard: ${grid.length - 1} rows.`);
       } catch (err) {
         // Fallback for contexts where clipboard API is blocked
-        console.error(LOG, 'Clipboard write failed:', err);
+        error('Clipboard write failed:', err);
         flashFeedback(toolbar, 'Copy failed — check console');
       }
     });
@@ -712,7 +815,7 @@
         const tbl = document.querySelector('table');
         const nBtn = findNextButton();
         const pBtn = findPrevButton();
-        console.log(LOG, `Attempt ${attempt}/10 diagnostics:`, {
+        log(`Attempt ${attempt}/10 diagnostics:`, {
           tableFound: !!tbl,
           tbodyFound: !!(tbl && tbl.querySelector('tbody')),
           rowCount: tbl ? (tbl.querySelector('tbody')?.querySelectorAll('tr').length ?? 0) : 0,
@@ -726,22 +829,22 @@
 
       paginationInfo = findPaginationInfo();
       if (paginationInfo) break;
-      console.log(LOG, `Attempt ${attempt}/10: pagination info not found yet, retrying...`);
+      log(`Attempt ${attempt}/10: pagination info not found yet, retrying...`);
     }
 
     if (!paginationInfo) {
-      console.warn(LOG, 'Could not find pagination info after 10 attempts. Page structure may have changed.');
+      warn('Could not find pagination info after 10 attempts. Page structure may have changed.');
       return;
     }
-    console.log(LOG, 'Pagination info:', paginationInfo);
+    log('Pagination info:', paginationInfo);
 
     const totalModels = paginationInfo.total;
     const totalPages = Math.ceil(totalModels / PAGE_SIZE);
-    console.log(LOG, `Found ${totalModels} models across ~${totalPages} pages.`);
+    log(`Found ${totalModels} models across ~${totalPages} pages.`);
 
     // If all models already visible, nothing to do
     if (paginationInfo.end >= totalModels) {
-      console.log(LOG, 'All models already visible.');
+      log('All models already visible.');
       return;
     }
 
@@ -751,7 +854,7 @@
     // Collect rows from the current (first) page
     const firstPageRows = extractTableRows();
     allRows.push(...firstPageRows);
-    console.log(LOG, `Page 1: collected ${firstPageRows.length} rows.`);
+    log(`Page 1: collected ${firstPageRows.length} rows.`);
     updateBanner(banner, allRows.length, totalModels);
 
     // Navigate through remaining pages
@@ -760,7 +863,7 @@
     while (page < totalPages && page < MAX_PAGES) {
       const nextBtn = findNextButton();
       if (!nextBtn || isNextDisabled(nextBtn)) {
-        console.log(LOG, `Next button unavailable at page ${page}. Stopping.`);
+        log(`Next button unavailable at page ${page}. Stopping.`);
         break;
       }
 
@@ -769,7 +872,7 @@
       const currentFirstRow = currentRows.length > 0 ? rowFingerprint(currentRows[0]) : '';
 
       // Click Next — use simulated events for React compatibility
-      console.log(LOG, `Clicking Next for page ${page + 1}...`);
+      log(`Clicking Next for page ${page + 1}...`);
       simulateClick(nextBtn);
       page++;
 
@@ -780,20 +883,20 @@
       // Collect rows from this page
       const pageRows = extractTableRows();
       allRows.push(...pageRows);
-      console.log(LOG, `Page ${page}: collected ${pageRows.length} rows (total: ${allRows.length}).`);
+      log(`Page ${page}: collected ${pageRows.length} rows (total: ${allRows.length}).`);
       updateBanner(banner, Math.min(allRows.length, totalModels), totalModels);
 
       // If we've collected enough rows, stop early without waiting for
       // the next iteration's button check (avoids the slow last-page timeout)
       if (allRows.length >= totalModels) {
-        console.log(LOG, 'Collected enough rows, stopping early.');
+        log('Collected enough rows, stopping early.');
         break;
       }
     }
 
     // Deduplicate in case of overlap
     const uniqueRows = deduplicateRows(allRows);
-    console.log(LOG, `Collected ${allRows.length} rows, ${uniqueRows.length} unique after dedup.`);
+    log(`Collected ${allRows.length} rows, ${uniqueRows.length} unique after dedup.`);
 
     // Inject all rows into the DOM while preventing React from blanking
     // the page. Strategy: find the nearest React-controlled ancestor of
@@ -801,7 +904,7 @@
     // React can re-render all it wants inside the hidden container.
     const origTable = document.querySelector('table');
     if (!origTable) {
-      console.error(LOG, 'Table not found for row replacement.');
+      error('Table not found for row replacement.');
       completeBanner(banner, uniqueRows.length);
       return;
     }
@@ -825,7 +928,7 @@
       reactContainer = reactContainer.parentElement;
     }
 
-    console.log(LOG, 'React container to hide:', reactContainer?.tagName, reactContainer?.className);
+    log('React container to hide:', reactContainer?.tagName, reactContainer?.className);
 
     // Build our static table: clone the header, insert all collected rows
     const staticTable = origTable.cloneNode(false);
@@ -881,12 +984,12 @@
     if (reactRoot) {
       const fiberKey = Object.keys(reactRoot).find((k) => k.startsWith('__reactFiber$'));
       if (fiberKey) {
-        console.log(LOG, 'Disconnecting React fiber to prevent re-renders.');
+        log('Disconnecting React fiber to prevent re-renders.');
         delete reactRoot[fiberKey];
       }
     }
 
-    console.log(LOG, `Done. Displaying ${uniqueRows.length} models in a single table.`);
+    log(`Done. Displaying ${uniqueRows.length} models in a single table.`);
     completeBanner(banner, uniqueRows.length);
   }
 
@@ -909,7 +1012,7 @@
     try {
       await showAllModels();
     } catch (err) {
-      console.error(LOG, 'Failed to load all models:', err);
+      error('Failed to load all models:', err);
     } finally {
       running = false;
     }
