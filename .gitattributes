@@ -1,0 +1,36 @@
+# Enforce LF line endings for all text files in the repository.
+# Prevents CRLF/LF phantom diffs when working across Windows and Unix/macOS.
+
+# Default: detect text files and normalize to LF on commit
+* text=auto eol=lf
+
+# Shell scripts — always LF (CRLF breaks shebang lines)
+*.sh text eol=lf
+
+# Source and config files — always LF
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.txt text eol=lf
+
+# Binary files — do not touch
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+
+# ---------------------------------------------------------------------------
+# Before running `git add --renormalize .`, check for files whose CRLF is
+# load-bearing and exempt them here with `-text` first. Some formats carry CRLF
+# in the wire format itself, so normalizing them changes what the file *means*,
+# not just how it is stored — parser test fixtures are the usual casualty.
+# Candidates: *.ofx, *.qfx, *.qif, *.bat, *.cmd, *.ps1, *.reg, HTTP/MIME
+# fixtures, and anything under a `fixtures/` or `mocks/` tree.
+# `git ls-files --eol | grep 'i/crlf\|i/mixed'` lists what is currently at risk.
+# ---------------------------------------------------------------------------
