@@ -14,6 +14,8 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
   - [`auto-focus-search/`](#auto-focus-search)
   - [`llm-stats-show-all/`](#llm-stats-show-all)
   - [`yourtube/`](#yourtube)
+- [AI chat](#ai-chat)
+  - [`ai-chat-widescreen/`](#ai-chat-widescreen)
 - [Gaming](#gaming)
   - [`barter-bundle-scorer/`](#barter-bundle-scorer)
   - [`fanatical-autoclaim/`](#fanatical-autoclaim)
@@ -103,6 +105,37 @@ A unified userscript for [YouTube](https://www.youtube.com) — "YouTube without
 **Metadata update checks:**
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.meta.js`
+
+<a id="ai-chat"></a>
+
+---
+
+<h2 align="center">━━━━━━━━━━━━━━━━━━━━━━━  AI chat  ━━━━━━━━━━━━━━━━━━━━━━━</h2>
+
+---
+
+### `ai-chat-widescreen/`
+
+A userscript for [ChatGPT](https://chatgpt.com), [Claude](https://claude.ai), and [Gemini](https://gemini.google.com) that widens the narrow chat column to fit the monitor you actually have.
+
+**Features:**
+
+- Per-site width, saved separately — a width that reads well on ChatGPT isn't the one that reads well on Gemini
+- Slider from 50% to 100% of the window, with `Comfortable` / `Wide` / `Full` presets, and a live readout of the width in pixels (`≈ 1120 px of chat · 80% of this 1400 px window · site default 768 px`)
+- Live preview — the page resizes as the slider moves, so the width you pick is the width you can see
+- Optional "match the input box", so the composer can follow the thread or keep the site's own width
+- Selector-light engine — walks up from a message (or the composer) and widens whatever the site capped along the way, so churn in generated class names costs at most one anchor
+- Never narrower than the stock column, whatever the window size
+- `Alt+Shift+W` toggles widescreen; switching it off leaves no trace of the script on the page
+- Floating pill with an LED that reads on or off at a glance, and a two-step reset
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/ai-chat-widescreen/ai-chat-widescreen.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/ai-chat-widescreen/ai-chat-widescreen.meta.js`
 
 <a id="gaming"></a>
 
