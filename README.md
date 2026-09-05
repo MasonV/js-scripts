@@ -125,6 +125,7 @@ A userscript for [ChatGPT](https://chatgpt.com), [Claude](https://claude.ai), an
 - Live preview — the page resizes as the slider moves, so the width you pick is the width you can see
 - Optional "match the input box", so the composer can follow the thread or keep the site's own width
 - Selector-light engine — walks up from a message (or the composer) and widens whatever the site capped along the way, so churn in generated class names costs at most one anchor
+- Tables and code blocks follow the column too — where a site pinches its own table wrapper (Gemini clips wide tables mid-word), the wrapper is grown to match; a table that fits is left exactly as the site drew it
 - Never narrower than the stock column, whatever the window size
 - `Alt+Shift+W` toggles widescreen; switching it off leaves no trace of the script on the page
 - Floating pill with an LED that reads on or off at a glance, and a two-step reset

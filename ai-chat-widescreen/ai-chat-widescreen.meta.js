@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI Chat Widescreen
 // @namespace    ai-chat-widescreen
-// @version      1.0.0
+// @version      1.1.0
 // @description  Widescreen mode for ChatGPT, Claude, and Gemini — widens the narrow chat column to fit your monitor, with a per-site width control
 // @match        https://chatgpt.com/*
 // @match        https://claude.ai/*

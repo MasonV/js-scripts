@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI Chat Widescreen
 // @namespace    ai-chat-widescreen
-// @version      1.0.0
+// @version      1.1.0
 // @description  Widescreen mode for ChatGPT, Claude, and Gemini — widens the narrow chat column to fit your monitor, with a per-site width control
 // @match        https://chatgpt.com/*
 // @match        https://claude.ai/*
@@ -47,6 +47,14 @@
 	// Widescreen never makes the column narrower than the stock ~768px one,
 	// however small the window gets.
 	const FLOOR_PX = 768
+
+	// Wide content that hangs *below* a message rather than above it.
+	const CONTENT_SELECTOR = 'table, pre'
+
+	// How far above a table to look for whatever is pinching it. These
+	// wrappers are one or two deep in every app; a deeper walk would only
+	// buy re-measuring the whole message on every pass.
+	const CONTENT_WALK_DEPTH = 3
 
 	const WIDTH_MIN_PCT = 50
 	const WIDTH_MAX_PCT = 100
@@ -280,8 +288,12 @@
 
 		const expr = widthExpr()
 		// Containers stay tagged either way; the stylesheet decides whether
-		// the composer is included, so the toggle costs no DOM work.
-		const scope = settings.matchComposer ? `[${WIDE_ATTR}]` : `[${WIDE_ATTR}="thread"]`
+		// the composer is included, so the toggle costs no DOM work. Content
+		// blocks follow the thread, never the composer setting.
+		const kinds = settings.matchComposer
+			? ['thread', 'composer', 'block', 'content']
+			: ['thread', 'block', 'content']
+		const scope = kinds.map(kind => `[${WIDE_ATTR}="${kind}"]`).join(', ')
 		const varRules = site.widthVars.length
 			? `:root, html, body, main { ${site.widthVars
 					.map(name => `${name}: ${expr} !important;`)
@@ -291,6 +303,10 @@
 		writeStyle(
 			[
 				`${scope} { max-width: ${expr} !important; }`,
+				// A pinched wrapper needs to be told to grow, not merely
+				// allowed to: lifting its cap alone leaves an inline or
+				// measured width in place.
+				`[${WIDE_ATTR}="block"] { width: 100% !important; }`,
 				varRules,
 				settings.matchComposer ? '' : composerStockRules(),
 			]
@@ -350,6 +366,70 @@
 		return claimed
 	}
 
+	// An element is pinched when its content is being cut off or scrolled
+	// inside it. That is the symptom the user sees, and it holds whatever the
+	// cause — a max-width, a width the app measured and set inline, a flex
+	// item that won't grow — so it doesn't depend on guessing which one a
+	// site used this month.
+	function isPinched(el) {
+		return el.scrollWidth > el.clientWidth + 1
+	}
+
+	function capInBandPx(el) {
+		const maxWidth = getComputedStyle(el).maxWidth
+		const px = parseFloat(maxWidth)
+		if (!maxWidth.endsWith('px') || !Number.isFinite(px)) return null
+		return px >= MIN_STOCK_PX && px <= MAX_STOCK_PX ? px : null
+	}
+
+	// Tables and code blocks sit below the message anchor, so the upward walk
+	// never sees them: on a site that caps its own table wrapper, the column
+	// widens and the table stays clipped inside it. This is the other half —
+	// walk *down* to the wide content, then back up to the column, freeing
+	// whatever is holding it in.
+	function tagContentBlocks() {
+		const inThread = CONTENT_SELECTOR.split(', ')
+			.map(sel => `[${WIDE_ATTR}="thread"] ${sel}`)
+			.join(', ')
+
+		let claimed = 0
+
+		for (const content of document.querySelectorAll(inThread)) {
+			// The table itself only ever has a cap lifted. Forcing its width
+			// would squash a wide table into the column instead of letting it
+			// scroll, which is worse than what it does now.
+			if (!content.hasAttribute(WIDE_ATTR)) {
+				const cap = capInBandPx(content)
+				if (cap !== null) {
+					content.setAttribute(WIDE_ATTR, 'content')
+					content.setAttribute(STOCK_ATTR, String(Math.round(cap)))
+					claimed++
+				}
+			}
+
+			let el = content.parentElement
+			for (let depth = 0; el && depth < CONTENT_WALK_DEPTH; depth++) {
+				const kind = el.getAttribute(WIDE_ATTR)
+				// Reached the column itself — everything above is already ours.
+				if (kind === 'thread' || kind === 'composer') break
+
+				if (kind !== 'block') {
+					const cap = capInBandPx(el)
+					if (isPinched(el) || cap !== null) {
+						el.setAttribute(WIDE_ATTR, 'block')
+						if (cap !== null) el.setAttribute(STOCK_ATTR, String(Math.round(cap)))
+						claimed++
+						break
+					}
+				}
+
+				el = el.parentElement
+			}
+		}
+
+		return claimed
+	}
+
 	// Turning widescreen off leaves no trace of the script on the page.
 	function untagAll() {
 		for (const el of document.querySelectorAll(`[${WIDE_ATTR}]`)) {
@@ -377,7 +457,10 @@
 			return
 		}
 
-		const claimed = tagFrom(site.thread, 'thread') + tagFrom(site.composer, 'composer')
+		// Order matters: the content pass stops at a thread-tagged element, so
+		// the column has to be claimed first.
+		let claimed = tagFrom(site.thread, 'thread') + tagFrom(site.composer, 'composer')
+		claimed += tagContentBlocks()
 		if (claimed && !reportedClaims) {
 			reportedClaims = true
 			log(`Widened ${claimed} container(s) on ${site.label}.`)
