@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.10.0
+// @version      0.10.1
 // @description  Bulk-reveal and bulk-redeem keys on Luna
 // @include      /^https:\/\/luna\.amazon\.[a-z.]{2,6}\//
 // @match        https://www.gog.com/*
@@ -490,11 +490,15 @@
   //  CORE ACTIONS — CLAIM PAGE
   // ═══════════════════════════════════════════════════════════════════
 
+  function findClaimCta() {
+    return document.querySelector('[data-a-target="buy-box_call-to-action"]');
+  }
+
   async function claimCurrentGame() {
-    const btn = document.querySelector('[data-a-target="buy-box_call-to-action"]');
+    const btn = findClaimCta();
     if (!btn) {
       warn("Claim button not found");
-      updateStatus("Claim button not found");
+      updateStatus("Claim button not found", "error");
       return;
     }
 
@@ -503,6 +507,7 @@
     updateStatus(`Claiming via ${store}…`);
     setButtonsEnabled(false);
 
+    const before = snapshotClaimState(btn);
     if (store === "GOG") {
       // Luna opens a second claim page to expose the key — keep it in this
       // tab, then carry on to GOG's "Claim code" link.
@@ -512,12 +517,97 @@
       btn.click();
     }
 
-    await sleep(redeemDelayMs);
-    log("Claim submitted");
-    updateStatus("Claim submitted");
+    updateStatus(`Claim clicked — checking it went through…`);
+    const result = await verifyClaim(before, store);
     setButtonsEnabled(true);
+    reportClaimResult(result);
 
-    if (store === "GOG") followGogClaimCode();
+    if (store !== "GOG") return;
+    if (result.ok) {
+      followGogClaimCode();
+    } else {
+      // Don't hand an unconfirmed claim to GOG.
+      clearGogHandoff();
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  CLAIM VERIFICATION
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // A claim only counts once Luna shows it worked. Anything else — an error
+  // popup, or no signal before the timeout — is reported as a failure, and
+  // the tab is left exactly where it is so the user can reload and check.
+  //
+  // UNVERIFIED signals (no before/after capture exists yet — see todo):
+  //   success: the call-to-action reads "Claimed"/"Redeemed", a dialog or
+  //            alert says so, or (GOG) the "Claim code" link appears.
+  //   error:   a dialog/alert/live region, new since the click, whose text
+  //            reads like an error; or the call-to-action itself does.
+
+  const CLAIM_VERIFY_TIMEOUT_MS = 15000;
+  const CLAIM_SUCCESS_RE = /\b(claimed|redeemed|successfully)\b/i;
+  const CLAIM_ERROR_RE =
+    /\b(error|went wrong|try again|unable to|failed|couldn['’]t|could not|not available)\b/i;
+  const CLAIM_PENDING_RE = /\b(claiming|loading|processing)\b/i;
+
+  function noticeTexts() {
+    return Array.from(
+      document.querySelectorAll('[role="alert"], [role="alertdialog"], [role="dialog"], [aria-live]'),
+    )
+      .filter((el) => !el.closest("#lac-panel") && el.getClientRects().length > 0)
+      .map((el) => el.textContent.trim().replace(/\s+/g, " "))
+      .filter(Boolean);
+  }
+
+  function snapshotClaimState(btn) {
+    return { label: btn.textContent.trim(), notices: new Set(noticeTexts()) };
+  }
+
+  function probeClaim(before, store) {
+    const cta = findClaimCta();
+    const label = cta?.textContent.trim() ?? "";
+
+    const fresh = noticeTexts().filter((t) => !before.notices.has(t));
+    const errorNotice = fresh.find((t) => CLAIM_ERROR_RE.test(t));
+    if (errorNotice) return { ok: false, reason: `Luna says: "${errorNotice.slice(0, 120)}"` };
+    if (label && label !== before.label && CLAIM_ERROR_RE.test(label)) {
+      return { ok: false, reason: `Claim button now reads "${label}"` };
+    }
+
+    if (store === "GOG" && findGogClaimCode()) return { ok: true, signal: "GOG key exposed" };
+    if (label && label !== before.label && CLAIM_SUCCESS_RE.test(label)) {
+      return { ok: true, signal: `button reads "${label}"` };
+    }
+    const successNotice = fresh.find((t) => CLAIM_SUCCESS_RE.test(t));
+    if (successNotice) return { ok: true, signal: `"${successNotice.slice(0, 80)}"` };
+    return null;
+  }
+
+  async function verifyClaim(before, store) {
+    const result = await waitFor(() => probeClaim(before, store), CLAIM_VERIFY_TIMEOUT_MS);
+    if (result) return result;
+
+    const label = findClaimCta()?.textContent.trim();
+    let reason = `no confirmation from Luna after ${CLAIM_VERIFY_TIMEOUT_MS / 1000}s`;
+    if (!label) reason += " (claim button is gone)";
+    else if (label !== before.label) reason += ` (button now reads "${label}")`;
+    if (label && CLAIM_PENDING_RE.test(label)) reason += " — still pending";
+    return { ok: false, reason };
+  }
+
+  function reportClaimResult(result) {
+    if (result.ok) {
+      log(`Claim confirmed: ${result.signal}`);
+      updateStatus(`✓ Claimed — ${result.signal}`, "ok");
+    } else {
+      warn(`Claim NOT confirmed: ${result.reason}`);
+      updateStatus(`⚠ Claim not confirmed: ${result.reason}. Reload and check.`, "error");
+    }
+    // Background tabs from "Auto Claim All" are easiest to triage from the
+    // tab strip. Best effort — Luna may rewrite the title.
+    const mark = result.ok ? "✓ " : "⚠ ";
+    if (!document.title.startsWith(mark)) document.title = mark + document.title;
   }
 
   // ═══════════════════════════════════════════════════════════════════
