@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.8.0
+// @version      0.9.0
 // @description  Bulk-reveal and bulk-redeem keys on Luna
 // @include      /^https:\/\/luna\.amazon\.[a-z.]{2,6}\//
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -11,6 +11,7 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_openInTab
+// @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==

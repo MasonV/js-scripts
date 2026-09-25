@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.8.0
+// @version      0.9.0
 // @description  Bulk-reveal and bulk-redeem keys on Luna
 // @include      /^https:\/\/luna\.amazon\.[a-z.]{2,6}\//
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -11,6 +11,7 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_openInTab
+// @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
@@ -51,6 +52,16 @@
     ["on GOG.com", "GOG"],
     ["on Legacy Games", "Legacy Games"],
   ];
+
+  // GOG: after the Luna claim, the key is exposed with a "Claim code" link
+  // of the form https://www.gog.com/redeem/<game_key>. The handoff flag is
+  // per-tab (sessionStorage) so it survives Luna navigating this same tab
+  // to the page that exposes the key.
+  const GOG_HANDOFF_KEY = "lac_gog_handoff_v1";
+  const GOG_HANDOFF_TTL_MS = 2 * 60 * 1000;
+  const GOG_LINK_TIMEOUT_MS = 20000;
+  const GOG_REDEEM_URL_RE =
+    /^https:\/\/(?:www\.)?gog\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?redeem\/([A-Za-z0-9-]+)\/?(?:[?#].*)?$/;
 
   // Mutable — updated by the UI input
   let revealDelayMs = DEFAULT_REVEAL_DELAY_MS;
@@ -264,6 +275,63 @@
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  /**
+   * Poll `probe` until it returns something truthy or `timeoutMs` elapses.
+   * Resolves with the probe's value, or null on timeout.
+   */
+  async function waitFor(probe, timeoutMs, intervalMs = 250) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const value = probe();
+      if (value) return value;
+      if (Date.now() >= deadline) return null;
+      await sleep(intervalMs);
+    }
+  }
+
+  // Keys end up in the console and the status line — show only enough to
+  // tell two apart.
+  function maskKey(key) {
+    return key.length > 5 ? `${key.slice(0, 5)}…` : key;
+  }
+
+  // The page's own window — Luna's click handlers call *its* window.open.
+  const pageWindow = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+
+  /**
+   * Click `el`, but keep whatever it opens in this tab: drop a
+   * target="_blank" on its anchor, and for a few seconds route the page's
+   * window.open() into a same-tab navigation. `onUrl` gets first refusal
+   * on each URL (return true when handled).
+   */
+  function clickInSameTab(el, onUrl = () => false, windowMs = 10000) {
+    const anchor = el.closest("a");
+    if (anchor && anchor.getAttribute("target") && anchor.getAttribute("target") !== "_self") {
+      anchor.removeAttribute("target");
+    }
+
+    const originalOpen = pageWindow.open;
+    const sameTabOpen = function (url, ...rest) {
+      // window.open() with no URL is the "open blank, set location later"
+      // pattern — there's nothing to redirect, so let the page have it.
+      if (!url) return originalOpen.call(pageWindow, url, ...rest);
+      const abs = new URL(String(url), window.location.href).href;
+      log(`Keeping window.open in this tab → ${abs.replace(GOG_REDEEM_URL_RE, "gog.com/redeem/…")}`);
+      if (!onUrl(abs)) window.location.assign(abs);
+      return null;
+    };
+    // Firefox's sandbox needs the function exported into the page scope.
+    pageWindow.open =
+      typeof exportFunction === "function" ? exportFunction(sameTabOpen, pageWindow) : sameTabOpen;
+    try {
+      el.click();
+    } finally {
+      setTimeout(() => {
+        pageWindow.open = originalOpen;
+      }, windowMs);
+    }
+  }
+
   function findButtonsByText(text) {
     const candidates = document.querySelectorAll(
       '.item-card__claim-button a.tw-button[data-a-target="FGWPOffer"]',
@@ -416,12 +484,116 @@
     updateStatus(`Claiming via ${store}…`);
     setButtonsEnabled(false);
 
-    btn.click();
+    if (store === "GOG") {
+      // Luna opens a second claim page to expose the key — keep it in this
+      // tab, then carry on to GOG's "Claim code" link.
+      markGogHandoff();
+      clickInSameTab(btn, tryGogHandoffUrl);
+    } else {
+      btn.click();
+    }
 
     await sleep(redeemDelayMs);
     log("Claim submitted");
     updateStatus("Claim submitted");
     setButtonsEnabled(true);
+
+    if (store === "GOG") followGogClaimCode();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  GOG HANDOFF — Luna side
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // Order of events: Claim on Luna → Luna exposes the key (same tab, either
+  // in place or via a second claim page) → "Claim code" links to
+  // https://www.gog.com/redeem/<game_key> → this tab navigates there.
+
+  function markGogHandoff() {
+    try {
+      sessionStorage.setItem(GOG_HANDOFF_KEY, String(Date.now()));
+    } catch {
+      /* private mode — the in-page watcher still covers the SPA case */
+    }
+  }
+
+  function clearGogHandoff() {
+    try {
+      sessionStorage.removeItem(GOG_HANDOFF_KEY);
+    } catch {
+      /* nothing to clear */
+    }
+  }
+
+  function hasPendingGogHandoff() {
+    try {
+      const at = Number(sessionStorage.getItem(GOG_HANDOFF_KEY));
+      if (!at) return false;
+      if (Date.now() - at > GOG_HANDOFF_TTL_MS) {
+        clearGogHandoff();
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Find the "Claim code" target: an anchor whose href is a GOG redeem URL,
+   * else the "Claim code" button itself (its link may be wired in JS).
+   */
+  function findGogClaimCode() {
+    for (const a of document.querySelectorAll('a[href*="gog.com"]')) {
+      if (GOG_REDEEM_URL_RE.test(a.href)) return { url: a.href };
+    }
+    const button = Array.from(document.querySelectorAll('a, button, [role="button"]')).find(
+      (el) => !el.closest("#lac-panel") && el.textContent.trim().toLowerCase() === "claim code",
+    );
+    if (!button) return null;
+    const href = button.closest("a")?.href;
+    return href && GOG_REDEEM_URL_RE.test(href) ? { url: href } : { el: button };
+  }
+
+  function handOffToGog(url) {
+    const key = url.match(GOG_REDEEM_URL_RE)[1];
+    clearGogHandoff();
+    log(`GOG: handing off key ${maskKey(key)} to gog.com`);
+    updateStatus(`GOG: opening redeem page for ${maskKey(key)}…`);
+    window.location.assign(url);
+  }
+
+  // clickInSameTab() hook: take over any GOG redeem URL the page tries to open.
+  function tryGogHandoffUrl(url) {
+    if (!GOG_REDEEM_URL_RE.test(url)) return false;
+    handOffToGog(url);
+    return true;
+  }
+
+  let gogWatchActive = false;
+
+  async function followGogClaimCode() {
+    if (gogWatchActive) return;
+    gogWatchActive = true;
+    try {
+      log("GOG: waiting for the Claim code link…");
+      updateStatus("GOG: waiting for the key…");
+      const target = await waitFor(findGogClaimCode, GOG_LINK_TIMEOUT_MS);
+      if (!target) {
+        warn(`GOG: no Claim code link after ${GOG_LINK_TIMEOUT_MS}ms`);
+        updateStatus("GOG: Claim code link not found — finish on this page", "error");
+        clearGogHandoff();
+        return;
+      }
+      if (target.url) {
+        handOffToGog(target.url);
+      } else {
+        log("GOG: Claim code has no href — clicking it in this tab");
+        clickInSameTab(target.el, tryGogHandoffUrl);
+      }
+    } finally {
+      gogWatchActive = false;
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -432,8 +604,12 @@
   let claimBtn = null;
   let autoClaimBtn = null;
 
-  function updateStatus(text) {
-    if (statusEl) statusEl.textContent = text;
+  // tone: undefined (neutral) | "ok" | "error"
+  function updateStatus(text, tone) {
+    if (!statusEl) return;
+    statusEl.textContent = text;
+    statusEl.classList.toggle("lac-status--ok", tone === "ok");
+    statusEl.classList.toggle("lac-status--error", tone === "error");
   }
 
   // Home page only: preview what "Open All" would do under the current toggles.
@@ -853,6 +1029,9 @@
                 min-height: 16px;
             }
 
+            #lac-status.lac-status--ok { color: #81c784; }
+            #lac-status.lac-status--error { color: #ef5350; font-weight: 700; }
+
         `);
   }
 
@@ -921,6 +1100,10 @@
     const path = window.location.pathname;
     const isHome = /\/claims\/home/.test(path);
     const isClaim = /\/claims\/.+\/dp\//.test(path);
+
+    // A GOG claim started in this tab carries on here, whatever route Luna
+    // used to expose the key.
+    if (hasPendingGogHandoff()) followGogClaimCode();
 
     if (!isHome && !isClaim) {
       if (currentPanelRoute !== null) {
