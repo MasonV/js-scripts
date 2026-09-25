@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.9.0
+// @version      0.10.0
 // @description  Bulk-reveal and bulk-redeem keys on Luna
 // @include      /^https:\/\/luna\.amazon\.[a-z.]{2,6}\//
+// @match        https://www.gog.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js
@@ -12,6 +13,9 @@
 // @grant        GM_addStyle
 // @grant        GM_openInTab
 // @grant        unsafeWindow
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
 // @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
@@ -26,6 +30,10 @@
 // page load.
 // Path arm 1 — home listing:  /claims/home…
 // Path arm 2 — claim detail:  /claims/<slug>/dp/…
+//
+// @match www.gog.com: the GOG leg (Continue → Redeem on /redeem/<key>). The
+// script runs on every GOG page but does nothing unless Luna handed it that
+// exact key a few minutes earlier — see "GOG REDEMPTION — gog.com side".
 
 (function () {
   "use strict";
@@ -62,6 +70,17 @@
   const GOG_LINK_TIMEOUT_MS = 20000;
   const GOG_REDEEM_URL_RE =
     /^https:\/\/(?:www\.)?gog\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?redeem\/([A-Za-z0-9-]+)\/?(?:[?#].*)?$/;
+
+  // GOG, cross-site: localStorage/sessionStorage don't reach gog.com, so the
+  // handoff is recorded in GM storage (shared by the script on every site).
+  // The key itself travels in the redeem URL; the GM entry is what gives the
+  // gog.com side permission to act on it, and records the Redeem click so it
+  // can never happen twice. One entry per key so parallel tabs don't clobber.
+  const GOG_PENDING_PREFIX = "lac_gog_pending_v1:";
+  const GOG_PENDING_TTL_MS = 10 * 60 * 1000;
+  const GOG_AUTO_REDEEM_KEY = "lac_gog_auto_redeem_v1"; // default false: stop before Redeem
+  const GOG_STEP_TIMEOUT_MS = 20000;
+  const GOG_REDEEM_PATH_RE = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?redeem\/([A-Za-z0-9-]+)\/?$/;
 
   // Mutable — updated by the UI input
   let revealDelayMs = DEFAULT_REVEAL_DELAY_MS;
@@ -558,6 +577,11 @@
   function handOffToGog(url) {
     const key = url.match(GOG_REDEEM_URL_RE)[1];
     clearGogHandoff();
+    GM_setValue(GOG_PENDING_PREFIX + key.toUpperCase(), {
+      createdAt: Date.now(),
+      game: document.querySelector("h1")?.textContent?.trim() || null,
+      stage: "handoff",
+    });
     log(`GOG: handing off key ${maskKey(key)} to gog.com`);
     updateStatus(`GOG: opening redeem page for ${maskKey(key)}…`);
     window.location.assign(url);
@@ -594,6 +618,184 @@
     } finally {
       gogWatchActive = false;
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  GOG REDEMPTION — gog.com side
+  // ═══════════════════════════════════════════════════════════════════
+  //
+  // Page 1 "Redeem code": key prefilled, green Continue.
+  // Page 2 "You are about to redeem 1 item …": Cancel / Redeem.
+  // Buttons are found by visible text, never by GOG's generated classes.
+  // Redeem is exactly-once: the GM entry is stamped "redeem-clicked" *before*
+  // the click, and a stamped entry is never clicked again — not after a
+  // reload, not from a second tab. Any surprise stops the run.
+
+  function isGogAutoRedeem() {
+    return GM_getValue(GOG_AUTO_REDEEM_KEY, false) === true;
+  }
+
+  function setGogAutoRedeem(on) {
+    GM_setValue(GOG_AUTO_REDEEM_KEY, on);
+  }
+
+  function isVisible(el) {
+    return el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
+  }
+
+  function isEnabled(el) {
+    return !el.disabled && el.getAttribute("aria-disabled") !== "true";
+  }
+
+  function findVisibleButtonsByText(text) {
+    const want = text.toLowerCase();
+    return Array.from(
+      document.querySelectorAll('button, a, [role="button"], input[type="submit"]'),
+    ).filter(
+      (el) =>
+        !el.closest("#lac-panel") &&
+        (el.value || el.textContent).trim().toLowerCase() === want &&
+        isVisible(el),
+    );
+  }
+
+  // The single visible, enabled button with this text — or null, so an
+  // ambiguous page is never guessed at.
+  function findOnlyButton(text) {
+    const matches = findVisibleButtonsByText(text).filter(isEnabled);
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function normalizeKey(key) {
+    return key.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  }
+
+  // A prefilled input that holds a *different* key means we're on the wrong
+  // code — stop. An empty or missing input is left to GOG.
+  function prefilledKeyMismatch(key) {
+    const values = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'))
+      .filter(isVisible)
+      .map((i) => normalizeKey(i.value))
+      .filter(Boolean);
+    return values.length > 0 && !values.includes(normalizeKey(key));
+  }
+
+  function createGogPanel(entry) {
+    const panel = buildPanelShell("Autoclaim · GOG");
+
+    const gameEl = document.createElement("div");
+    gameEl.id = "lac-store";
+    gameEl.textContent = entry.game ? `${entry.game}` : "GOG key from Luna";
+    panel.appendChild(gameEl);
+
+    statusEl = document.createElement("div");
+    statusEl.id = "lac-status";
+    panel.appendChild(statusEl);
+
+    document.body.appendChild(panel);
+    return panel;
+  }
+
+  function stopGog(message) {
+    warn(`GOG: ${message}`);
+    updateStatus(`${message} — stopped`, "error");
+  }
+
+  async function runGogRedemption() {
+    const match = window.location.pathname.match(GOG_REDEEM_PATH_RE);
+    if (!match) return;
+    const key = match[1];
+    const entryKey = GOG_PENDING_PREFIX + key.toUpperCase();
+    const entry = GM_getValue(entryKey, null);
+    if (!entry) return; // not a code Luna handed us — leave the page alone
+
+    if (Date.now() - entry.createdAt > GOG_PENDING_TTL_MS) {
+      log(`GOG: handoff for ${maskKey(key)} is stale — ignoring`);
+      GM_deleteValue(entryKey);
+      return;
+    }
+
+    checkForUpdate();
+    injectStyles();
+    const panel = createGogPanel(entry);
+
+    if (entry.stage === "redeem-clicked") {
+      stopGog("Redeem was already clicked for this code — not clicking again. Check GOG's result");
+      return;
+    }
+
+    // ── Page 1: Continue ─────────────────────────────────────────────
+    updateStatus("Waiting for Continue…");
+    const continueBtn = await waitFor(() => findOnlyButton("Continue"), GOG_STEP_TIMEOUT_MS);
+    if (!continueBtn) {
+      stopGog("Continue button not found (signed in to GOG?)");
+      return;
+    }
+    if (prefilledKeyMismatch(key)) {
+      stopGog("The code on the page doesn't match the one from Luna");
+      return;
+    }
+    log(`GOG: clicking Continue for ${maskKey(key)}`);
+    GM_setValue(entryKey, { ...entry, stage: "continue-clicked" });
+    continueBtn.click();
+
+    // ── Page 2: wait for the transition, then Redeem ────────────────
+    updateStatus("Waiting for the confirmation page…");
+    const redeemBtn = await waitFor(() => {
+      if (findVisibleButtonsByText("Continue").length) return null; // still on page 1
+      if (!/you are about to redeem/i.test(document.body.innerText)) return null;
+      return findOnlyButton("Redeem");
+    }, GOG_STEP_TIMEOUT_MS);
+    if (!redeemBtn) {
+      stopGog("Confirmation page with a single Redeem button didn't appear");
+      return;
+    }
+
+    let confirmBtn = null;
+    let redeemStarted = false;
+    const redeemOnce = async () => {
+      if (redeemStarted) return;
+      redeemStarted = true;
+      confirmBtn?.remove();
+
+      // Re-read: another tab or an earlier run may have got here first.
+      const latest = GM_getValue(entryKey, null);
+      if (!latest || latest.stage === "redeem-clicked") {
+        stopGog("This code's Redeem was already handled elsewhere");
+        return;
+      }
+      if (!redeemBtn.isConnected || !isVisible(redeemBtn) || !isEnabled(redeemBtn)) {
+        stopGog("The Redeem button went away before it could be clicked");
+        return;
+      }
+
+      GM_setValue(entryKey, { ...latest, stage: "redeem-clicked", redeemedAt: Date.now() });
+      log(`GOG: clicking Redeem for ${maskKey(key)}`);
+      redeemBtn.click();
+      updateStatus("Redeem clicked — waiting for GOG…");
+
+      const gone = await waitFor(() => !redeemBtn.isConnected || !isVisible(redeemBtn), GOG_STEP_TIMEOUT_MS);
+      if (gone) {
+        GM_deleteValue(entryKey);
+        log(`GOG: Redeem accepted for ${maskKey(key)}`);
+        updateStatus("Redeem sent — GOG's result is on the page", "ok");
+      } else {
+        // The entry stays stamped, so nothing will ever click Redeem again.
+        stopGog("GOG didn't move on after Redeem. Check the page before trying by hand");
+      }
+    };
+
+    if (isGogAutoRedeem()) {
+      await redeemOnce();
+      return;
+    }
+
+    updateStatus("Ready to redeem — confirm below");
+    confirmBtn = document.createElement("button");
+    confirmBtn.className = "lac-btn lac-btn-primary";
+    confirmBtn.textContent = "✔ Redeem on GOG";
+    confirmBtn.addEventListener("click", redeemOnce);
+    panel.appendChild(confirmBtn);
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -715,6 +917,36 @@
     return row;
   }
 
+  // GOG's last step redeems the code for good, so the default stops and asks.
+  function createGogRedeemModeRow() {
+    const row = document.createElement("div");
+    row.className = "lac-store-row";
+
+    const label = document.createElement("span");
+    label.className = "lac-store-label";
+    label.textContent = "GOG final Redeem";
+
+    const toggle = document.createElement("button");
+    const render = (auto) => {
+      toggle.className = `lac-store-toggle ${auto ? "lac-store-toggle--on" : "lac-store-toggle--off"}`;
+      toggle.textContent = auto ? "Automatic" : "Ask first";
+      toggle.title = auto
+        ? "GOG's Redeem is clicked for you. Click to stop and ask first instead."
+        : "Stops on GOG's confirmation page until you click Redeem. Click to make it automatic.";
+    };
+    render(isGogAutoRedeem());
+    toggle.addEventListener("click", () => {
+      const auto = !isGogAutoRedeem();
+      setGogAutoRedeem(auto);
+      render(auto);
+      log(`GOG final Redeem: ${auto ? "automatic" : "ask first"}`);
+    });
+
+    row.appendChild(label);
+    row.appendChild(toggle);
+    return row;
+  }
+
   function createPanel() {
     const panel = buildPanelShell("Autoclaim");
 
@@ -753,6 +985,7 @@
     storesLabel.textContent = "Stores";
     storeSection.appendChild(storesLabel);
     KNOWN_STORES.forEach((s) => storeSection.appendChild(createStoreToggleRow(s)));
+    storeSection.appendChild(createGogRedeemModeRow());
     panel.appendChild(storeSection);
 
     statusEl = document.createElement("div");
@@ -1195,6 +1428,11 @@
   }
 
   function init() {
+    if (/(^|\.)gog\.com$/.test(window.location.hostname)) {
+      // Silent on every GOG page except a redeem page Luna handed off.
+      runGogRedemption();
+      return;
+    }
     log(`v${SCRIPT_VERSION} loaded`);
     checkForUpdate();
     watchForNavigation();
