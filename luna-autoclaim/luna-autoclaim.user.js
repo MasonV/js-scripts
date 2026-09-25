@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.7.0
+// @version      0.8.0
 // @description  Bulk-reveal and bulk-redeem keys on Luna
 // @include      /^https:\/\/luna\.amazon\.[a-z.]{2,6}\//
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -283,15 +283,69 @@
   }
 
   /**
+   * Match a set of title strings against STORE_PATTERNS.
+   * Returns the canonical store name, or null when none — or more than one
+   * — store matches, so an ambiguous scope never gets guessed at.
+   */
+  function matchStore(titles) {
+    const stores = new Set(
+      STORE_PATTERNS.filter(([pattern]) => titles.some((t) => t.includes(pattern))).map(
+        ([, store]) => store,
+      ),
+    );
+    return stores.size === 1 ? [...stores][0] : null;
+  }
+
+  function titlesIn(root) {
+    return Array.from(root.querySelectorAll("p[title]")).map((p) => p.getAttribute("title"));
+  }
+
+  /**
    * Detect which store the current claim page is for.
    * Checks all p[title] elements to avoid false-positives from unrelated elements.
    */
   function detectStore() {
-    const pTitles = Array.from(document.querySelectorAll("p[title]")).map((p) =>
-      p.getAttribute("title"),
-    );
-    const match = STORE_PATTERNS.find(([pattern]) => pTitles.some((t) => t.includes(pattern)));
-    return match ? match[1] : null;
+    return matchStore(titlesIn(document));
+  }
+
+  /**
+   * Detect the store for one listing entry, before its claim page exists.
+   * Same card walk as getGameName(), same p[title] vocabulary as detectStore().
+   * Returns null when the card doesn't expose a store label — callers must
+   * not guess from the game name.
+   */
+  function getListingStore(btn) {
+    const card = btn.closest(".item-card-details");
+    return card ? matchStore(titlesIn(card)) : null;
+  }
+
+  /**
+   * Split the listing's claim buttons by the store toggles.
+   * `unknown` entries are still opened: the claim page resolves their store
+   * and enforces the toggle there.
+   */
+  function planClaims() {
+    const disabled = loadDisabledStores();
+    const toOpen = [];
+    const skipped = [];
+    let unknown = 0;
+    for (const btn of findButtonsByText("Claim game")) {
+      const store = getListingStore(btn);
+      if (store && disabled.has(store)) {
+        skipped.push({ btn, store });
+      } else {
+        if (!store) unknown++;
+        toOpen.push({ btn, store });
+      }
+    }
+    return { toOpen, skipped, unknown };
+  }
+
+  function describePlan({ toOpen, skipped, unknown }, verb) {
+    const parts = [`${verb} ${toOpen.length}`];
+    if (skipped.length) parts.push(`skipped ${skipped.length} (store set to Skip)`);
+    if (unknown) parts.push(`${unknown} store unknown`);
+    return parts.join(" · ");
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -299,36 +353,49 @@
   // ═══════════════════════════════════════════════════════════════════
 
   async function openAllClaims({ autoClaim = false } = {}) {
-    const claimButtons = findButtonsByText("Claim game");
-    if (claimButtons.length === 0) {
+    const plan = planClaims();
+    const { toOpen, skipped } = plan;
+    if (toOpen.length === 0 && skipped.length === 0) {
       log('No "Claim Game" buttons found — all keys may already be redeemed');
       updateStatus("No keys to reveal");
       return;
     }
 
-    log(`Found ${claimButtons.length} key(s) to claim (autoClaim=${autoClaim})`);
-    updateStatus(`Opening 0/${claimButtons.length}...`);
+    skipped.forEach(({ btn, store }) =>
+      logItem(`Skipping ${getGameName(btn)} — ${store} is set to Skip`),
+    );
+    if (toOpen.length === 0) {
+      log(`All ${skipped.length} claim(s) are for stores set to Skip — nothing opened`);
+      updateStatus(describePlan(plan, "Opened"));
+      return;
+    }
+
+    log(
+      `Found ${toOpen.length} key(s) to claim, ${skipped.length} skipped, ` +
+        `${plan.unknown} with unknown store (autoClaim=${autoClaim})`,
+    );
+    updateStatus(`Opening 0/${toOpen.length}...`);
     setButtonsEnabled(false);
 
-    for (let i = 0; i < claimButtons.length; i++) {
-      const btn = claimButtons[i];
+    for (let i = 0; i < toOpen.length; i++) {
+      const { btn, store } = toOpen[i];
       const gameName = getGameName(btn);
 
-      logItem(`Opening ${i + 1}/${claimButtons.length}: ${gameName}`);
-      updateStatus(`Opening ${i + 1}/${claimButtons.length}: ${gameName}`);
+      logItem(`Opening ${i + 1}/${toOpen.length}: ${gameName} (${store ?? "store unknown"})`);
+      updateStatus(`Opening ${i + 1}/${toOpen.length}: ${gameName}`);
 
       const url = new URL(btn.href);
       if (autoClaim) url.searchParams.set("lac_autoclaim", "1");
       GM_openInTab(url.toString(), { active: false });
 
-      if (i < claimButtons.length - 1) {
+      if (i < toOpen.length - 1) {
         await sleep(revealDelayMs);
       }
     }
 
     await sleep(revealDelayMs);
     log("All claim pages opened");
-    updateStatus(`Opened ${claimButtons.length} claim page(s)`);
+    updateStatus(describePlan(plan, "Opened"));
     setButtonsEnabled(true);
   }
 
@@ -367,6 +434,15 @@
 
   function updateStatus(text) {
     if (statusEl) statusEl.textContent = text;
+  }
+
+  // Home page only: preview what "Open All" would do under the current toggles.
+  function refreshListingStatus() {
+    // Don't clobber the "Opening i/n" progress line mid-run.
+    if (claimBtn?.disabled) return;
+    const plan = planClaims();
+    log(`Listing: ${describePlan(plan, "to open")}`);
+    updateStatus(describePlan(plan, "To open:"));
   }
 
   function setButtonsEnabled(enabled) {
@@ -455,6 +531,7 @@
       toggle.textContent = nowDisabled ? "Skip" : "Claim";
       toggle.title = `Click to ${nowDisabled ? "enable" : "disable"} claiming for ${storeName}`;
       log(`${storeName}: ${nowDisabled ? "disabled" : "enabled"}`);
+      refreshListingStatus();
     });
 
     row.appendChild(label);
@@ -868,9 +945,7 @@
         if (generation !== routeGeneration) return;
         injectStyles();
         createPanel();
-        const claimCount = findButtonsByText("Claim game").length;
-        log(`Found ${claimCount} to claim`);
-        updateStatus(`${claimCount} to claim`);
+        refreshListingStatus();
       });
       return;
     }
