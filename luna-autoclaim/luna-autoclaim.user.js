@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.10.1
+// @version      0.11.0
 // @description  Bulk-reveal and bulk-redeem keys on Luna
 // @include      /^https:\/\/luna\.amazon\.[a-z.]{2,6}\//
 // @match        https://www.gog.com/*
@@ -51,14 +51,19 @@
   const DISABLED_STORES_KEY = "lac_disabled_stores_v1";
 
   // All known stores in display order — used to build the settings list.
-  const KNOWN_STORES = ["Amazon Games", "Epic Games", "GOG", "Legacy Games"];
+  // A store not listed here is never claimed — see claimRefusal().
+  const KNOWN_STORES = ["Amazon Games", "Epic Games", "GOG", "Legacy Games", "Microsoft Store"];
 
   // Maps the title-attribute suffix to the canonical store name.
+  // "on Microsoft Store" is UNVERIFIED against a live page (see todo). A wrong
+  // guess is safe: it just leaves Microsoft keys unrecognised, and those are
+  // refused rather than claimed.
   const STORE_PATTERNS = [
     ["on Amazon Games", "Amazon Games"],
     ["on Epic Games Store", "Epic Games"],
     ["on GOG.com", "GOG"],
     ["on Legacy Games", "Legacy Games"],
+    ["on Microsoft Store", "Microsoft Store"],
   ];
 
   // GOG: after the Luna claim, the key is exposed with a "Claim code" link
@@ -396,6 +401,26 @@
   }
 
   /**
+   * The store-looking labels on the page ("on <Something>"), for telling
+   * the user what was seen when no known store matched.
+   */
+  function describeSeenStores() {
+    const seen = [...new Set(titlesIn(document).filter((t) => /^on\s+\S/i.test(t.trim())))];
+    return seen.length ? seen.map((t) => `"${t.trim()}"`).join(", ") : "no store label";
+  }
+
+  /**
+   * Why this claim page must not be claimed, or null when it may be.
+   * An unrecognised store is a hard stop: clicking would claim a store the
+   * script doesn't understand.
+   */
+  function claimRefusal(store) {
+    if (!store) return `Store not recognised (saw ${describeSeenStores()}) — not claiming`;
+    if (isStoreDisabled(store)) return `${store} is set to Skip — not claiming`;
+    return null;
+  }
+
+  /**
    * Detect the store for one listing entry, before its claim page exists.
    * Same card walk as getGameName(), same p[title] vocabulary as detectStore().
    * Returns null when the card doesn't expose a store label — callers must
@@ -408,8 +433,8 @@
 
   /**
    * Split the listing's claim buttons by the store toggles.
-   * `unknown` entries are still opened: the claim page resolves their store
-   * and enforces the toggle there.
+   * `unknown` entries are still opened: the claim page resolves their store,
+   * enforces the toggle there, and refuses to claim a store it can't identify.
    */
   function planClaims() {
     const disabled = loadDisabledStores();
@@ -502,7 +527,15 @@
       return;
     }
 
-    const store = detectStore() ?? "Unknown store";
+    // Re-checked at click time: the panel may have been built before the
+    // page finished rendering, and the auto-claim path gets here directly.
+    const store = detectStore();
+    const refusal = claimRefusal(store);
+    if (refusal) {
+      warn(refusal);
+      updateStatus(refusal, "error");
+      return;
+    }
     log(`Claiming via ${store}`);
     updateStatus(`Claiming via ${store}…`);
     setButtonsEnabled(false);
@@ -1095,15 +1128,20 @@
 
     const storeEl = document.createElement("div");
     storeEl.id = "lac-store";
-    storeEl.textContent = store ?? "Unknown store";
+    storeEl.textContent = store
+      ? `Store: ${store}`
+      : `Store: not recognised (saw ${describeSeenStores()})`;
     panel.appendChild(storeEl);
 
     statusEl = document.createElement("div");
     statusEl.id = "lac-status";
     panel.appendChild(statusEl);
 
-    if (store && isStoreDisabled(store)) {
-      statusEl.textContent = "Store disabled — skipping";
+    if (!store) {
+      // No Claim button: an unknown store is never claimed from here.
+      updateStatus(claimRefusal(store), "error");
+    } else if (isStoreDisabled(store)) {
+      statusEl.textContent = "Store set to Skip — not claiming";
 
       // Allow re-enabling without going back to the home page.
       const enableBtn = document.createElement("button");
@@ -1127,19 +1165,17 @@
       claimBtn.addEventListener("click", claimCurrentGame);
       panel.appendChild(claimBtn);
 
-      if (store) {
-        const disableBtn = document.createElement("button");
-        disableBtn.className = "lac-btn lac-btn-danger";
-        disableBtn.textContent = `Skip ${store} always`;
-        disableBtn.addEventListener("click", () => {
-          toggleStoreDisabled(store);
-          log(`${store} disabled`);
-          panel.remove();
-          createClaimPagePanel(store);
-          document.body.appendChild(document.getElementById("lac-panel"));
-        });
-        panel.appendChild(disableBtn);
-      }
+      const disableBtn = document.createElement("button");
+      disableBtn.className = "lac-btn lac-btn-danger";
+      disableBtn.textContent = `Skip ${store} always`;
+      disableBtn.addEventListener("click", () => {
+        toggleStoreDisabled(store);
+        log(`${store} disabled`);
+        panel.remove();
+        createClaimPagePanel(store);
+        document.body.appendChild(document.getElementById("lac-panel"));
+      });
+      panel.appendChild(disableBtn);
     }
 
     document.body.appendChild(panel);
@@ -1459,7 +1495,7 @@
     waitForClaimPageContent(() => {
       if (generation !== routeGeneration) return;
       const store = detectStore();
-      if (!store) warn("Store not recognised — defaulting panel to unknown");
+      if (!store) warn(`Store not recognised — saw ${describeSeenStores()}`);
       log(`Store: ${store ?? "unknown"}`);
       injectStyles();
       createClaimPagePanel(store);
@@ -1467,8 +1503,9 @@
       const autoClaimParam =
         new URLSearchParams(window.location.search).get("lac_autoclaim") === "1";
       if (autoClaimParam) {
-        if (store && isStoreDisabled(store)) {
-          log(`Auto-claim skipped — ${store} is disabled`);
+        const refusal = claimRefusal(store);
+        if (refusal) {
+          warn(`Auto-claim stopped: ${refusal}`);
         } else {
           log("Auto-claim triggered by URL param");
           // Brief delay so the page's own JS finishes binding before we click.
