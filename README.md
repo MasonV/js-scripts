@@ -26,6 +26,8 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
   - [`yt-music-redirect/`](#yt-music-redirect)
   - [`ytm-desktop-handoff/`](#ytm-desktop-handoff)
   - [`ytm-data-panel/`](#ytm-data-panel)
+- [Video streaming](#video-streaming)
+  - [`prime-video-filter/`](#prime-video-filter)
 - [Archived](#archived)
   - [`archive/bonjourr-quick-add/`](#archivebonjourr-quick-add)
   - [`archive/google-address-autocomplete-ca/`](#archivegoogle-address-autocomplete-ca)
@@ -325,6 +327,37 @@ A userscript for [YouTube Music](https://music.youtube.com) that fills the empty
 **Metadata update checks:**
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-data-panel/ytm-data-panel.meta.js`
+
+<a id="video-streaming"></a>
+
+---
+
+<h2 align="center">━━━━━━━━━━━━━━━━━━━━━━━  Video streaming  ━━━━━━━━━━━━━━━━━━━━━━━</h2>
+
+---
+
+### `prime-video-filter/`
+
+A userscript for [Prime Video](https://www.primevideo.com) that removes titles you don't want from storefront rows, search results and your watchlist. Hidden titles are removed so the rest of the row closes up.
+
+**Features:**
+
+- **Hide titles not included with Prime** — rent, buy, and paid-channel titles. Uses the card's entitlement marker and falls back to its labels. A title the script can't check stays visible.
+- **Hide titles you've watched** — from each card's progress bar, with an adjustable "counts as watched at" threshold (default 90%)
+- **Hide low-rated titles** — below an IMDb rating you choose (default 7.0). Ratings are read from the card when it shows one; otherwise from the title's detail page, fetched two at a time, only for cards near the screen, and cached for 14 days. Titles with no rating stay unless you turn on "Hide titles with no IMDb rating".
+- Hide rows with nothing left, so an all-paid row doesn't leave a bare heading
+- Floating launcher showing how many titles are hidden; the panel explains the count (e.g. "Hiding 23 of 140 titles — 12 not included, 6 watched, 5 rated below 7.0")
+- `Alt+Shift+F` pauses and resumes filtering so you can see everything
+- Every filter is off on a fresh install
+- Label matching is English-only; the entitlement marker and progress bars work in any language
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/prime-video-filter/prime-video-filter.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/prime-video-filter/prime-video-filter.meta.js`
 
 <a id="archived"></a>
 
