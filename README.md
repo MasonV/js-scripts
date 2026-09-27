@@ -342,11 +342,11 @@ A userscript for [Prime Video](https://www.primevideo.com) that removes titles y
 
 **Features:**
 
-- **Hide titles not included with Prime** — rent, buy, and paid-channel titles. Uses the card's entitlement marker and falls back to its labels. A title the script can't check stays visible.
+- **Hide titles not included with Prime** — rent, buy, and paid-channel titles. Cards carrying Prime Video's entitlement marker are hidden by a CSS rule the moment they render, with no wait for the script; others fall back to their labels. A title the script can't check stays visible.
 - **Hide titles you've watched** — from each card's progress bar, with an adjustable "counts as watched at" threshold (default 90%)
-- **Hide low-rated titles** — below an IMDb rating you choose (default 7.0). Ratings are read from the card when it shows one; otherwise from the title's detail page, fetched two at a time, only for cards near the screen, and cached for 14 days. Titles with no rating stay unless you turn on "Hide titles with no IMDb rating".
+- **Hide low-rated titles** — below an IMDb rating you choose (default 7.0). Ratings are read from the card when it shows one; otherwise from the title's detail page, fetched four at a time, newest-scrolled first, only for cards near the screen (and the next few along each row), and cached for 14 days. Titles with no rating stay unless you turn on "Hide titles with no IMDb rating".
 - Hide rows with nothing left, so an all-paid row doesn't leave a bare heading
-- Floating launcher showing how many titles are hidden; the panel explains the count (e.g. "Hiding 23 of 140 titles — 12 not included, 6 watched, 5 rated below 7.0")
+- A "⧩ Filter titles" button in the bottom-right corner shows how many titles are hidden (it pulses until you first open it); the panel explains the count (e.g. "Hiding 23 of 140 titles — 12 not included, 6 watched, 5 rated below 7.0")
 - `Alt+Shift+F` pauses and resumes filtering so you can see everything
 - Every filter is off on a fresh install
 - Label matching is English-only; the entitlement marker and progress bars work in any language

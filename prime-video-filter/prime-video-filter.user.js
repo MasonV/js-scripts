@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prime Video Filter
 // @namespace    prime-video-filter
-// @version      0.1.0
+// @version      0.2.0
 // @description  Hide Prime Video titles you can't watch with Prime, titles you've already watched, and titles below an IMDb rating you choose
 // @match        https://www.primevideo.com/*
 // @match        https://www.amazon.com/gp/video/*
@@ -39,6 +39,14 @@
 	const HIDDEN_ATTR = 'data-pvf-hidden'
 	const ROW_HIDDEN_ATTR = 'data-pvf-row-hidden'
 
+	// On <html> while "not included" is on: lets a CSS rule hide paid cards
+	// the instant Prime Video renders them, before any script runs.
+	const HIDE_PAID_CLASS = 'pvf-hide-paid'
+	const INTRO_KEY = 'prime_video_filter_intro_seen_v1'
+
+	// A pass slower than this gets logged, so a slow page can be diagnosed.
+	const SLOW_PASS_MS = 50
+
 	// A title card. Prime Video tags its cards with a test id; the
 	// data-card-title fallback covers layouts that drop it.
 	const CARD_SELECTOR = 'article[data-testid="card"], article[data-card-title]'
@@ -61,8 +69,8 @@
 
 	// Detail-page lookups for IMDb ratings: few at a time, spaced out, and
 	// remembered, so browsing a storefront doesn't hammer Amazon.
-	const RATING_FETCH_CONCURRENCY = 2
-	const RATING_FETCH_GAP_MS = 350
+	const RATING_FETCH_CONCURRENCY = 4
+	const RATING_FETCH_GAP_MS = 100
 	const RATING_TTL_MS = 14 * 24 * 60 * 60 * 1000
 	const NO_RATING_TTL_MS = 2 * 24 * 60 * 60 * 1000
 	const RATING_CACHE_MAX = 3000
@@ -117,6 +125,22 @@
 		const badge = flat.match(/\bIMDb(?:\s+rating)?\s*:?\s*(\d{1,2}(?:\.\d)?)(?!\d)/i)
 		if (badge) return validRating(badge[1])
 
+		return null
+	}
+
+	// Detail pages are large; flattening the whole thing to text is slow.
+	// Look at a short window after each "IMDb" mention instead.
+	function findImdbRatingInHtml(html) {
+		const text = String(html || '')
+		const json = text.match(/"imdbRating"\s*:\s*"?(\d{1,2}(?:\.\d)?)/i)
+		if (json) return validRating(json[1])
+		const mention = /imdb/gi
+		let m
+		let tries = 0
+		while ((m = mention.exec(text)) && tries++ < 50) {
+			const rating = extractImdbRating(text.slice(m.index, m.index + 400))
+			if (rating != null) return rating
+		}
 		return null
 	}
 
@@ -295,10 +319,17 @@
 		return parts.join(' | ')
 	}
 
+	// Reading labels walks the whole card, so remember what a card said.
+	// The attribute is cheap and can change, so it is always re-read.
+	const labelEntitlement = new WeakMap()
+
 	function readEntitlement(card) {
 		const fromAttr = entitlementFromAttr(card.getAttribute('data-card-entitlement'))
 		if (fromAttr) return fromAttr
-		return classifyEntitlement(cardLabels(card))
+		if (labelEntitlement.has(card)) return labelEntitlement.get(card)
+		const fromLabels = classifyEntitlement(cardLabels(card))
+		if (fromLabels) labelEntitlement.set(card, fromLabels)
+		return fromLabels
 	}
 
 	function readProgress(card) {
@@ -385,7 +416,9 @@
 
 	function pumpRatingQueue() {
 		while (ratingActive < RATING_FETCH_CONCURRENCY && ratingQueue.length) {
-			const job = ratingQueue.shift()
+			// Newest first: the cards you just scrolled to matter more than
+			// the ones you scrolled past.
+			const job = ratingQueue.pop()
 			ratingActive++
 			ratingInFlight.add(job.key)
 			lookupRating(job)
@@ -403,26 +436,9 @@
 	async function lookupRating({ key, href }) {
 		const res = await fetch(href, { credentials: 'include' })
 		if (!res.ok) throw new Error(`HTTP ${res.status}`)
-		const html = await res.text()
-
-		let rating = null
-		try {
-			const doc = new DOMParser().parseFromString(html, 'text/html')
-			const badge = doc.querySelector(
-				'[data-automation-id="imdb-rating-badge"], [data-testid*="imdb" i], [aria-label*="IMDb" i]'
-			)
-			if (badge) {
-				rating = extractImdbRating(
-					`${badge.getAttribute('aria-label') || ''} ${badge.textContent || ''}`
-				)
-				if (rating == null && /imdb/i.test(badge.textContent || '')) {
-					rating = extractImdbRating(`IMDb ${badge.textContent}`)
-				}
-			}
-		} catch (e) {
-			warn('Could not parse a detail page; falling back to text search:', e)
-		}
-		if (rating == null) rating = extractImdbRating(html)
+		// Searched as text, not parsed: building a DOM for a whole detail page
+		// blocked the main thread for every title looked up.
+		const rating = findImdbRatingInHtml(await res.text())
 
 		loadRatingCache()[key] = { r: rating, t: Date.now() }
 		saveRatingCacheSoon()
@@ -448,7 +464,9 @@
 					}
 					if (changed) scheduleApply()
 				},
-				{ rootMargin: '600px' }
+				// Wide sideways margin: rows scroll horizontally, so the next
+				// few cards along are looked up before you reach them.
+				{ rootMargin: '800px 2000px' }
 			)
 		}
 		ratingObserver.observe(card)
@@ -471,7 +489,13 @@
 	}
 
 	function apply() {
+		const started = performance.now()
+		document.documentElement.classList.toggle(
+			HIDE_PAID_CLASS,
+			settings.enabled && settings.hideNotIncluded
+		)
 		const cards = document.querySelectorAll(CARD_SELECTOR)
+		const rows = new Map()
 		const counts = {
 			total: 0,
 			hidden: 0,
@@ -491,6 +515,13 @@
 			if (seenHosts.has(host)) continue
 			seenHosts.add(host)
 			counts.total++
+
+			const list = host.parentElement
+			const row = list && (list.closest('section') || list.parentElement)
+			if (row) {
+				if (!rows.has(row)) rows.set(row, [])
+				rows.get(row).push(host)
+			}
 
 			const facts = { entitlement: null, progress: null, rating: null, ratingSettled: false }
 
@@ -524,29 +555,25 @@
 		}
 
 		if (counts.total) everSawCards = true
-		applyRows()
+		applyRows(rows)
 		lastCounts = counts
 		renderPanelState()
+
+		const ms = performance.now() - started
+		if (ms > SLOW_PASS_MS) console.log(`[PVF] Slow pass: ${counts.total} cards in ${Math.round(ms)} ms.`)
 	}
 
 	// A row whose every title is filtered out leaves a bare heading behind.
 	// Collapse it too — but only a row we can see all the cards of.
-	function applyRows() {
-		const rows = new Set()
-		for (const card of document.querySelectorAll(CARD_SELECTOR)) {
-			const list = cardHost(card).parentElement
-			const row = list && (list.closest('section') || list.parentElement)
-			if (row) rows.add(row)
-		}
-		for (const row of document.querySelectorAll(`[${ROW_HIDDEN_ATTR}]`)) rows.add(row)
-
-		for (const row of rows) {
-			let hide = false
-			if (settings.enabled && settings.hideEmptyRows && anyFilterOn()) {
-				const hosts = new Set(Array.from(row.querySelectorAll(CARD_SELECTOR), cardHost))
-				hide = hosts.size > 0 && Array.from(hosts).every((h) => h.hasAttribute(HIDDEN_ATTR))
-			}
+	function applyRows(rows) {
+		const active = settings.enabled && settings.hideEmptyRows && anyFilterOn()
+		for (const [row, hosts] of rows) {
+			const hide = active && hosts.every((h) => h.hasAttribute(HIDDEN_ATTR))
 			setHidden(row, ROW_HIDDEN_ATTR, hide ? 'empty' : null)
+		}
+		// A row that has since lost all its cards gets its heading back.
+		for (const row of document.querySelectorAll(`[${ROW_HIDDEN_ATTR}]`)) {
+			if (!rows.has(row)) setHidden(row, ROW_HIDDEN_ATTR, null)
 		}
 	}
 
@@ -570,14 +597,29 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	// Prime Video is a single-page app that streams rows in as you scroll,
-	// so re-run on any added content. Only childList: our own attribute
-	// writes must not wake the observer.
+	// so re-run when cards arrive. Only childList, and never for our own
+	// panel: v0.1.0 re-ran on its own counter updates, which kept the
+	// script filtering the whole page several times a second.
+	function isOwnUi(node) {
+		const el = node.nodeType === 1 ? node : node.parentElement
+		return !!el?.closest(`#${LAUNCHER_ID}, #${PANEL_ID}, #${UPDATE_BANNER_ID}`)
+	}
+
+	function mayAffectCards(node) {
+		if (node.nodeType !== 1) return false
+		if (node.tagName === 'ARTICLE' || node.closest('article')) return true
+		return !!node.querySelector('article')
+	}
+
 	function startWatching() {
 		new MutationObserver((mutations) => {
 			for (const m of mutations) {
-				if (m.addedNodes.length) {
-					scheduleApply()
-					return
+				if (isOwnUi(m.target)) continue
+				for (const node of m.addedNodes) {
+					if (mayAffectCards(node)) {
+						scheduleApply()
+						return
+					}
 				}
 			}
 		}).observe(document.body, { childList: true, subtree: true })
@@ -626,12 +668,13 @@
 		launcherEl = document.createElement('button')
 		launcherEl.id = LAUNCHER_ID
 		launcherEl.type = 'button'
-		launcherEl.title = 'Prime Video Filter settings (Alt+Shift+F pauses filtering)'
+		launcherEl.title = 'Prime Video Filter — open settings (Alt+Shift+F pauses filtering)'
 		launcherEl.innerHTML =
 			'<span class="pvf-led"></span><span class="pvf-launcher-icon">⧩</span>' +
-			'<span class="pvf-launcher-text">Filter</span>' +
+			'<span class="pvf-launcher-text">Filter titles</span>' +
 			'<span class="pvf-launcher-state">Off</span>'
 		launcherEl.addEventListener('click', togglePanel)
+		if (!introSeen()) launcherEl.classList.add('pvf-intro')
 		document.body.appendChild(launcherEl)
 	}
 
@@ -766,9 +809,13 @@
 		reset.classList.remove('pvf-armed')
 	}
 
+	function setText(el, text) {
+		if (el && el.textContent !== text) el.textContent = text
+	}
+
 	function setSwitch(button, on) {
 		if (!button) return
-		button.textContent = on ? 'On' : 'Off'
+		setText(button, on ? 'On' : 'Off')
 		button.setAttribute('aria-pressed', on ? 'true' : 'false')
 		button.classList.toggle('pvf-on', on)
 		button.classList.toggle('pvf-off', !on)
@@ -802,9 +849,9 @@
 			launcherEl.classList.toggle('pvf-idle', !active)
 			const state = launcherEl.querySelector('.pvf-launcher-state')
 			if (state) {
-				if (!settings.enabled) state.textContent = 'Paused'
-				else if (!anyFilterOn()) state.textContent = 'Off'
-				else state.textContent = `${lastCounts?.hidden ?? 0} hidden`
+				if (!settings.enabled) setText(state, 'Paused')
+				else if (!anyFilterOn()) setText(state, 'Off')
+				else setText(state, `${lastCounts?.hidden ?? 0} hidden`)
 			}
 		}
 
@@ -822,22 +869,46 @@
 		const rating = panelEl.querySelector('#pvf-min-rating')
 		if (Number(rating.value) !== settings.minRating) rating.value = String(settings.minRating)
 
-		panelEl.querySelector('#pvf-watched-echo').textContent =
+		setText(
+			panelEl.querySelector('#pvf-watched-echo'),
 			settings.watchedPct >= 100
 				? 'Watched = played to the very end (100%)'
 				: `Watched = ${settings.watchedPct}% or more played`
-		panelEl.querySelector('#pvf-rating-echo').textContent =
+		)
+		setText(
+			panelEl.querySelector('#pvf-rating-echo'),
 			`Keeps IMDb ${formatRating(settings.minRating)} and up; hides anything lower`
+		)
 
-		panelEl.querySelector('#pvf-summary').textContent = summaryText()
+		setText(panelEl.querySelector('#pvf-summary'), summaryText())
 
 		panelEl.querySelector('[data-for="watched"]').classList.toggle('pvf-inert', !settings.hideWatched)
 		panelEl.querySelector('[data-for="rated"]').classList.toggle('pvf-inert', !settings.hideLowRated)
 		panelEl.classList.toggle('pvf-disabled', !settings.enabled)
 	}
 
+	// The launcher glows until the panel has been opened once, so a fresh
+	// install is easy to spot; after that it sits quietly in the corner.
+	function introSeen() {
+		try {
+			return localStorage.getItem(INTRO_KEY) === '1'
+		} catch {
+			return false
+		}
+	}
+
+	function markIntroSeen() {
+		launcherEl?.classList.remove('pvf-intro')
+		try {
+			localStorage.setItem(INTRO_KEY, '1')
+		} catch {
+			// Worst case the glow comes back next visit.
+		}
+	}
+
 	function openPanel() {
 		if (!panelEl) return
+		markIntroSeen()
 		panelEl.hidden = false
 		renderPanelState()
 	}
@@ -1014,46 +1085,60 @@
 
 	const PAGE_CSS = `
 		[${HIDDEN_ATTR}], [${ROW_HIDDEN_ATTR}] { display: none !important; }
+
+		/* Fast path: the browser hides a paid card as it renders, with no
+		   wait for the script. Cards without the attribute go through the
+		   script's label check instead. */
+		html.${HIDE_PAID_CLASS} li:has(> article[data-card-entitlement]:not([data-card-entitlement="Entitled" i])) {
+			display: none !important;
+		}
 	`
 
 	const PANEL_CSS = `
 		#${LAUNCHER_ID} {
 			position: fixed;
-			right: 16px;
-			bottom: 16px;
+			right: 20px;
+			bottom: 20px;
 			z-index: 2147483646;
 			display: flex;
 			align-items: center;
-			gap: 7px;
-			padding: 6px 12px;
-			border: 1px solid #25323d;
+			gap: 8px;
+			padding: 9px 14px 9px 12px;
+			border: 1px solid #00a8e1;
 			border-radius: 999px;
 			background: #0f171e;
-			color: #e6edf2;
+			color: #fff;
 			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-			font-size: 12px;
+			font-size: 14px;
+			font-weight: 600;
 			line-height: 1;
 			cursor: pointer;
-			opacity: 0.45;
-			box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-			transition: opacity 0.2s ease, transform 0.15s ease;
+			box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 0 3px rgba(0, 168, 225, 0.18);
+			transition: transform 0.15s ease, box-shadow 0.2s ease, background 0.2s ease;
 		}
-		#${LAUNCHER_ID}:hover { opacity: 1; transform: translateY(-1px); }
-		#${LAUNCHER_ID} .pvf-launcher-icon { font-size: 13px; }
+		#${LAUNCHER_ID}:hover {
+			transform: translateY(-2px);
+			background: #13212c;
+			box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6), 0 0 0 4px rgba(0, 168, 225, 0.35);
+		}
+		#${LAUNCHER_ID} .pvf-launcher-icon { font-size: 15px; color: #00a8e1; }
 		#${LAUNCHER_ID} .pvf-launcher-state {
-			padding: 2px 7px;
+			padding: 3px 8px;
 			border-radius: 999px;
-			background: #00739c;
-			font-size: 10px;
-			font-weight: 600;
-			letter-spacing: 0.03em;
+			background: #00a8e1;
+			color: #0f171e;
+			font-size: 11px;
+			font-weight: 700;
+			letter-spacing: 0.02em;
 		}
-		#${LAUNCHER_ID}.pvf-idle .pvf-launcher-state { background: #33404b; }
+		#${LAUNCHER_ID}.pvf-idle { border-color: #4b5d6b; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55); }
+		#${LAUNCHER_ID}.pvf-idle .pvf-launcher-icon { color: #c5d0d9; }
+		#${LAUNCHER_ID}.pvf-idle .pvf-launcher-state { background: #3a4854; color: #e6edf2; }
 
-		/* The LED says "something is being hidden" even at 45% opacity. */
+		/* The LED says "something is being hidden" at a glance. */
 		#${LAUNCHER_ID} .pvf-led {
-			width: 7px;
-			height: 7px;
+			width: 8px;
+			height: 8px;
 			border-radius: 50%;
 			background: #00a8e1;
 			box-shadow: 0 0 7px rgba(0, 168, 225, 0.95);
@@ -1069,10 +1154,20 @@
 			50% { box-shadow: 0 0 10px rgba(0, 168, 225, 1); }
 		}
 
+		/* First visit: a ripple that keeps going until the panel is opened. */
+		#${LAUNCHER_ID}.pvf-intro { animation: pvf-ripple 1.8s ease-out infinite; }
+		@keyframes pvf-ripple {
+			0% { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 0 0 rgba(0, 168, 225, 0.7); }
+			100% { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 0 18px rgba(0, 168, 225, 0); }
+		}
+		@media (prefers-reduced-motion: reduce) {
+			#${LAUNCHER_ID}, #${LAUNCHER_ID} .pvf-led { animation: none !important; }
+		}
+
 		#${PANEL_ID} {
 			position: fixed;
-			right: 16px;
-			bottom: 60px;
+			right: 20px;
+			bottom: 72px;
 			z-index: 2147483647;
 			width: 320px;
 			max-height: calc(100vh - 80px);

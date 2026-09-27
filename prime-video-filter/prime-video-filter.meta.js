@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prime Video Filter
 // @namespace    prime-video-filter
-// @version      0.1.0
+// @version      0.2.0
 // @description  Hide Prime Video titles you can't watch with Prime, titles you've already watched, and titles below an IMDb rating you choose
 // @match        https://www.primevideo.com/*
 // @match        https://www.amazon.com/gp/video/*
