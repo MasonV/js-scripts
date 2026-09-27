@@ -22,6 +22,7 @@ function loadPureLogic() {
 	const body = src.slice(bodyStart, end)
 	const names = [
 		'extractImdbRating',
+		'findImdbRatingInHtml',
 		'classifyEntitlement',
 		'entitlementFromAttr',
 		'progressFromAria',
@@ -73,6 +74,18 @@ test('extractImdbRating refuses non-ratings', () => {
 	assert.equal(L.extractImdbRating('IMDb 0'), null)
 	assert.equal(L.extractImdbRating('IMDb 2019'), null)
 	assert.equal(L.extractImdbRating('IMDb 11'), null)
+})
+
+test('findImdbRatingInHtml finds the badge in a large page', () => {
+	const pad = '<div>' + 'x'.repeat(200000) + '</div>'
+	const badge = '<span data-automation-id="imdb-rating-badge">IMDb 8.1</span>'
+	assert.equal(L.findImdbRatingInHtml(pad + badge + pad), 8.1)
+	assert.equal(L.findImdbRatingInHtml(pad + '<span>IMDb</span> <span>6.4</span>' + pad), 6.4)
+	assert.equal(L.findImdbRatingInHtml('<script>{"imdbRating":7.3}</script>' + pad), 7.3)
+	// A mention without a score doesn't stop the search.
+	assert.equal(L.findImdbRatingInHtml('<a>See on IMDb</a>' + pad + badge), 8.1)
+	assert.equal(L.findImdbRatingInHtml(pad), null)
+	assert.equal(L.findImdbRatingInHtml(null), null)
 })
 
 test('classifyEntitlement: included wins over paid upsells', () => {
