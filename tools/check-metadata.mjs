@@ -157,7 +157,7 @@ for (const [group, files] of groupedScripts(walk(ROOT))) {
       if (!downloadUrl.endsWith('.user.js')) groupErrors.push('@downloadURL should point at .user.js')
 
       if (!hasUpdateCheckMarkers(user.text)) {
-        groupErrors.push('missing // <update-check> … // </update-check> region (run: node tools/sync-update-check.mjs)')
+        groupErrors.push('missing // <update-check> … // </update-check> region (run: node tools/sync-blocks.mjs)')
       }
       if (!definesUpdateCheck(user.text)) groupErrors.push('no checkForUpdate() defined')
       if (!callsUpdateCheck(user.text)) groupErrors.push('checkForUpdate() is defined but never called')
@@ -189,15 +189,15 @@ for (const [group, files] of groupedScripts(walk(ROOT))) {
   warnings += groupWarnings.length
 }
 
-// The generated update-check region is owned by sync-update-check.mjs, so
-// ask it whether any file has drifted from the template.
-const sync = spawnSync(process.execPath, [path.join('tools', 'sync-update-check.mjs'), '--check'], {
+// Generated regions (update-check and the opt-in shared blocks) are owned by
+// sync-blocks.mjs, so ask it whether any file has drifted from its template.
+const sync = spawnSync(process.execPath, [path.join('tools', 'sync-blocks.mjs'), '--check'], {
   cwd: ROOT,
   encoding: 'utf8',
 })
 
 if (sync.status !== 0) {
-  console.log(`\nupdate-check blocks out of sync:`)
+  console.log(`\ngenerated blocks out of sync (run: node tools/sync-blocks.mjs):`)
   console.log(sync.stdout.trimEnd())
   errors++
 }
