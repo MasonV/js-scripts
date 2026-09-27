@@ -185,7 +185,7 @@ A userscript for [Fanatical](https://www.fanatical.com) order pages that bulk-re
 - Sequential key reveal with delays to avoid API rate limits
 - Redeems keys via existing "Redeem on Steam" buttons, with fallback to `steam://registerkey/` URLs
 - Status display showing current progress and game names
-- Waits for React SPA to render before activating
+- Waits for React SPA to render before activating, and follows in-site navigation so the panel appears on order pages without a reload
 
 **Install / download:**
 

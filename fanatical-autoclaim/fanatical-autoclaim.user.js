@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Fanatical Autoclaim
 // @namespace    fanatical-autoclaim
-// @version      1.3.0
+// @version      1.4.0
 // @description  Bulk-reveal and bulk-redeem Steam keys on Fanatical order pages
-// @match        https://www.fanatical.com/en/orders/*
+// @match        https://www.fanatical.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/fanatical-autoclaim/fanatical-autoclaim.meta.js
@@ -618,23 +618,39 @@
     //  INITIALIZATION
     // ═══════════════════════════════════════════════════════════════════
 
+    // Fanatical is a single-page app: moving from the store or the order list
+    // to an order page is a client-side route change, not a page load. The
+    // script therefore matches the whole site and shows/hides the panel as
+    // the route changes.
+    const ORDER_PATH = /^\/[a-z]{2}(?:-[a-z]{2})?\/orders\/[^/]+/i
+
+    let activeOrderPath = null
+    let waitInterval = null
+    let stylesInjected = false
+
+    function isOrderPage() {
+        return ORDER_PATH.test(location.pathname)
+    }
+
     /**
      * Wait for the React app to render order content before injecting the panel.
      * Polls for the presence of key-related buttons (REVEAL KEY or REDEEM ON STEAM).
+     * Only one wait runs at a time; a new route cancels the previous one.
      */
     function waitForOrderContent(callback, maxWaitMs = 15000) {
+        clearInterval(waitInterval)
         const startTime = Date.now()
-        const interval = setInterval(() => {
+        waitInterval = setInterval(() => {
             const hasReveal = findButtonsByText('Reveal Key').length > 0
             const hasRedeem = findButtonsByText('Redeem on Steam').length > 0
             if (hasReveal || hasRedeem) {
-                clearInterval(interval)
+                clearInterval(waitInterval)
                 log(`Order content detected (${Date.now() - startTime}ms)`)
                 callback()
                 return
             }
             if (Date.now() - startTime > maxWaitMs) {
-                clearInterval(interval)
+                clearInterval(waitInterval)
                 warn(`Timed out waiting for order content after ${maxWaitMs}ms`)
                 // Still inject the panel — the user might have a slow connection
                 callback()
@@ -642,20 +658,60 @@
         }, 500)
     }
 
+    function removePanel() {
+        document.getElementById('fac-panel')?.remove()
+        statusEl = revealBtn = redeemBtn = revealAndRedeemBtn = null
+    }
+
+    function showPanel() {
+        if (!stylesInjected) {
+            injectStyles()
+            stylesInjected = true
+        }
+        removePanel()
+        createPanel()
+
+        const revealCount = findButtonsByText('Reveal Key').length
+        const redeemCount = findButtonsByText('Redeem on Steam').length
+        const keyCount = findRevealedKeys().length
+        log(`Found ${revealCount} to reveal, ${redeemCount} redeem buttons, ${keyCount} visible keys`)
+        updateStatus(`${revealCount} to reveal, ${redeemCount} ready`)
+    }
+
+    function handleRoute() {
+        const path = isOrderPage() ? location.pathname : null
+        if (path === activeOrderPath) return
+        activeOrderPath = path
+
+        clearInterval(waitInterval)
+        removePanel()
+        if (!path) return
+
+        log(`Order page: ${path}`)
+        waitForOrderContent(() => {
+            // The user may have navigated away while we were waiting.
+            if (location.pathname === path) showPanel()
+        })
+    }
+
+    function watchForNavigation() {
+        // Navigation API fires on client-side route changes in modern browsers.
+        // The URL isn't always updated when it fires, so defer a tick.
+        if (typeof window.navigation !== 'undefined') {
+            window.navigation.addEventListener('navigate', () => setTimeout(handleRoute, 0))
+        }
+        window.addEventListener('popstate', handleRoute)
+        // Fallback for browsers without the Navigation API. Patching
+        // history.pushState doesn't work from the userscript sandbox, so poll
+        // instead — handleRoute is a cheap string compare when nothing changed.
+        setInterval(handleRoute, 1000)
+    }
+
     function init() {
         log(`v${SCRIPT_VERSION} loaded`)
         checkForUpdate()
-
-        waitForOrderContent(() => {
-            injectStyles()
-            createPanel()
-
-            const revealCount = findButtonsByText('Reveal Key').length
-            const redeemCount = findButtonsByText('Redeem on Steam').length
-            const keyCount = findRevealedKeys().length
-            log(`Found ${revealCount} to reveal, ${redeemCount} redeem buttons, ${keyCount} visible keys`)
-            updateStatus(`${revealCount} to reveal, ${redeemCount} ready`)
-        })
+        watchForNavigation()
+        handleRoute()
     }
 
     init()
