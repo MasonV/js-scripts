@@ -12,7 +12,6 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
 
 - [Utility](#utility)
   - [`auto-focus-search/`](#auto-focus-search)
-  - [`llm-stats-show-all/`](#llm-stats-show-all)
   - [`yourtube/`](#yourtube)
 - [AI chat](#ai-chat)
   - [`ai-chat-widescreen/`](#ai-chat-widescreen)
@@ -21,9 +20,7 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
   - [`fanatical-autoclaim/`](#fanatical-autoclaim)
   - [`luna-autoclaim/`](#luna-autoclaim)
   - [`itch-bundle-autoclaim/`](#itch-bundle-autoclaim)
-  - [`lichess-declutter/`](#lichess-declutter)
 - [Work](#work)
-  - [`google-address-autocomplete-ca/`](#google-address-autocomplete-ca)
   - [`odoo-heic-to-jpeg/`](#odoo-heic-to-jpeg)
 - [Music streaming](#music-streaming)
   - [`yt-music-redirect/`](#yt-music-redirect)
@@ -31,6 +28,9 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
   - [`ytm-data-panel/`](#ytm-data-panel)
 - [Archived](#archived)
   - [`archive/bonjourr-quick-add/`](#archivebonjourr-quick-add)
+  - [`archive/google-address-autocomplete-ca/`](#archivegoogle-address-autocomplete-ca)
+  - [`archive/lichess-declutter/`](#archivelichess-declutter)
+  - [`archive/llm-stats-show-all/`](#archivellm-stats-show-all)
 
 <a id="utility"></a>
 
@@ -61,28 +61,6 @@ A global userscript that automatically detects and focuses search input fields o
 **Metadata update checks:**
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.meta.js`
-
----
-
-### `llm-stats-show-all/`
-
-A userscript for [llm-stats.com](https://llm-stats.com) leaderboard pages that auto-paginates through all models and displays them in a single table.
-
-**Features:**
-
-- Automatically clicks through all pagination pages, collecting every model row
-- Replaces the paginated table with a single view of all models
-- Progress banner with percentage indicator during loading
-- Deduplicates rows to handle any overlap between pages
-- Hides pagination controls once all models are loaded
-
-**Install / download:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.user.js`
-
-**Metadata update checks:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/llm-stats-show-all/llm-stats-show-all.meta.js`
 
 ---
 
@@ -248,54 +226,11 @@ https://greasyfork.org/en/scripts/405532-itch-io-autoclaim
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/itch-bundle-autoclaim/itch-bundle-autoclaim.meta.js`
 
----
-
-### `lichess-declutter/`
-
-A userscript for [lichess.org](https://lichess.org) that strips the homepage down to essentials for casual play.
-
-**Features:**
-
-- Removes streamers, tournaments, live game preview, donate/swag, and announcement feed
-- Filters time controls to only 2+1 Bullet, 10+0 Rapid, and 30+0 Classical
-- Removes lobby/correspondence tabs and game creation buttons (lobby, challenge, computer)
-- Moves live player counter into the header bar
-- Reflows layout to prioritize puzzle of the day and blog articles
-
-**Install / download:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/lichess-declutter/lichess-declutter.user.js`
-
-**Metadata update checks:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/lichess-declutter/lichess-declutter.meta.js`
-
 <a id="work"></a>
 
 ---
 
 <h2 align="center">━━━━━━━━━━━━━━━━━━━━━━━  Work  ━━━━━━━━━━━━━━━━━━━━━━━</h2>
-
----
-
-### `google-address-autocomplete-ca/`
-
-A userscript for [Odoo](https://www.odoo.com) SaaS instances that restricts Google Places Autocomplete results to Canada with a location bias toward Southern Ontario.
-
-**Features:**
-
-- Wraps `google.maps.places.Autocomplete` constructor to inject `componentRestrictions: { country: "ca" }`
-- Wraps `AutocompleteService.getPlacePredictions` with the same restriction plus a circular location bias (centered on Southern Ontario, 150 km radius)
-- Non-destructive — does not override restrictions if already present
-- Polls until `google.maps.places` is loaded before patching
-
-**Install / download:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/google-address-autocomplete-ca/google-address-autocomplete-ca.user.js`
-
-**Metadata update checks:**
-
-`https://raw.githubusercontent.com/MasonV/js-scripts/main/google-address-autocomplete-ca/google-address-autocomplete-ca.meta.js`
 
 ---
 
@@ -404,6 +339,18 @@ Scripts that are no longer functional or maintained. Kept in the repo for refere
 ### `archive/bonjourr-quick-add/`
 
 A userscript for [Bonjourr](https://bonjourr.fr) new tab pages that provides a quick interface for adding shortcuts with automatic page title fetching. **Not functional** — Firefox's extension security model blocks userscript injection into `moz-extension://` pages. Kept in the repo in case browser APIs or Bonjourr change to make this viable. See [`REPORT.md`](archive/bonjourr-quick-add/REPORT.md) for the full post-mortem.
+
+### `archive/google-address-autocomplete-ca/`
+
+A userscript for [Odoo](https://www.odoo.com) SaaS instances that restricted Google Places Autocomplete results to Canada with a location bias toward Southern Ontario. **No longer maintained.**
+
+### `archive/lichess-declutter/`
+
+A userscript for [lichess.org](https://lichess.org) that stripped the homepage down to essentials for casual play. **No longer maintained.**
+
+### `archive/llm-stats-show-all/`
+
+A userscript for [llm-stats.com](https://llm-stats.com) leaderboard pages that auto-paginated through all models and displayed them in a single table. **No longer maintained.**
 
 <a id="update-workflow"></a>
 
