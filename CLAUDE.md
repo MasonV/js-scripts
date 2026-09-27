@@ -76,7 +76,7 @@ All scripts should include an in-page update check that runs on load. This uses 
 
 **Sandbox caveat:** Any `@grant` other than `none` puts the script in Tampermonkey's sandbox. If the script also accesses page-context globals (e.g., YouTube's `ytInitialPlayerResponse`), add `// @grant unsafeWindow` and use `unsafeWindow` instead of `window` for those accesses.
 
-**Do not hand-write this block.** It lives in one place — `tools/update-check.template.js` — and is copied into each script by `tools/sync-update-check.mjs`. In the `.user.js`, mark the region and let the tool fill it:
+**Do not hand-write this block.** It lives in one place — `tools/update-check.template.js` — and is copied into each script by `tools/sync-blocks.mjs` (`tools/sync-update-check.mjs` still works as an alias). In the `.user.js`, mark the region and let the tool fill it:
 
 ```js
 // <update-check>
@@ -86,7 +86,7 @@ All scripts should include an in-page update check that runs on load. This uses 
 Then run:
 
 ```sh
-node tools/sync-update-check.mjs
+node tools/sync-blocks.mjs
 ```
 
 The generated block owns `UPDATE_BANNER_ID`, `META_URL`, `DOWNLOAD_URL`, `checkForUpdate()` and `showUpdateBanner()`. It expects two constants to already exist in the enclosing scope:
@@ -97,6 +97,20 @@ The generated block owns `UPDATE_BANNER_ID`, `META_URL`, `DOWNLOAD_URL`, `checkF
 Everything else is handled for you: the update URLs are read from `GM_info.script.updateURL`/`downloadURL` (with literal fallbacks for Greasemonkey), versions are compared numerically so a local build ahead of `main` never nags, dev builds skip the check entirely, the banner de-duplicates itself, and it carries a `✕ Dismiss` control scoped to the session and the offered version.
 
 Call `checkForUpdate()` at the top of the initialization block. `node tools/check-metadata.mjs` fails the build if a script is missing the markers, never calls `checkForUpdate()`, or has let its block drift from the template.
+
+### Shared Blocks
+
+Code that more than one script needs is kept once in `tools/blocks/` and copied in by the same tool, `node tools/sync-blocks.mjs`, using the same marker pattern (`// <block-name>` / `// </block-name>`). Unlike `update-check`, these are opt-in: a script gets a block only if it carries that block's markers. Never edit a generated region in a `.user.js` — change the template and re-sync. Each template's header lists what it expects from the host script.
+
+| Block | Provides | Host must define / grant |
+| --- | --- | --- |
+| `autoclaim-kit` | `sleep`, `waitFor`, visible-button lookup, `maskKey`/`normalizeKey`; the floating panel (`buildPanelShell`, `createStatusLine`, `updateStatus`, `createDelayInput`, `setControlsEnabled`, `removePanel`) and its base CSS (`injectPanelStyles`) | `UI_PREFIX` (e.g. `'lac'` → `#lac-panel`); `@grant GM_addStyle` |
+| `steam-redeem` | `STEAM_KEY_RE`, `steamRedeemUrl(key)`, `findSteamKeys()` | nothing |
+| `gog-redeem` | Store side `sendToGogRedeem(url, game)`; gog.com side `runGogRedemption()` (Continue → Redeem, exactly once, "Ask first" by default); `isGogHost()` | `autoclaim-kit`, `KEY_PREFIX`, `log`, `warn`, `checkForUpdate`; `@match https://www.gog.com/*`; `@grant GM_getValue`, `GM_setValue`, `GM_deleteValue` |
+
+Place `autoclaim-kit` before any block that uses it. Changing a template changes every script that includes it, so each of those scripts needs its own version bump in the same commit.
+
+Adding a block: write `tools/blocks/<name>.template.js` (tab-indented; the tool re-indents it to the host file), register it in `BLOCKS` in `tools/sync-blocks.mjs`, and cover its pure functions in `tools/sync-blocks.test.mjs`. That file evaluates the real template text, so its tests can't drift from the shipped code.
 
 ## Version & Deployment
 
@@ -123,6 +137,7 @@ Tests use the built-in Node runner, no dependencies:
 
 ```sh
 node --test barter-bundle-scorer/scoring.test.js
+node --test tools/sync-blocks.test.mjs
 ```
 
 `scoring.test.js` mirrors the pure scoring functions out of the userscript, because there's no module system to import them through. **When you change the MATH or SCORING sections of `barter-bundle-scorer.user.js`, update the copies in the test file too** — nothing enforces this automatically yet.
@@ -140,7 +155,7 @@ This validates `.user.js` / `.meta.js` pairs — matching metadata, correct upda
 1. Create a folder: `<script-name>/`
 2. Add `<script-name>.user.js` with a complete Tampermonkey metadata block (`@name`, `@version`, `@match`, `@grant GM_xmlhttpRequest`, `@connect raw.githubusercontent.com`, `@updateURL`, `@downloadURL`).
 3. Add `<script-name>.meta.js` with matching metadata (no script body). Copy the header manually from `.user.js`; do not auto-generate it.
-4. Define `SCRIPT_VERSION` and `LOG_PREFIX`, add the `// <update-check>` / `// </update-check>` markers, and run `node tools/sync-update-check.mjs` to fill them in. Call `checkForUpdate()` from the init block.
+4. Define `SCRIPT_VERSION` and `LOG_PREFIX`, add the `// <update-check>` / `// </update-check>` markers, and run `node tools/sync-blocks.mjs` to fill them in. Add markers for any shared blocks the script needs (see Shared Blocks). Call `checkForUpdate()` from the init block.
 5. Update `README.md` with install/update URLs and a brief description.
 6. Use `templates/userscript-template.md` for standard metadata boilerplate.
 7. Use the section divider and logging prefix conventions documented above.

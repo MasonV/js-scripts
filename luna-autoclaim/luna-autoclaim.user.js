@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.11.0
+// @version      0.11.1
 // @description  Bulk-reveal and bulk-redeem keys on Luna
 // @include      /^https:\/\/luna\.amazon\.[a-z.]{2,6}\//
 // @match        https://www.gog.com/*
@@ -33,7 +33,7 @@
 //
 // @match www.gog.com: the GOG leg (Continue → Redeem on /redeem/<key>). The
 // script runs on every GOG page but does nothing unless Luna handed it that
-// exact key a few minutes earlier — see "GOG REDEMPTION — gog.com side".
+// exact key a few minutes earlier — see the "GOG REDEEM" block.
 
 (function () {
   "use strict";
@@ -44,6 +44,8 @@
       : "__DEV__";
   const LOG_PREFIX = "[Luna Autoclaim]";
   const SHORT_PREFIX = "[LAC]";
+  const UI_PREFIX = "lac"; // panel ids/classes — see the autoclaim-kit block
+  const KEY_PREFIX = "lac"; // GM storage keys — see the gog-redeem block
 
   const DEFAULT_REVEAL_DELAY_MS = 500;
   const DEFAULT_REDEEM_DELAY_MS = 800;
@@ -73,19 +75,6 @@
   const GOG_HANDOFF_KEY = "lac_gog_handoff_v1";
   const GOG_HANDOFF_TTL_MS = 2 * 60 * 1000;
   const GOG_LINK_TIMEOUT_MS = 20000;
-  const GOG_REDEEM_URL_RE =
-    /^https:\/\/(?:www\.)?gog\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?redeem\/([A-Za-z0-9-]+)\/?(?:[?#].*)?$/;
-
-  // GOG, cross-site: localStorage/sessionStorage don't reach gog.com, so the
-  // handoff is recorded in GM storage (shared by the script on every site).
-  // The key itself travels in the redeem URL; the GM entry is what gives the
-  // gog.com side permission to act on it, and records the Redeem click so it
-  // can never happen twice. One entry per key so parallel tabs don't clobber.
-  const GOG_PENDING_PREFIX = "lac_gog_pending_v1:";
-  const GOG_PENDING_TTL_MS = 10 * 60 * 1000;
-  const GOG_AUTO_REDEEM_KEY = "lac_gog_auto_redeem_v1"; // default false: stop before Redeem
-  const GOG_STEP_TIMEOUT_MS = 20000;
-  const GOG_REDEEM_PATH_RE = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?redeem\/([A-Za-z0-9-]+)\/?$/;
 
   // Mutable — updated by the UI input
   let revealDelayMs = DEFAULT_REVEAL_DELAY_MS;
@@ -291,12 +280,19 @@
   }
   // </update-check>
 
+  // <autoclaim-kit>
   // ═══════════════════════════════════════════════════════════════════
-  //  DOM HELPERS
+  //  AUTOCLAIM KIT — shared helpers and panel UI
+  //  Generated from tools/blocks/autoclaim-kit.template.js — do not edit here.
+  //  Change the template, then run: node tools/sync-blocks.mjs
   // ═══════════════════════════════════════════════════════════════════
+  //
+  // Expects UI_PREFIX (e.g. 'lac') in the enclosing scope: every id and class
+  // the panel uses is `${UI_PREFIX}-…`, so two autoclaim scripts on one page
+  // never collide. Needs @grant GM_addStyle.
 
   function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise(resolve => setTimeout(resolve, ms))
   }
 
   /**
@@ -304,20 +300,302 @@
    * Resolves with the probe's value, or null on timeout.
    */
   async function waitFor(probe, timeoutMs, intervalMs = 250) {
-    const deadline = Date.now() + timeoutMs;
+    const deadline = Date.now() + timeoutMs
     for (;;) {
-      const value = probe();
-      if (value) return value;
-      if (Date.now() >= deadline) return null;
-      await sleep(intervalMs);
+      const value = probe()
+      if (value) return value
+      if (Date.now() >= deadline) return null
+      await sleep(intervalMs)
     }
+  }
+
+  function isVisible(el) {
+    return el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
+  }
+
+  function isEnabled(el) {
+    return !el.disabled && el.getAttribute('aria-disabled') !== 'true'
+  }
+
+  // Visible buttons/links whose text is exactly `text` (case-insensitive),
+  // ignoring our own panel.
+  function findVisibleButtonsByText(text) {
+    const want = text.toLowerCase()
+    return Array.from(
+      document.querySelectorAll('button, a, [role="button"], input[type="submit"]'),
+    ).filter(
+      el =>
+        !el.closest(`#${UI_PREFIX}-panel`) &&
+        (el.value || el.textContent).trim().toLowerCase() === want &&
+        isVisible(el),
+    )
+  }
+
+  // The single visible, enabled button with this text — or null, so an
+  // ambiguous page is never guessed at.
+  function findOnlyButton(text) {
+    const matches = findVisibleButtonsByText(text).filter(isEnabled)
+    return matches.length === 1 ? matches[0] : null
+  }
+
+  function normalizeKey(key) {
+    return key.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
   }
 
   // Keys end up in the console and the status line — show only enough to
   // tell two apart.
   function maskKey(key) {
-    return key.length > 5 ? `${key.slice(0, 5)}…` : key;
+    return key.length > 5 ? `${key.slice(0, 5)}…` : key
   }
+
+  // ── Panel ───────────────────────────────────────────────────────────
+
+  let statusEl = null
+  let panelStylesInjected = false
+
+  // Floating panel with a title and a close button. The caller appends its
+  // own controls, then the panel to document.body.
+  function buildPanelShell(titleText) {
+    const panel = document.createElement('div')
+    panel.id = `${UI_PREFIX}-panel`
+
+    const header = document.createElement('div')
+    header.id = `${UI_PREFIX}-header`
+
+    const title = document.createElement('div')
+    title.id = `${UI_PREFIX}-title`
+    title.textContent = titleText
+    header.appendChild(title)
+
+    const closeBtn = document.createElement('button')
+    closeBtn.id = `${UI_PREFIX}-close-btn`
+    closeBtn.textContent = '×'
+    closeBtn.title = 'Close panel'
+    closeBtn.addEventListener('click', () => panel.remove())
+    header.appendChild(closeBtn)
+
+    panel.appendChild(header)
+    return panel
+  }
+
+  // The one status line updateStatus() writes to.
+  function createStatusLine(panel, text = '') {
+    statusEl = document.createElement('div')
+    statusEl.id = `${UI_PREFIX}-status`
+    statusEl.textContent = text
+    panel.appendChild(statusEl)
+    return statusEl
+  }
+
+  // tone: undefined (neutral) | 'ok' | 'error'
+  function updateStatus(text, tone) {
+    if (!statusEl) return
+    statusEl.textContent = text
+    statusEl.classList.toggle(`${UI_PREFIX}-status--ok`, tone === 'ok')
+    statusEl.classList.toggle(`${UI_PREFIX}-status--error`, tone === 'error')
+  }
+
+  function setControlsEnabled(controls, enabled) {
+    controls.forEach(btn => {
+      if (!btn) return
+      btn.disabled = !enabled
+      btn.style.opacity = enabled ? '1' : '0.5'
+      btn.style.pointerEvents = enabled ? 'auto' : 'none'
+    })
+  }
+
+  function createDelayInput(labelText, defaultValue, onChange) {
+    const row = document.createElement('div')
+    row.className = `${UI_PREFIX}-delay-row`
+
+    const label = document.createElement('label')
+    label.className = `${UI_PREFIX}-delay-label`
+    label.textContent = labelText
+
+    const input = document.createElement('input')
+    input.type = 'number'
+    input.className = `${UI_PREFIX}-delay-input`
+    input.min = '100'
+    input.max = '10000'
+    input.step = '100'
+    input.value = defaultValue
+    input.addEventListener('change', () => {
+      const val = parseInt(input.value, 10)
+      if (!isNaN(val) && val >= 100) onChange(val)
+    })
+
+    const unit = document.createElement('span')
+    unit.className = `${UI_PREFIX}-delay-unit`
+    unit.textContent = 'ms'
+
+    row.appendChild(label)
+    row.appendChild(input)
+    row.appendChild(unit)
+    return row
+  }
+
+  function removePanel() {
+    document.getElementById(`${UI_PREFIX}-panel`)?.remove()
+    statusEl = null
+  }
+
+  // Base panel styles. Safe to call on every route — only the first call
+  // injects. Script-specific rules go in the script's own GM_addStyle.
+  function injectPanelStyles() {
+    if (panelStylesInjected) return
+    panelStylesInjected = true
+    const p = UI_PREFIX
+    GM_addStyle(`
+      #${p}-panel {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 10000;
+        background: #2b2b2b;
+        border: 1px solid #424242;
+        border-radius: 8px;
+        padding: 12px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 200px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        font-family: Lato, 'Open Sans', sans-serif;
+        font-size: 14px;
+        color: #eee;
+      }
+
+      #${p}-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      #${p}-title {
+        font-weight: 700;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #ff9800;
+        flex: 1;
+        text-align: center;
+        padding-left: 20px;
+      }
+
+      #${p}-close-btn {
+        background: none;
+        border: none;
+        color: #757575;
+        font-size: 18px;
+        cursor: pointer;
+        padding: 0;
+        line-height: 1;
+        width: 20px;
+        font-family: inherit;
+      }
+
+      #${p}-close-btn:hover { color: #eee; }
+
+      /* One-line context under the title, e.g. "Store: GOG" */
+      #${p}-store {
+        font-size: 12px;
+        color: #bdbdbd;
+        text-align: center;
+        padding: 2px 0;
+      }
+
+      .${p}-btn {
+        background: #424242;
+        color: #eee;
+        border: 1px solid #616161;
+        border-radius: 4px;
+        padding: 8px 12px;
+        font-size: 13px;
+        font-weight: 400;
+        cursor: pointer;
+        transition: background 0.15s ease, opacity 0.15s ease;
+        font-family: inherit;
+      }
+
+      .${p}-btn:hover { background: #616161; }
+
+      .${p}-btn-primary {
+        background: #ff9800;
+        color: #212121;
+        border-color: #ff9800;
+        font-weight: 700;
+      }
+
+      .${p}-btn-primary:hover { background: #ffb74d; }
+
+      .${p}-btn-danger {
+        background: transparent;
+        color: #ef5350;
+        border-color: #ef5350;
+        font-size: 11px;
+        padding: 4px 8px;
+      }
+
+      .${p}-btn-danger:hover {
+        background: #ef5350;
+        color: #fff;
+      }
+
+      #${p}-delays {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        border-top: 1px solid #424242;
+        padding-top: 8px;
+        margin-top: 2px;
+      }
+
+      .${p}-delay-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .${p}-delay-label {
+        font-size: 11px;
+        color: #9e9e9e;
+        flex: 1;
+        margin: 0;
+      }
+
+      .${p}-delay-input {
+        width: 60px;
+        background: #333;
+        color: #eee;
+        border: 1px solid #616161;
+        border-radius: 3px;
+        padding: 2px 4px;
+        font-size: 12px;
+        font-family: inherit;
+        text-align: right;
+      }
+
+      .${p}-delay-unit {
+        font-size: 11px;
+        color: #757575;
+      }
+
+      #${p}-status {
+        font-size: 12px;
+        color: #9e9e9e;
+        text-align: center;
+        min-height: 16px;
+      }
+
+      #${p}-status.${p}-status--ok { color: #81c784; }
+      #${p}-status.${p}-status--error { color: #ef5350; font-weight: 700; }
+    `)
+  }
+  // </autoclaim-kit>
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  DOM HELPERS
+  // ═══════════════════════════════════════════════════════════════════
 
   // The page's own window — Luna's click handlers call *its* window.open.
   const pageWindow = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
@@ -698,16 +976,8 @@
   }
 
   function handOffToGog(url) {
-    const key = url.match(GOG_REDEEM_URL_RE)[1];
     clearGogHandoff();
-    GM_setValue(GOG_PENDING_PREFIX + key.toUpperCase(), {
-      createdAt: Date.now(),
-      game: document.querySelector("h1")?.textContent?.trim() || null,
-      stage: "handoff",
-    });
-    log(`GOG: handing off key ${maskKey(key)} to gog.com`);
-    updateStatus(`GOG: opening redeem page for ${maskKey(key)}…`);
-    window.location.assign(url);
+    sendToGogRedeem(url, document.querySelector("h1")?.textContent?.trim());
   }
 
   // clickInSameTab() hook: take over any GOG redeem URL the page tries to open.
@@ -743,199 +1013,207 @@
     }
   }
 
+  // <gog-redeem>
   // ═══════════════════════════════════════════════════════════════════
-  //  GOG REDEMPTION — gog.com side
+  //  GOG REDEEM
+  //  Generated from tools/blocks/gog-redeem.template.js — do not edit here.
+  //  Change the template, then run: node tools/sync-blocks.mjs
   // ═══════════════════════════════════════════════════════════════════
   //
-  // Page 1 "Redeem code": key prefilled, green Continue.
-  // Page 2 "You are about to redeem 1 item …": Cancel / Redeem.
-  // Buttons are found by visible text, never by GOG's generated classes.
-  // Redeem is exactly-once: the GM entry is stamped "redeem-clicked" *before*
-  // the click, and a stamped entry is never clicked again — not after a
-  // reload, not from a second tab. Any surprise stops the run.
+  // Two halves, one script on two sites:
+  //   store side  sendToGogRedeem(url, game) records the key in GM storage
+  //               and navigates this tab to https://www.gog.com/redeem/<key>.
+  //   gog.com     runGogRedemption() acts only on a key the store side sent
+  //               in the last few minutes: Continue, then Redeem.
+  //
+  // localStorage/sessionStorage don't reach gog.com, so the handoff lives in
+  // GM storage (shared by the script on every site it matches). The key
+  // travels in the redeem URL; the GM entry is what gives the gog.com side
+  // permission to act on it, and records the Redeem click so it can never
+  // happen twice. One entry per key so parallel tabs don't clobber.
+  //
+  // gog.com pages: Page 1 "Redeem code" — key prefilled, green Continue.
+  // Page 2 "You are about to redeem 1 item …" — Cancel / Redeem. Buttons are
+  // found by visible text, never by GOG's generated classes. Any surprise
+  // stops the run.
+  //
+  // Expects KEY_PREFIX (e.g. 'lac'), log(), warn(), checkForUpdate() and the
+  // autoclaim-kit block. Needs @match https://www.gog.com/* and @grant
+  // GM_getValue, GM_setValue, GM_deleteValue.
+
+  const GOG_REDEEM_URL_RE =
+    /^https:\/\/(?:www\.)?gog\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?redeem\/([A-Za-z0-9-]+)\/?(?:[?#].*)?$/
+  const GOG_REDEEM_PATH_RE = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?redeem\/([A-Za-z0-9-]+)\/?$/
+
+  const GOG_PENDING_PREFIX = `${KEY_PREFIX}_gog_pending_v1:`
+  const GOG_PENDING_TTL_MS = 10 * 60 * 1000
+  const GOG_AUTO_REDEEM_KEY = `${KEY_PREFIX}_gog_auto_redeem_v1` // default false: stop before Redeem
+  const GOG_STEP_TIMEOUT_MS = 20000
+
+  function isGogHost() {
+    return /(^|\.)gog\.com$/.test(window.location.hostname)
+  }
 
   function isGogAutoRedeem() {
-    return GM_getValue(GOG_AUTO_REDEEM_KEY, false) === true;
+    return GM_getValue(GOG_AUTO_REDEEM_KEY, false) === true
   }
 
   function setGogAutoRedeem(on) {
-    GM_setValue(GOG_AUTO_REDEEM_KEY, on);
+    GM_setValue(GOG_AUTO_REDEEM_KEY, on)
   }
 
-  function isVisible(el) {
-    return el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
+  // ── Store side ──────────────────────────────────────────────────────
+
+  // `url` must match GOG_REDEEM_URL_RE. `game` is shown on the gog.com panel.
+  function sendToGogRedeem(url, game) {
+    const key = url.match(GOG_REDEEM_URL_RE)[1]
+    GM_setValue(GOG_PENDING_PREFIX + key.toUpperCase(), {
+      createdAt: Date.now(),
+      game: game || null,
+      stage: 'handoff',
+    })
+    log(`GOG: handing off key ${maskKey(key)} to gog.com`)
+    updateStatus(`GOG: opening redeem page for ${maskKey(key)}…`)
+    window.location.assign(url)
   }
 
-  function isEnabled(el) {
-    return !el.disabled && el.getAttribute("aria-disabled") !== "true";
-  }
-
-  function findVisibleButtonsByText(text) {
-    const want = text.toLowerCase();
-    return Array.from(
-      document.querySelectorAll('button, a, [role="button"], input[type="submit"]'),
-    ).filter(
-      (el) =>
-        !el.closest("#lac-panel") &&
-        (el.value || el.textContent).trim().toLowerCase() === want &&
-        isVisible(el),
-    );
-  }
-
-  // The single visible, enabled button with this text — or null, so an
-  // ambiguous page is never guessed at.
-  function findOnlyButton(text) {
-    const matches = findVisibleButtonsByText(text).filter(isEnabled);
-    return matches.length === 1 ? matches[0] : null;
-  }
-
-  function normalizeKey(key) {
-    return key.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-  }
+  // ── gog.com side ────────────────────────────────────────────────────
 
   // A prefilled input that holds a *different* key means we're on the wrong
   // code — stop. An empty or missing input is left to GOG.
   function prefilledKeyMismatch(key) {
     const values = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'))
       .filter(isVisible)
-      .map((i) => normalizeKey(i.value))
-      .filter(Boolean);
-    return values.length > 0 && !values.includes(normalizeKey(key));
+      .map(i => normalizeKey(i.value))
+      .filter(Boolean)
+    return values.length > 0 && !values.includes(normalizeKey(key))
   }
 
   function createGogPanel(entry) {
-    const panel = buildPanelShell("Autoclaim · GOG");
+    const panel = buildPanelShell('Autoclaim · GOG')
 
-    const gameEl = document.createElement("div");
-    gameEl.id = "lac-store";
-    gameEl.textContent = entry.game ? `${entry.game}` : "GOG key from Luna";
-    panel.appendChild(gameEl);
+    const gameEl = document.createElement('div')
+    gameEl.id = `${UI_PREFIX}-store`
+    gameEl.textContent = entry.game ? `${entry.game}` : 'GOG key'
+    panel.appendChild(gameEl)
 
-    statusEl = document.createElement("div");
-    statusEl.id = "lac-status";
-    panel.appendChild(statusEl);
-
-    document.body.appendChild(panel);
-    return panel;
+    createStatusLine(panel)
+    document.body.appendChild(panel)
+    return panel
   }
 
   function stopGog(message) {
-    warn(`GOG: ${message}`);
-    updateStatus(`${message} — stopped`, "error");
+    warn(`GOG: ${message}`)
+    updateStatus(`${message} — stopped`, 'error')
   }
 
+  // Redeem is exactly-once: the GM entry is stamped "redeem-clicked" *before*
+  // the click, and a stamped entry is never clicked again — not after a
+  // reload, not from a second tab.
   async function runGogRedemption() {
-    const match = window.location.pathname.match(GOG_REDEEM_PATH_RE);
-    if (!match) return;
-    const key = match[1];
-    const entryKey = GOG_PENDING_PREFIX + key.toUpperCase();
-    const entry = GM_getValue(entryKey, null);
-    if (!entry) return; // not a code Luna handed us — leave the page alone
+    const match = window.location.pathname.match(GOG_REDEEM_PATH_RE)
+    if (!match) return
+    const key = match[1]
+    const entryKey = GOG_PENDING_PREFIX + key.toUpperCase()
+    const entry = GM_getValue(entryKey, null)
+    if (!entry) return // not a code we handed over — leave the page alone
 
     if (Date.now() - entry.createdAt > GOG_PENDING_TTL_MS) {
-      log(`GOG: handoff for ${maskKey(key)} is stale — ignoring`);
-      GM_deleteValue(entryKey);
-      return;
+      log(`GOG: handoff for ${maskKey(key)} is stale — ignoring`)
+      GM_deleteValue(entryKey)
+      return
     }
 
-    checkForUpdate();
-    injectStyles();
-    const panel = createGogPanel(entry);
+    checkForUpdate()
+    injectPanelStyles()
+    const panel = createGogPanel(entry)
 
-    if (entry.stage === "redeem-clicked") {
-      stopGog("Redeem was already clicked for this code — not clicking again. Check GOG's result");
-      return;
+    if (entry.stage === 'redeem-clicked') {
+      stopGog("Redeem was already clicked for this code — not clicking again. Check GOG's result")
+      return
     }
 
     // ── Page 1: Continue ─────────────────────────────────────────────
-    updateStatus("Waiting for Continue…");
-    const continueBtn = await waitFor(() => findOnlyButton("Continue"), GOG_STEP_TIMEOUT_MS);
+    updateStatus('Waiting for Continue…')
+    const continueBtn = await waitFor(() => findOnlyButton('Continue'), GOG_STEP_TIMEOUT_MS)
     if (!continueBtn) {
-      stopGog("Continue button not found (signed in to GOG?)");
-      return;
+      stopGog('Continue button not found (signed in to GOG?)')
+      return
     }
     if (prefilledKeyMismatch(key)) {
-      stopGog("The code on the page doesn't match the one from Luna");
-      return;
+      stopGog("The code on the page doesn't match the one handed over")
+      return
     }
-    log(`GOG: clicking Continue for ${maskKey(key)}`);
-    GM_setValue(entryKey, { ...entry, stage: "continue-clicked" });
-    continueBtn.click();
+    log(`GOG: clicking Continue for ${maskKey(key)}`)
+    GM_setValue(entryKey, { ...entry, stage: 'continue-clicked' })
+    continueBtn.click()
 
     // ── Page 2: wait for the transition, then Redeem ────────────────
-    updateStatus("Waiting for the confirmation page…");
+    updateStatus('Waiting for the confirmation page…')
     const redeemBtn = await waitFor(() => {
-      if (findVisibleButtonsByText("Continue").length) return null; // still on page 1
-      if (!/you are about to redeem/i.test(document.body.innerText)) return null;
-      return findOnlyButton("Redeem");
-    }, GOG_STEP_TIMEOUT_MS);
+      if (findVisibleButtonsByText('Continue').length) return null // still on page 1
+      if (!/you are about to redeem/i.test(document.body.innerText)) return null
+      return findOnlyButton('Redeem')
+    }, GOG_STEP_TIMEOUT_MS)
     if (!redeemBtn) {
-      stopGog("Confirmation page with a single Redeem button didn't appear");
-      return;
+      stopGog("Confirmation page with a single Redeem button didn't appear")
+      return
     }
 
-    let confirmBtn = null;
-    let redeemStarted = false;
+    let confirmBtn = null
+    let redeemStarted = false
     const redeemOnce = async () => {
-      if (redeemStarted) return;
-      redeemStarted = true;
-      confirmBtn?.remove();
+      if (redeemStarted) return
+      redeemStarted = true
+      confirmBtn?.remove()
 
       // Re-read: another tab or an earlier run may have got here first.
-      const latest = GM_getValue(entryKey, null);
-      if (!latest || latest.stage === "redeem-clicked") {
-        stopGog("This code's Redeem was already handled elsewhere");
-        return;
+      const latest = GM_getValue(entryKey, null)
+      if (!latest || latest.stage === 'redeem-clicked') {
+        stopGog("This code's Redeem was already handled elsewhere")
+        return
       }
       if (!redeemBtn.isConnected || !isVisible(redeemBtn) || !isEnabled(redeemBtn)) {
-        stopGog("The Redeem button went away before it could be clicked");
-        return;
+        stopGog('The Redeem button went away before it could be clicked')
+        return
       }
 
-      GM_setValue(entryKey, { ...latest, stage: "redeem-clicked", redeemedAt: Date.now() });
-      log(`GOG: clicking Redeem for ${maskKey(key)}`);
-      redeemBtn.click();
-      updateStatus("Redeem clicked — waiting for GOG…");
+      GM_setValue(entryKey, { ...latest, stage: 'redeem-clicked', redeemedAt: Date.now() })
+      log(`GOG: clicking Redeem for ${maskKey(key)}`)
+      redeemBtn.click()
+      updateStatus('Redeem clicked — waiting for GOG…')
 
-      const gone = await waitFor(() => !redeemBtn.isConnected || !isVisible(redeemBtn), GOG_STEP_TIMEOUT_MS);
+      const gone = await waitFor(() => !redeemBtn.isConnected || !isVisible(redeemBtn), GOG_STEP_TIMEOUT_MS)
       if (gone) {
-        GM_deleteValue(entryKey);
-        log(`GOG: Redeem accepted for ${maskKey(key)}`);
-        updateStatus("Redeem sent — GOG's result is on the page", "ok");
+        GM_deleteValue(entryKey)
+        log(`GOG: Redeem accepted for ${maskKey(key)}`)
+        updateStatus("Redeem sent — GOG's result is on the page", 'ok')
       } else {
         // The entry stays stamped, so nothing will ever click Redeem again.
-        stopGog("GOG didn't move on after Redeem. Check the page before trying by hand");
+        stopGog("GOG didn't move on after Redeem. Check the page before trying by hand")
       }
-    };
-
-    if (isGogAutoRedeem()) {
-      await redeemOnce();
-      return;
     }
 
-    updateStatus("Ready to redeem — confirm below");
-    confirmBtn = document.createElement("button");
-    confirmBtn.className = "lac-btn lac-btn-primary";
-    confirmBtn.textContent = "✔ Redeem on GOG";
-    confirmBtn.addEventListener("click", redeemOnce);
-    panel.appendChild(confirmBtn);
+    if (isGogAutoRedeem()) {
+      await redeemOnce()
+      return
+    }
+
+    updateStatus('Ready to redeem — confirm below')
+    confirmBtn = document.createElement('button')
+    confirmBtn.className = `${UI_PREFIX}-btn ${UI_PREFIX}-btn-primary`
+    confirmBtn.textContent = '✔ Redeem on GOG'
+    confirmBtn.addEventListener('click', redeemOnce)
+    panel.appendChild(confirmBtn)
   }
+  // </gog-redeem>
 
   // ═══════════════════════════════════════════════════════════════════
   //  UI — SHARED
   // ═══════════════════════════════════════════════════════════════════
 
-  let statusEl = null;
   let claimBtn = null;
   let autoClaimBtn = null;
-
-  // tone: undefined (neutral) | "ok" | "error"
-  function updateStatus(text, tone) {
-    if (!statusEl) return;
-    statusEl.textContent = text;
-    statusEl.classList.toggle("lac-status--ok", tone === "ok");
-    statusEl.classList.toggle("lac-status--error", tone === "error");
-  }
 
   // Home page only: preview what "Open All" would do under the current toggles.
   function refreshListingStatus() {
@@ -947,65 +1225,7 @@
   }
 
   function setButtonsEnabled(enabled) {
-    [claimBtn, autoClaimBtn].forEach((btn) => {
-      if (!btn) return;
-      btn.disabled = !enabled;
-      btn.style.opacity = enabled ? "1" : "0.5";
-      btn.style.pointerEvents = enabled ? "auto" : "none";
-    });
-  }
-
-  function buildPanelShell(titleText) {
-    const panel = document.createElement("div");
-    panel.id = "lac-panel";
-
-    const header = document.createElement("div");
-    header.id = "lac-header";
-
-    const title = document.createElement("div");
-    title.id = "lac-title";
-    title.textContent = titleText;
-    header.appendChild(title);
-
-    const closeBtn = document.createElement("button");
-    closeBtn.id = "lac-close-btn";
-    closeBtn.textContent = "\u00D7";
-    closeBtn.title = "Close panel";
-    closeBtn.addEventListener("click", () => panel.remove());
-    header.appendChild(closeBtn);
-
-    panel.appendChild(header);
-    return panel;
-  }
-
-  function createDelayInput(labelText, defaultValue, onChange) {
-    const row = document.createElement("div");
-    row.className = "lac-delay-row";
-
-    const label = document.createElement("label");
-    label.className = "lac-delay-label";
-    label.textContent = labelText;
-
-    const input = document.createElement("input");
-    input.type = "number";
-    input.className = "lac-delay-input";
-    input.min = "100";
-    input.max = "10000";
-    input.step = "100";
-    input.value = defaultValue;
-    input.addEventListener("change", () => {
-      const val = parseInt(input.value, 10);
-      if (!isNaN(val) && val >= 100) onChange(val);
-    });
-
-    const unit = document.createElement("span");
-    unit.className = "lac-delay-unit";
-    unit.textContent = "ms";
-
-    row.appendChild(label);
-    row.appendChild(input);
-    row.appendChild(unit);
-    return row;
+    setControlsEnabled([claimBtn, autoClaimBtn], enabled);
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -1111,10 +1331,7 @@
     storeSection.appendChild(createGogRedeemModeRow());
     panel.appendChild(storeSection);
 
-    statusEl = document.createElement("div");
-    statusEl.id = "lac-status";
-    statusEl.textContent = "Ready";
-    panel.appendChild(statusEl);
+    createStatusLine(panel, "Ready");
 
     document.body.appendChild(panel);
   }
@@ -1133,15 +1350,13 @@
       : `Store: not recognised (saw ${describeSeenStores()})`;
     panel.appendChild(storeEl);
 
-    statusEl = document.createElement("div");
-    statusEl.id = "lac-status";
-    panel.appendChild(statusEl);
+    createStatusLine(panel);
 
     if (!store) {
       // No Claim button: an unknown store is never claimed from here.
       updateStatus(claimRefusal(store), "error");
     } else if (isStoreDisabled(store)) {
-      statusEl.textContent = "Store set to Skip — not claiming";
+      updateStatus("Store set to Skip — not claiming");
 
       // Allow re-enabling without going back to the home page.
       const enableBtn = document.createElement("button");
@@ -1156,7 +1371,7 @@
       });
       panel.appendChild(enableBtn);
     } else {
-      statusEl.textContent = "Ready";
+      updateStatus("Ready");
 
       claimBtn = document.createElement("button");
       claimBtn.id = "lac-claim-btn";
@@ -1185,141 +1400,15 @@
   //  STYLES
   // ═══════════════════════════════════════════════════════════════════
 
+  // Base panel styles come from the autoclaim-kit block; these are the
+  // Luna-only additions (store toggles).
+  let lunaStylesInjected = false;
+
   function injectStyles() {
+    injectPanelStyles();
+    if (lunaStylesInjected) return;
+    lunaStylesInjected = true;
     GM_addStyle(`
-            #lac-panel {
-                position: fixed;
-                bottom: 20px;
-                right: 20px;
-                z-index: 10000;
-                background: #2b2b2b;
-                border: 1px solid #424242;
-                border-radius: 8px;
-                padding: 12px 16px;
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-                min-width: 200px;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-                font-family: Lato, 'Open Sans', sans-serif;
-                font-size: 14px;
-                color: #eee;
-            }
-
-            #lac-header {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-            }
-
-            #lac-title {
-                font-weight: 700;
-                font-size: 13px;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-                color: #ff9800;
-                flex: 1;
-                text-align: center;
-                padding-left: 20px;
-            }
-
-            #lac-close-btn {
-                background: none;
-                border: none;
-                color: #757575;
-                font-size: 18px;
-                cursor: pointer;
-                padding: 0;
-                line-height: 1;
-                width: 20px;
-                font-family: inherit;
-            }
-
-            #lac-close-btn:hover { color: #eee; }
-
-            #lac-store {
-                font-size: 12px;
-                color: #bdbdbd;
-                text-align: center;
-                padding: 2px 0;
-            }
-
-            .lac-btn {
-                background: #424242;
-                color: #eee;
-                border: 1px solid #616161;
-                border-radius: 4px;
-                padding: 8px 12px;
-                font-size: 13px;
-                font-weight: 400;
-                cursor: pointer;
-                transition: background 0.15s ease, opacity 0.15s ease;
-                font-family: inherit;
-            }
-
-            .lac-btn:hover { background: #616161; }
-
-            .lac-btn-primary {
-                background: #ff9800;
-                color: #212121;
-                border-color: #ff9800;
-                font-weight: 700;
-            }
-
-            .lac-btn-primary:hover { background: #ffb74d; }
-
-            .lac-btn-danger {
-                background: transparent;
-                color: #ef5350;
-                border-color: #ef5350;
-                font-size: 11px;
-                padding: 4px 8px;
-            }
-
-            .lac-btn-danger:hover {
-                background: #ef5350;
-                color: #fff;
-            }
-
-            #lac-delays {
-                display: flex;
-                flex-direction: column;
-                gap: 4px;
-                border-top: 1px solid #424242;
-                padding-top: 8px;
-                margin-top: 2px;
-            }
-
-            .lac-delay-row {
-                display: flex;
-                align-items: center;
-                gap: 6px;
-            }
-
-            .lac-delay-label {
-                font-size: 11px;
-                color: #9e9e9e;
-                flex: 1;
-                margin: 0;
-            }
-
-            .lac-delay-input {
-                width: 60px;
-                background: #333;
-                color: #eee;
-                border: 1px solid #616161;
-                border-radius: 3px;
-                padding: 2px 4px;
-                font-size: 12px;
-                font-family: inherit;
-                text-align: right;
-            }
-
-            .lac-delay-unit {
-                font-size: 11px;
-                color: #757575;
-            }
-
             #lac-stores {
                 border-top: 1px solid #424242;
                 padding-top: 8px;
@@ -1380,17 +1469,6 @@
                 background: #616161;
                 color: #9e9e9e;
             }
-
-            #lac-status {
-                font-size: 12px;
-                color: #9e9e9e;
-                text-align: center;
-                min-height: 16px;
-            }
-
-            #lac-status.lac-status--ok { color: #81c784; }
-            #lac-status.lac-status--error { color: #ef5350; font-weight: 700; }
-
         `);
   }
 
@@ -1448,9 +1526,7 @@
   let routeGeneration = 0;
 
   function teardownPanel() {
-    const panel = document.getElementById("lac-panel");
-    if (panel) panel.remove();
-    statusEl = null;
+    removePanel();
     claimBtn = null;
     autoClaimBtn = null;
   }
@@ -1555,7 +1631,7 @@
   }
 
   function init() {
-    if (/(^|\.)gog\.com$/.test(window.location.hostname)) {
+    if (isGogHost()) {
       // Silent on every GOG page except a redeem page Luna handed off.
       runGogRedemption();
       return;

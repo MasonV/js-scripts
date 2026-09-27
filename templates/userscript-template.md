@@ -48,12 +48,16 @@ Do not copy this block between scripts — that is how `yourtube` ended up shipp
 Then fill it in:
 
 ```sh
-node tools/sync-update-check.mjs
+node tools/sync-blocks.mjs
 ```
 
 The generated code defines `UPDATE_BANNER_ID`, `META_URL`, `DOWNLOAD_URL`, `checkForUpdate()` and `showUpdateBanner()`, and reads the `LOG_PREFIX` and `SCRIPT_VERSION` declared above. Call `checkForUpdate()` from the init block.
 
 To change update-check behaviour for every script, edit the template and re-run the sync — never edit the generated region in a `.user.js`.
+
+## Shared Blocks
+
+Autoclaim-style scripts can also pull in opt-in shared blocks (panel UI, Steam and GOG redeemers) from `tools/blocks/` the same way — add `// <block-name>` / `// </block-name>` markers and run the sync. See "Shared Blocks" in `CLAUDE.md` for the list and what each expects.
 
 ## Validation
 
