@@ -31,6 +31,7 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
   - [`ytm-data-panel/`](#ytm-data-panel)
 - [Archived](#archived)
   - [`archive/bonjourr-quick-add/`](#archivebonjourr-quick-add)
+  - [`archive/gog-redeem/`](#archivegog-redeem)
 
 <a id="utility"></a>
 
@@ -207,7 +208,7 @@ A userscript for [Amazon Luna](https://luna.amazon.com) claim pages that opens a
 - Opens claim pages in background tabs with configurable pacing
 - Auto-claim handoff via URL flag so newly opened claim tabs can continue the flow
 - Store detection for Amazon Games, Epic Games, GOG, Legacy Games, and Microsoft Store — a claim for a store it can't identify is refused, never guessed
-- GOG: follows the "Claim code" link to gog.com in the same tab, then clicks Continue and (after asking, or automatically) Redeem exactly once
+- GOG: claims on Luna and stops once the key and its "Claim code" link are shown — you redeem on gog.com yourself (see [`archive/gog-redeem/`](#archivegog-redeem))
 - Each claim is checked for a success signal instead of assumed; unconfirmed claims are flagged in red
 - Per-store enable/disable settings persisted in `localStorage`
 - Update banner using the repo's metadata check pattern
@@ -404,6 +405,10 @@ Scripts that are no longer functional or maintained. Kept in the repo for refere
 ### `archive/bonjourr-quick-add/`
 
 A userscript for [Bonjourr](https://bonjourr.fr) new tab pages that provides a quick interface for adding shortcuts with automatic page title fetching. **Not functional** — Firefox's extension security model blocks userscript injection into `moz-extension://` pages. Kept in the repo in case browser APIs or Bonjourr change to make this viable. See [`REPORT.md`](archive/bonjourr-quick-add/REPORT.md) for the full post-mortem.
+
+### `archive/gog-redeem/`
+
+The shared block that clicked Continue and Redeem on gog.com for keys handed over by Luna Autoclaim. **Withdrawn** in Luna Autoclaim 0.12.0 — GOG's User Agreement prohibits scripts that interact with GOG services. See [`REPORT.md`](archive/gog-redeem/REPORT.md).
 
 <a id="update-workflow"></a>
 

@@ -4,7 +4,7 @@ Claim Pipeline Completeness
 
 - Epic redemption flawless.
 - Only one direct Luna game available so far, so direct-claim behavior is hard to evaluate.
-- GOG stops after exposing the keys. Recoverable state. New step needed to redeem key on GOG site.
+- GOG stops after exposing the keys, by design since 0.12.0 — the user redeems on gog.com by hand (GOG User Agreement §11.1(e) bans scripts interacting with GOG services; see archive/gog-redeem/REPORT.md).
 - Legacy Games stops after exposing keys. Recoverable state. Will not be pursuing development actively. If support is wanted, submit a request or PR for review.
 
 - Rate-limit testing still needed to confirm whether autoclaiming hits notable limits.
@@ -17,7 +17,7 @@ Listing Store Filter (0.8.0)
 - TODO: if the listing doesn't expose the store, fall back to open-then-close (depends on the tab-closing task).
 - TODO (decision pending): Amazon Games entries finish on Luna with no key to redeem. Before deciding whether they should be opened as claim pages at all, confirm the behaviour on a live listing. For now they follow the normal Amazon Games toggle.
 
-GOG Handoff — same tab, follow "Claim code" (0.9.0)
+GOG Handoff — same tab, follow "Claim code" (0.9.0) — WITHDRAWN in 0.12.0 except the same-tab claim click
 
 - A GOG claim now stays in the claim tab: the claim click drops any target="_blank" on the button's anchor and, for 10s, turns the page's window.open() into a same-tab navigation (needs @grant unsafeWindow; exportFunction on Firefox).
 - A per-tab sessionStorage flag (lac_gog_handoff_v1, 2 min TTL) marks the tab as mid-GOG-claim, so the flow resumes after Luna navigates the tab, whatever route exposes the key.
@@ -25,7 +25,7 @@ GOG Handoff — same tab, follow "Claim code" (0.9.0)
 - UNVERIFIED ordering: no live capture of the Luna GOG claim/key page exists in luna-autoclaim.dev.resources/ yet. It is not known whether the "Claim code" href is in the DOM before the key is revealed, or only after. The watcher polls after the claim click, so either ordering works — but if the href exists *before* the claim (e.g. rendered hidden), the handoff could fire before Luna has registered the claim. TODO: capture the DOOM + DOOM II claim page before and after the claim click and record which it is.
 - UNVERIFIED mechanism: which of target="_blank" or window.open() Luna uses to open the second claim page. If it's neither (e.g. a form target), the original tab still opens a second one — capture and check.
 
-GOG Redemption on gog.com — Continue, then Redeem (0.10.0)
+GOG Redemption on gog.com — Continue, then Redeem (0.10.0) — WITHDRAWN in 0.12.0 (archive/gog-redeem)
 
 - Adds @match https://www.gog.com/* (both .user.js and .meta.js) plus GM_getValue/GM_setValue/GM_deleteValue.
 - Carrier decision: the key travels in the redeem URL itself (/redeem/<game_key>); no extra URL param is added to GOG's URL. Permission to act travels in GM storage: the Luna side writes lac_gog_pending_v1:<KEY> just before navigating. The gog.com side does nothing on any page unless that exact key has a fresh entry (10 min TTL), so browsing GOG by hand is never touched and the update check doesn't run there.
@@ -49,3 +49,10 @@ Microsoft Store + Refuse Unknown Stores (0.11.0)
 - Hard stop: claimRefusal() blocks a null store (and a Skip store) on both the ?lac_autoclaim=1 path and the panel's Claim button, re-checked at click time. The claim page panel shows "Store: <name>" or "Store: not recognised (saw …)" and, for an unknown store, no Claim button and a red status — so "unknown" and "detected but set to Skip" read differently.
 - Listing: entries with an unknown store are still opened (the listing's store label is itself unverified); the claim page then refuses them.
 - Out of scope, for a follow-up: like GOG, a Microsoft Store key is redeemed off-site (microsoft.com / redeem.microsoft.com). Claiming it on Luna exposes the key and stops there; a full Microsoft flow needs its own handoff task.
+
+GOG Walk-back (0.12.0)
+
+- Removed: the handoff to gog.com (sessionStorage flag, following "Claim code"), the gog.com Continue/Redeem clicker, the "GOG final Redeem" setting, @match www.gog.com and the GM_getValue/GM_setValue/GM_deleteValue grants. Leftover lac_gog_* GM values from earlier versions are harmless and never read.
+- Kept: the same-tab claim click (Luna-side only) so the claim can still be verified; the "Claim code" link is read as the success signal, never followed.
+- Pending: ask GOG support whether a one-action-per-click helper is acceptable.
+- Pending: confirm the Amazon Luna Terms of Use wording on automated access ("robots").
