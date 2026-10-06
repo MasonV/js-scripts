@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prime Video Filter
 // @namespace    prime-video-filter
-// @version      0.2.0
+// @version      0.2.1
 // @description  Hide Prime Video titles you can't watch with Prime, titles you've already watched, and titles below an IMDb rating you choose
 // @match        https://www.primevideo.com/*
 // @match        https://www.amazon.com/gp/video/*
@@ -49,7 +49,9 @@
 
 	// A title card. Prime Video tags its cards with a test id; the
 	// data-card-title fallback covers layouts that drop it.
-	const CARD_SELECTOR = 'article[data-testid="card"], article[data-card-title]'
+	const CARD_SELECTOR =
+		'article[data-testid="card"], article[data-card-title], article[data-card-entitlement], ' +
+		'[data-testid="card"][data-card-title], [data-testid="card"][data-card-entitlement]'
 
 	const DEFAULTS = {
 		enabled: true,
@@ -324,7 +326,10 @@
 	const labelEntitlement = new WeakMap()
 
 	function readEntitlement(card) {
-		const fromAttr = entitlementFromAttr(card.getAttribute('data-card-entitlement'))
+		const attrHolder = card.hasAttribute('data-card-entitlement')
+			? card
+			: card.querySelector('[data-card-entitlement]')
+		const fromAttr = entitlementFromAttr(attrHolder?.getAttribute('data-card-entitlement'))
 		if (fromAttr) return fromAttr
 		if (labelEntitlement.has(card)) return labelEntitlement.get(card)
 		const fromLabels = classifyEntitlement(cardLabels(card))
@@ -607,8 +612,8 @@
 
 	function mayAffectCards(node) {
 		if (node.nodeType !== 1) return false
-		if (node.tagName === 'ARTICLE' || node.closest('article')) return true
-		return !!node.querySelector('article')
+		if (node.matches(CARD_SELECTOR) || node.closest(CARD_SELECTOR)) return true
+		return !!node.querySelector(CARD_SELECTOR)
 	}
 
 	function startWatching() {
@@ -1302,6 +1307,15 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	function init() {
+		// One failing step must not stop the rest: a thrown error in the first
+		// pass used to leave the page unwatched, and nothing on screen said why.
+		const step = (name, fn) => {
+			try {
+				fn()
+			} catch (e) {
+				console.error(`${LOG_PREFIX} ${name} failed:`, e)
+			}
+		}
 		checkForUpdate()
 		settings = readSettings()
 		log(
@@ -1310,13 +1324,13 @@
 				`watched ${settings.hideWatched ? `hidden at ${settings.watchedPct}%` : 'shown'}, ` +
 				`rating ${settings.hideLowRated ? `below ${formatRating(settings.minRating)} hidden` : 'ignored'}.`
 		)
-		GM_addStyle(PAGE_CSS + PANEL_CSS)
-		buildLauncher()
-		buildPanel()
-		apply()
-		startWatching()
-		setupKeyboardShortcut()
-		warnIfBlind()
+		step('Styles', () => GM_addStyle(PAGE_CSS + PANEL_CSS))
+		step('Launcher', buildLauncher)
+		step('Panel', buildPanel)
+		step('First filter pass', apply)
+		step('Page watching', startWatching)
+		step('Keyboard shortcut', setupKeyboardShortcut)
+		step('Blindness check', warnIfBlind)
 	}
 
 	init()
