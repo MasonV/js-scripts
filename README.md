@@ -136,6 +136,7 @@ A userscript for [Barter.vg](https://barter.vg) bundle pages that scores each ga
 - Bundle-level ratings: top-N average, depth score, and personal score (excluding owned games)
 - Deal quality metric (unowned MSRP vs. bundle cost)
 - Side evaluation panel with score histogram, top picks, and per-tier breakdowns
+- Collapsible header stats dashboard with individually hideable/restorable stat cards (persisted in `localStorage`)
 - Automatic owned-game detection (via Barter's library indicator) with manual toggle
 - DLC / soundtrack / artbook detection — excluded from bundle scores
 - Tiered bundle support with per-tier average and best scores
