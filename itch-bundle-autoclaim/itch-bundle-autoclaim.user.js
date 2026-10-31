@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Itch Bundle Autoclaim
 // @namespace    itch-bundle-autoclaim
-// @version      1.1.0
+// @version      1.2.0
 // @description  Claims all unclaimed games on an itch.io bundle download page, with automatic pagination
 // @match        https://itch.io/bundle/download/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -29,9 +29,128 @@
     const SHORT_PREFIX = '[ICA]'
 
     const STORAGE_KEY = 'itch_autoclaim_v1'
-    const CLAIM_DELAY_MS = 400    // delay between individual fetch() claims
+    const CLAIM_DELAY_MS = 400    // base delay between individual fetch() claims
     const NAV_DELAY_MS = 1500     // pause before navigating to the next page
+    const MAX_BACKOFF_MS = 10000  // cap exponential backoff at 10s
+    const MAX_CONSECUTIVE_FAILURES = 3
+    const MAX_CLAIMS_PER_MINUTE = 60
+    const RATE_WINDOW_MS = 60 * 1000
     const GAME_ROW_SELECTOR = '.game_row form.form'
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PURE LOGIC
+    // ═══════════════════════════════════════════════════════════════════
+
+    function parseRetryAfterMs(headerValue, now = Date.now()) {
+        if (headerValue == null) return 0
+        const trimmed = String(headerValue).trim()
+        if (!trimmed) return 0
+        if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+            const seconds = Number(trimmed)
+            return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds * 1000) : 0
+        }
+        const dateMs = Date.parse(trimmed)
+        if (!Number.isNaN(dateMs)) {
+            return Math.max(0, dateMs - now)
+        }
+        return 0
+    }
+
+    function isLoginRedirectUrl(url) {
+        if (!url || typeof url !== 'string') return false
+        try {
+            const parsed = new URL(url, 'https://itch.io')
+            const p = parsed.pathname.toLowerCase()
+            return p === '/login' || p.startsWith('/login/') || p === '/user/login' || p.startsWith('/user/login/')
+        } catch {
+            return false
+        }
+    }
+
+    function classifyClaimResponse(resp, now = Date.now()) {
+        if (!resp || typeof resp !== 'object') {
+            return { ok: false, status: 0, reason: 'No response', retryAfterMs: 0 }
+        }
+        const rawRetryAfter =
+            resp.headers && typeof resp.headers.get === 'function'
+                ? resp.headers.get('Retry-After')
+                : null
+        const retryAfterMs = parseRetryAfterMs(rawRetryAfter, now)
+
+        if (resp.type === 'opaqueredirect') {
+            return {
+                ok: false,
+                status: 0,
+                reason: 'Opaque redirect (unverified status)',
+                retryAfterMs,
+            }
+        }
+
+        const status = typeof resp.status === 'number' ? resp.status : 0
+
+        if (status === 429) {
+            return {
+                ok: false,
+                status: 429,
+                reason: 'Rate limited (HTTP 429)',
+                retryAfterMs,
+            }
+        }
+
+        if (isLoginRedirectUrl(resp.url)) {
+            return {
+                ok: false,
+                status,
+                reason: 'Redirected to login (session expired)',
+                retryAfterMs,
+            }
+        }
+
+        if (!resp.ok || status < 200 || status >= 300) {
+            return {
+                ok: false,
+                status,
+                reason: `HTTP ${status || 'error'}`,
+                retryAfterMs,
+            }
+        }
+
+        return { ok: true, status, reason: null, retryAfterMs: 0 }
+    }
+
+    function computeBackoffDelayMs(
+        baseDelayMs,
+        consecutiveFailures,
+        retryAfterMs = 0,
+        maxBackoffMs = MAX_BACKOFF_MS,
+    ) {
+        const base = Math.max(0, Number(baseDelayMs) || 0)
+        const failures = Math.max(0, Math.floor(Number(consecutiveFailures) || 0))
+        const retry = Math.max(0, Number(retryAfterMs) || 0)
+        const cap = Math.max(base, Number(maxBackoffMs) || MAX_BACKOFF_MS)
+        const delay = failures === 0 ? base : Math.min(cap, base * (2 ** failures))
+        return Math.max(delay, retry)
+    }
+
+    function pruneClaimTimestamps(timestamps, now = Date.now(), windowMs = RATE_WINDOW_MS) {
+        if (!Array.isArray(timestamps)) return []
+        const cutoff = now - windowMs
+        return timestamps
+            .filter(t => typeof t === 'number' && Number.isFinite(t) && t > cutoff && t <= now)
+            .sort((a, b) => a - b)
+    }
+
+    function computeRateCapWaitMs(
+        timestamps,
+        now = Date.now(),
+        maxPerMinute = MAX_CLAIMS_PER_MINUTE,
+        windowMs = RATE_WINDOW_MS,
+    ) {
+        const active = pruneClaimTimestamps(timestamps, now, windowMs)
+        if (active.length < maxPerMinute) return 0
+        const oldestInWindow = active[active.length - maxPerMinute]
+        return Math.max(0, oldestInWindow + windowMs - now)
+    }
 
     // ═══════════════════════════════════════════════════════════════════
     //  LOGGING
@@ -276,38 +395,93 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body,
-            redirect: 'manual',
+            credentials: 'same-origin',
         })
-        // itch.io returns a redirect (opaqueredirect, type==='opaqueredirect', status===0)
-        // on success via POST-redirect-GET; treat both 2xx and opaqueredirect as success
-        return response.ok || response.type === 'opaqueredirect'
+        // Without redirect:'manual', fetch follows itch.io's POST-redirect-GET so
+        // HTTP 429, Retry-After headers, 5xx errors, and /login redirects are visible.
+        return classifyClaimResponse(response)
     }
 
     async function claimAllOnPage(state, onProgress) {
         const forms = getClaimableForms()
         let claimedThisPage = 0
+        let consecutiveFailures = 0
+        let lastErrorReason = null
+
+        state.claimTimestamps = pruneClaimTimestamps(state.claimTimestamps, Date.now())
 
         for (let i = 0; i < forms.length; i++) {
             const form = forms[i]
             const gameName = getGameName(form)
+
+            const rateWaitMs = computeRateCapWaitMs(state.claimTimestamps, Date.now())
+            if (rateWaitMs > 0) {
+                const waitSec = Math.ceil(rateWaitMs / 1000)
+                log(`Rate cap (${MAX_CLAIMS_PER_MINUTE}/min) reached — waiting ${waitSec}s`)
+                updateStatus(`Rate cap (${MAX_CLAIMS_PER_MINUTE}/min) — waiting ${waitSec}s...`)
+                await sleep(rateWaitMs)
+                state.claimTimestamps = pruneClaimTimestamps(state.claimTimestamps, Date.now())
+            }
+
             logItem(`Claiming ${i + 1}/${forms.length}: ${gameName}`)
             onProgress(i + 1, forms.length, gameName, state.totalClaimed + claimedThisPage)
 
+            const now = Date.now()
+            state.claimTimestamps = pruneClaimTimestamps(state.claimTimestamps, now)
+            state.claimTimestamps.push(now)
+            if (state.active) saveState(state)
+
+            let retryAfterMs = 0
             try {
-                const ok = await claimForm(form)
-                if (ok) {
+                const result = await claimForm(form)
+                retryAfterMs = result.retryAfterMs || 0
+                if (result.ok) {
                     claimedThisPage++
+                    consecutiveFailures = 0
+                    lastErrorReason = null
                 } else {
-                    warn(`Claim may have failed for: ${gameName}`)
+                    consecutiveFailures++
+                    lastErrorReason = result.reason || 'Claim failed'
+                    warn(
+                        `Claim failed for "${gameName}" (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${lastErrorReason}`,
+                    )
                 }
             } catch (e) {
-                warn(`Fetch error claiming "${gameName}":`, e)
+                consecutiveFailures++
+                lastErrorReason = (e && e.message) ? `Network error (${e.message})` : 'Network error'
+                warn(
+                    `Fetch error claiming "${gameName}" (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}):`,
+                    e,
+                )
             }
 
-            if (i < forms.length - 1) await sleep(CLAIM_DELAY_MS)
+            if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                error(
+                    `Halting after ${consecutiveFailures} consecutive failures. Last error: ${lastErrorReason}`,
+                )
+                return { claimedThisPage, halted: true, errorReason: lastErrorReason }
+            }
+
+            if (i < forms.length - 1 || consecutiveFailures > 0) {
+                const delayMs = computeBackoffDelayMs(
+                    CLAIM_DELAY_MS,
+                    consecutiveFailures,
+                    retryAfterMs,
+                    MAX_BACKOFF_MS,
+                )
+                if (consecutiveFailures > 0) {
+                    const waitSec = (delayMs / 1000).toFixed(1).replace(/\.0$/, '')
+                    updateStatus(
+                        `Retry backoff (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): waiting ${waitSec}s (${lastErrorReason})`,
+                    )
+                }
+                if (delayMs > 0 && i < forms.length - 1) {
+                    await sleep(delayMs)
+                }
+            }
         }
 
-        return claimedThisPage
+        return { claimedThisPage, halted: false, errorReason: null }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -320,8 +494,10 @@
     let claimAllBtn  = null
     let claimPageBtn = null
 
-    function updateStatus(text) {
-        if (statusEl) statusEl.textContent = text
+    function updateStatus(text, isError = false) {
+        if (!statusEl) return
+        statusEl.textContent = text
+        statusEl.classList.toggle('ica-status--error', Boolean(isError))
     }
 
     function updateCounter(n) {
@@ -363,8 +539,24 @@
         log(`Page ${getCurrentPage()}: ${forms.length} claimable game(s)`)
         saveState(state)
 
-        const claimedThisPage = await claimAllOnPage(state, makeProgressCallback())
+        const { claimedThisPage, halted, errorReason } = await claimAllOnPage(
+            state,
+            makeProgressCallback(),
+        )
         state.totalClaimed += claimedThisPage
+
+        if (halted) {
+            clearState()
+            isMultiPageRun = false
+            updateStatus(
+                `Halted after ${MAX_CONSECUTIVE_FAILURES} failures: ${errorReason}`,
+                true,
+            )
+            updateCounter(state.totalClaimed)
+            setButtonsEnabled(true)
+            return
+        }
+
         saveState(state)
         log(`Page ${getCurrentPage()}: claimed ${claimedThisPage}, total so far ${state.totalClaimed}`)
 
@@ -375,7 +567,7 @@
 
     async function runClaimAllPages() {
         isMultiPageRun = true
-        const state = { active: true, totalClaimed: 0, pagesVisited: 0 }
+        const state = { active: true, totalClaimed: 0, pagesVisited: 0, claimTimestamps: [] }
         saveState(state)
         setButtonsEnabled(false)
         await runCurrentPage(state)
@@ -384,15 +576,23 @@
     async function runClaimThisPage() {
         setButtonsEnabled(false)
         updateStatus('Claiming...')
-        const state = { active: false, totalClaimed: 0, pagesVisited: 0 }
-        const count = await claimAllOnPage(state, makeProgressCallback())
+        const state = { active: false, totalClaimed: 0, pagesVisited: 0, claimTimestamps: [] }
+        const { claimedThisPage, halted, errorReason } = await claimAllOnPage(
+            state,
+            makeProgressCallback(),
+        )
         setButtonsEnabled(true)
-        if (count > 0) {
-            updateStatus(`Done — claimed ${count} game(s) on this page`)
+        updateCounter(claimedThisPage)
+        if (halted) {
+            updateStatus(
+                `Halted after ${MAX_CONSECUTIVE_FAILURES} failures: ${errorReason}`,
+                true,
+            )
+        } else if (claimedThisPage > 0) {
+            updateStatus(`Done — claimed ${claimedThisPage} game(s) on this page`)
         } else {
             updateStatus('Nothing to claim on this page')
         }
-        updateCounter(count)
     }
 
     function createPanel() {
@@ -534,6 +734,11 @@
                 color: #9e9e9e;
                 text-align: center;
                 min-height: 16px;
+            }
+
+            #ica-status.ica-status--error {
+                color: #FA5C5C;
+                font-weight: 600;
             }
 
             #ica-counter {

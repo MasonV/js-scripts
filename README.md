@@ -211,6 +211,7 @@ https://greasyfork.org/en/scripts/405532-itch-io-autoclaim
 **Features:**
 
 - Claims all unclaimed games on the current page via `fetch()` POST — no DOM clicking, no page flicker
+- Rate-limit mitigation: rolling 60 claims/min throughput cap, exponential backoff (up to 10s) on failures, `Retry-After` header support, and automatic halt after 3 consecutive failures (HTTP 429, session expiry `/login` redirect, or network/server errors)
 - Automatically advances to the next page after finishing each page and resumes claiming seamlessly
 - Survives page navigation using `sessionStorage` so the run continues uninterrupted across as many pages as the bundle has
 - Stops automatically when no claimable games are found (end of bundle)
