@@ -157,13 +157,14 @@ A userscript for [Barter.vg](https://barter.vg) bundle pages that scores each ga
 
 ### `fanatical-autoclaim/`
 
-A userscript for [Fanatical](https://www.fanatical.com) order pages that bulk-reveals and bulk-redeems Steam keys.
+A userscript for [Fanatical](https://www.fanatical.com) order pages that bulk-reveals Steam keys and opens Steam redeem URLs one at a time with a rolling-hour pacing guard.
 
 **Features:**
 
-- Floating control panel on order pages with Reveal All, Redeem All, and combined Reveal + Redeem buttons
-- Sequential key reveal with delays to avoid API rate limits
-- Redeems keys via existing "Redeem on Steam" buttons, with fallback to `steam://registerkey/` URLs
+- Floating control panel on order pages with Reveal All and per-click Redeem Next buttons
+- Sequential key reveal with configurable delay to avoid API rate limits
+- Opens one redeem URL per click (`Opened 3 of 12`) via "Redeem on Steam" buttons, falling back to `steam://registerkey/` URLs
+- Rolling-hour Steam activation counter (`N of 30 this hour`, persisted in `localStorage`) that disables Redeem Next at the 30/hr cap and shows time until the next slot
 - Status display showing current progress and game names
 - Waits for React SPA to render before activating, and follows in-site navigation so the panel appears on order pages without a reload
 
