@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    https://tampermonkey.net/
-// @version      6.6.0
+// @version      6.7.0
 // @description  Full-page bundle evaluation dashboard with per-game scoring, card grid, stats dashboard, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -252,13 +252,59 @@
     }
 
     /* ── Stats dashboard (horizontal strip) ── */
+    .bvg-stats-wrap {
+      border-bottom: 1px solid #21262d;
+      margin-bottom: 12px;
+      padding: 6px 0 12px;
+    }
+    .bvg-stats-wrap.bvg-stats-collapsed {
+      padding: 6px 0;
+    }
+    .bvg-stats-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    .bvg-stats-wrap.bvg-stats-collapsed .bvg-stats-bar {
+      margin-bottom: 0;
+    }
+    .bvg-stats-bar-left,
+    .bvg-stats-bar-right {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .bvg-stats-toggle-btn,
+    .bvg-stat-restore-chip {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #8b949e;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+      font-family: inherit;
+    }
+    .bvg-stats-toggle-btn:hover,
+    .bvg-stat-restore-chip:hover {
+      color: #e6edf3;
+      border-color: #58a6ff;
+      background: #1a2332;
+    }
+    .bvg-stats-hidden-label {
+      font-size: 11px;
+      color: #8b949e;
+    }
     .bvg-stats {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
       gap: 10px;
-      padding: 12px 0;
-      border-bottom: 1px solid #21262d;
-      margin-bottom: 12px;
     }
     .bvg-stat-card {
       background: #0d1117;
@@ -267,6 +313,35 @@
       padding: 10px 14px;
       position: relative;
       overflow: hidden;
+    }
+    .bvg-stat-hide-btn {
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      color: #8b949e;
+      font-size: 14px;
+      line-height: 1;
+      padding: 1px 5px;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity .15s, color .15s, background .15s, border-color .15s;
+      font-family: inherit;
+    }
+    .bvg-stat-card:hover .bvg-stat-hide-btn,
+    .bvg-picks-card:hover .bvg-stat-hide-btn,
+    .bvg-histogram-card:hover .bvg-stat-hide-btn,
+    .bvg-meta-card:hover .bvg-stat-hide-btn,
+    .bvg-tier-strip:hover .bvg-stat-hide-btn,
+    .bvg-stat-hide-btn:focus-visible {
+      opacity: 1;
+    }
+    .bvg-stat-hide-btn:hover {
+      color: #e6edf3;
+      background: #161b22;
+      border-color: #30363d;
     }
     .bvg-stat-card .bvg-score-bar {
       position: absolute; left: 0; bottom: 0;
@@ -290,6 +365,7 @@
       border: 1px solid #1f2937;
       border-radius: 10px;
       padding: 10px 14px;
+      position: relative;
     }
     .bvg-picks-card .bvg-section-label {
       font-size: 10px; text-transform: uppercase;
@@ -308,6 +384,7 @@
       border: 1px solid #1f2937;
       border-radius: 10px;
       padding: 10px 14px;
+      position: relative;
     }
     /* ── Meta card ── */
     .bvg-meta-card {
@@ -320,6 +397,7 @@
       display: flex;
       flex-direction: column;
       gap: 4px;
+      position: relative;
     }
     .bvg-meta-card .bvg-meta-highlight {
       color: #e6edf3; font-weight: 700;
@@ -519,6 +597,7 @@
       border-radius: 10px;
       padding: 10px 14px;
       grid-column: 1 / -1;
+      position: relative;
     }
     .bvg-tier-strip .bvg-section-label {
       font-size: 10px; text-transform: uppercase;
@@ -767,6 +846,80 @@
     savePresets(presets);
     log(`Deleted preset: "${name}"`);
   }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  PURE LOGIC
+  // ═══════════════════════════════════════════════════════════════════
+
+  const STAT_CARD_DEFS = [
+    { id: 'bundle', label: 'Bundle' },
+    { id: 'depth', label: 'Depth' },
+    { id: 'personal', label: 'Personal' },
+    { id: 'msrp', label: 'Total MSRP' },
+    { id: 'avgReview', label: 'Avg Review' },
+    { id: 'pctSaved', label: '% Saved' },
+    { id: 'picks', label: 'Top Picks' },
+    { id: 'histogram', label: 'Score Distribution' },
+    { id: 'meta', label: 'Ownership & Deal' },
+    { id: 'tiers', label: 'Tier Pricing' },
+  ];
+  const VALID_STAT_CARD_IDS = new Set(STAT_CARD_DEFS.map(d => d.id));
+
+  function normalizeStatsViewState(raw) {
+    if (Array.isArray(raw)) {
+      return {
+        collapsed: false,
+        hiddenCards: [...new Set(raw.filter(id => VALID_STAT_CARD_IDS.has(id)))],
+      };
+    }
+    if (!raw || typeof raw !== 'object') {
+      return { collapsed: false, hiddenCards: [] };
+    }
+    const hidden = Array.isArray(raw.hiddenCards)
+      ? [...new Set(raw.hiddenCards.filter(id => VALID_STAT_CARD_IDS.has(id)))]
+      : [];
+    return {
+      collapsed: Boolean(raw.collapsed),
+      hiddenCards: hidden,
+    };
+  }
+
+  function toggleHiddenStatCard(state, cardId) {
+    const norm = normalizeStatsViewState(state);
+    if (!VALID_STAT_CARD_IDS.has(cardId)) return norm;
+    const exists = norm.hiddenCards.includes(cardId);
+    const hiddenCards = exists
+      ? norm.hiddenCards.filter(id => id !== cardId)
+      : [...norm.hiddenCards, cardId];
+    return { collapsed: norm.collapsed, hiddenCards };
+  }
+
+  function showAllStatCards(state) {
+    normalizeStatsViewState(state);
+    return { collapsed: false, hiddenCards: [] };
+  }
+
+  function toggleStatsCollapsed(state) {
+    const norm = normalizeStatsViewState(state);
+    return { collapsed: !norm.collapsed, hiddenCards: norm.hiddenCards };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  STATS VIEW PERSISTENCE
+  // ═══════════════════════════════════════════════════════════════════
+  const STORAGE_KEY_STATS_VIEW = 'bvg_scorer_stats_view_v1';
+  function loadStatsViewState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_STATS_VIEW);
+      return raw ? normalizeStatsViewState(JSON.parse(raw)) : { collapsed: false, hiddenCards: [] };
+    } catch {
+      return { collapsed: false, hiddenCards: [] };
+    }
+  }
+  function saveStatsViewState(state) {
+    safeStorageSet(STORAGE_KEY_STATS_VIEW, JSON.stringify(normalizeStatsViewState(state)));
+  }
+  let _statsViewState = loadStatsViewState();
 
   // ═══════════════════════════════════════
   // PURE FUNCTIONS — START
@@ -1561,7 +1714,9 @@
   // ═══════════════════════════════════════
   // RENDER: STATS DASHBOARD
   // ═══════════════════════════════════════
-  function renderStatsDashboard(app, bundleScores, scored, tiers) {
+  function buildStatsDashboardHTML(bundleScores, scored, tiers, viewState = _statsViewState) {
+    const normView = normalizeStatsViewState(viewState);
+    const hiddenSet = new Set(normView.hiddenCards);
     const { bundleRating, depthRating, personalRating, topMain, dealQuality, unownedMsrpSum } = bundleScores;
     const ownedSet = _appRefs.ownedSet;
     const games = scored.filter(g => g.itemType === 'game');
@@ -1570,7 +1725,7 @@
     const dlcCount = scored.filter(g => g.itemType !== 'game').length;
     const wishCount = games.filter(g => g.wishlistedDOM).length;
 
-    // Aggregate stats for new cards
+    // Aggregate stats for cards
     const totalMsrp = games.reduce((s, g) => s + (g.msrp || 0), 0);
     const ratedGames = games.filter(g => g.ratingPct != null);
     const avgReview = ratedGames.length > 0
@@ -1578,13 +1733,14 @@
     const pctSaved = totalMsrp > 0 && CURRENT_BUNDLE_COST
       ? ((totalMsrp - CURRENT_BUNDLE_COST) / totalMsrp) * 100 : null;
 
-    const stats = document.createElement('div');
-    stats.className = 'bvg-stats';
-    _appRefs.statsContainer = stats;
+    const hideBtn = (id, label) =>
+      `<button type="button" class="bvg-stat-hide-btn" data-hide-stat="${id}" title="Hide ${escHtml(label)} card" aria-label="Hide ${escHtml(label)} card">&times;</button>`;
 
-    const statBadge = (label, rating, detail) => {
+    const statBadge = (id, label, rating, detail) => {
+      if (hiddenSet.has(id)) return '';
       const c = ratingColor(rating);
-      return `<div class="bvg-stat-card">
+      return `<div class="bvg-stat-card" data-stat-card="${id}">
+        ${hideBtn(id, label)}
         <div class="bvg-score-label">${label}</div>
         <div><span class="bvg-score-num" style="color:${c}">${rating.toFixed(0)}</span><span class="bvg-score-denom">/100</span></div>
         <div class="bvg-score-label">${detail}</div>
@@ -1598,8 +1754,9 @@
       .join('');
 
     // Tier pricing strip — prominent display of each tier's price, games, and price-per-game
+    const hasTiers = Boolean(tiers && tiers.length > 0);
     let tierStripHTML = '';
-    if (tiers && tiers.length > 0) {
+    if (hasTiers && !hiddenSet.has('tiers')) {
       const currPref = _gridState.currency;
       const tierItems = tiers.map(t => {
         const tierGames = games.filter(g => g.tr && g.tr.dataset.bvgTier === t.name);
@@ -1618,51 +1775,132 @@
           <div class="bvg-tsi-detail">Avg score: <strong style="color:${avgColor}">${tierAvg.toFixed(0)}</strong> &middot; MSRP: $${tierMsrp.toFixed(2)}</div>
         </div>`;
       }).join('');
-      tierStripHTML = `<div class="bvg-tier-strip">
+      tierStripHTML = `<div class="bvg-tier-strip" data-stat-card="tiers">
+        ${hideBtn('tiers', 'Tier Pricing')}
         <div class="bvg-section-label">Tier Pricing</div>
         <div class="bvg-tier-strip-items">${tierItems}</div>
       </div>`;
     }
 
-    stats.innerHTML = `
-      ${statBadge('Bundle', bundleRating, `top ${SETTINGS.topNMain}`)}
-      ${statBadge('Depth', depthRating, `top ${SETTINGS.topNDepth}`)}
-      ${statBadge('Personal', personalRating, `excl. owned`)}
-      <div class="bvg-stat-card">
+    const availableDefs = STAT_CARD_DEFS.filter(d => {
+      if (d.id === 'pctSaved') return pctSaved != null;
+      if (d.id === 'tiers') return hasTiers;
+      return true;
+    });
+    const hiddenDefs = availableDefs.filter(d => hiddenSet.has(d.id));
+
+    const restoreChipsHTML = hiddenDefs
+      .map(d => `<button type="button" class="bvg-stat-restore-chip" data-restore-stat="${d.id}" title="Restore ${escHtml(d.label)} card">+ ${escHtml(d.label)}</button>`)
+      .join('');
+
+    const showAllBtnHTML = hiddenDefs.length > 1
+      ? `<button type="button" class="bvg-stat-restore-chip" data-action="show-all-stats" title="Show all hidden stat cards">Show all</button>`
+      : '';
+
+    const collapseBtnLabel = normView.collapsed ? '&#9656; Show stats' : '&#9662; Hide stats';
+    const barHTML = `<div class="bvg-stats-bar">
+      <div class="bvg-stats-bar-left">
+        <button type="button" class="bvg-stats-toggle-btn" data-action="toggle-stats-collapse" aria-expanded="${!normView.collapsed}">${collapseBtnLabel}</button>
+        ${hiddenDefs.length > 0 ? `<span class="bvg-stats-hidden-label">Hidden:</span>${restoreChipsHTML}${showAllBtnHTML}` : ''}
+      </div>
+    </div>`;
+
+    if (normView.collapsed) {
+      return barHTML;
+    }
+
+    const cardsHTML = `
+      ${statBadge('bundle', 'Bundle', bundleRating, `top ${SETTINGS.topNMain}`)}
+      ${statBadge('depth', 'Depth', depthRating, `top ${SETTINGS.topNDepth}`)}
+      ${statBadge('personal', 'Personal', personalRating, `excl. owned`)}
+      ${!hiddenSet.has('msrp') ? `<div class="bvg-stat-card" data-stat-card="msrp">
+        ${hideBtn('msrp', 'Total MSRP')}
         <div class="bvg-score-label">Total MSRP</div>
         <div><span class="bvg-score-num" style="color:#58a6ff">$${totalMsrp.toFixed(0)}</span></div>
         <div class="bvg-score-label">${gameCount} games${dlcCount > 0 ? ` + ${dlcCount} DLC` : ''}</div>
-      </div>
-      <div class="bvg-stat-card">
+      </div>` : ''}
+      ${!hiddenSet.has('avgReview') ? `<div class="bvg-stat-card" data-stat-card="avgReview">
+        ${hideBtn('avgReview', 'Avg Review')}
         <div class="bvg-score-label">Avg Review</div>
         <div><span class="bvg-score-num" style="color:${ratingColor(avgReview)}">${avgReview.toFixed(0)}%</span></div>
         <div class="bvg-score-label">${ratedGames.length} rated</div>
         <div class="bvg-score-bar" style="width:${avgReview}%;background:${ratingColor(avgReview)}"></div>
-      </div>
-      ${pctSaved != null ? `<div class="bvg-stat-card">
+      </div>` : ''}
+      ${pctSaved != null && !hiddenSet.has('pctSaved') ? `<div class="bvg-stat-card" data-stat-card="pctSaved">
+        ${hideBtn('pctSaved', '% Saved')}
         <div class="bvg-score-label">% Saved vs MSRP</div>
         <div><span class="bvg-score-num" style="color:#3fb950">${pctSaved.toFixed(0)}%</span></div>
         <div class="bvg-score-label">$${CURRENT_BUNDLE_COST.toFixed(2)} bundle</div>
         <div class="bvg-score-bar" style="width:${Math.min(pctSaved, 100)}%;background:#3fb950"></div>
       </div>` : ''}
-      <div class="bvg-picks-card">
+      ${!hiddenSet.has('picks') ? `<div class="bvg-picks-card" data-stat-card="picks">
+        ${hideBtn('picks', 'Top Picks')}
         <div class="bvg-section-label">Top Picks</div>
         ${picksHTML || '<span style="color:#8b949e">n/a</span>'}
-      </div>
-      <div class="bvg-histogram-card">
+      </div>` : ''}
+      ${!hiddenSet.has('histogram') ? `<div class="bvg-histogram-card" data-stat-card="histogram">
+        ${hideBtn('histogram', 'Score Distribution')}
         <div class="bvg-section-label" style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#8b949e;font-weight:600;margin-bottom:6px;">Score Distribution</div>
         ${buildHistogramHTML(scored)}
-      </div>
-      <div class="bvg-meta-card">
+      </div>` : ''}
+      ${!hiddenSet.has('meta') ? `<div class="bvg-meta-card" data-stat-card="meta">
+        ${hideBtn('meta', 'Ownership & Deal')}
         <span>${ownedCount} of ${gameCount} games owned${dlcCount > 0 ? ` &middot; ${dlcCount} DLC/extras` : ''}</span>
         <span>${wishCount} wishlisted${CURRENT_BUNDLE_COST ? ` &middot; Bundle: $${CURRENT_BUNDLE_COST.toFixed(2)}` : ''}</span>
         ${dealQuality != null ? `<span><span class="bvg-meta-highlight">Deal: ${dealQuality.toFixed(1)}x</span> ($${unownedMsrpSum.toFixed(0)} unowned MSRP)</span>` : ''}
         <span>Rating: ${SETTINGS.useWilsonAdjustedRating ? 'Wilson-adjusted' : 'Raw % (confidence-weighted)'}</span>
-      </div>
+      </div>` : ''}
       ${tierStripHTML}
     `;
 
-    app.appendChild(stats);
+    return `${barHTML}<div class="bvg-stats">${cardsHTML}</div>`;
+  }
+
+  function reRenderStats() {
+    const wrap = _appRefs.statsContainer;
+    if (!wrap || !_appRefs.bundleScores || !_appRefs.scored) return;
+    wrap.classList.toggle('bvg-stats-collapsed', Boolean(_statsViewState.collapsed));
+    wrap.innerHTML = buildStatsDashboardHTML(
+      _appRefs.bundleScores,
+      _appRefs.scored,
+      _appRefs.tiers,
+      _statsViewState,
+    );
+  }
+
+  function renderStatsDashboard(app, bundleScores, scored, tiers) {
+    const wrap = document.createElement('div');
+    wrap.className = `bvg-stats-wrap${_statsViewState.collapsed ? ' bvg-stats-collapsed' : ''}`;
+    _appRefs.statsContainer = wrap;
+    wrap.innerHTML = buildStatsDashboardHTML(bundleScores, scored, tiers, _statsViewState);
+
+    wrap.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      const hideId = btn.dataset.hideStat;
+      const restoreId = btn.dataset.restoreStat;
+      const action = btn.dataset.action;
+
+      if (hideId) {
+        _statsViewState = toggleHiddenStatCard(_statsViewState, hideId);
+        saveStatsViewState(_statsViewState);
+        reRenderStats();
+      } else if (restoreId) {
+        _statsViewState = toggleHiddenStatCard(_statsViewState, restoreId);
+        saveStatsViewState(_statsViewState);
+        reRenderStats();
+      } else if (action === 'show-all-stats') {
+        _statsViewState = showAllStatCards(_statsViewState);
+        saveStatsViewState(_statsViewState);
+        reRenderStats();
+      } else if (action === 'toggle-stats-collapse') {
+        _statsViewState = toggleStatsCollapsed(_statsViewState);
+        saveStatsViewState(_statsViewState);
+        reRenderStats();
+      }
+    });
+
+    app.appendChild(wrap);
   }
 
   // ═══════════════════════════════════════
