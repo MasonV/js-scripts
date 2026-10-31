@@ -1,10 +1,9 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.11.1
-// @description  Bulk-reveal and bulk-redeem keys on Luna
+// @version      0.12.0
+// @description  Open available Prime Gaming claim pages on Luna one at a time with per-store filtering
 // @include      /^https:\/\/luna\.amazon\.[a-z.]{2,6}\//
-// @match        https://www.gog.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/luna-autoclaim/luna-autoclaim.meta.js
@@ -12,10 +11,6 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @grant        GM_openInTab
-// @grant        unsafeWindow
-// @grant        GM_getValue
-// @grant        GM_setValue
-// @grant        GM_deleteValue
 // @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
@@ -30,10 +25,6 @@
 // page load.
 // Path arm 1 — home listing:  /claims/home…
 // Path arm 2 — claim detail:  /claims/<slug>/dp/…
-//
-// @match www.gog.com: the GOG leg (Continue → Redeem on /redeem/<key>). The
-// script runs on every GOG page but does nothing unless Luna handed it that
-// exact key a few minutes earlier — see the "GOG REDEEM" block.
 
 (function () {
   "use strict";
@@ -45,21 +36,14 @@
   const LOG_PREFIX = "[Luna Autoclaim]";
   const SHORT_PREFIX = "[LAC]";
   const UI_PREFIX = "lac"; // panel ids/classes — see the autoclaim-kit block
-  const KEY_PREFIX = "lac"; // GM storage keys — see the gog-redeem block
-
-  const DEFAULT_REVEAL_DELAY_MS = 500;
-  const DEFAULT_REDEEM_DELAY_MS = 800;
 
   const DISABLED_STORES_KEY = "lac_disabled_stores_v1";
 
   // All known stores in display order — used to build the settings list.
-  // A store not listed here is never claimed — see claimRefusal().
   const KNOWN_STORES = ["Amazon Games", "Epic Games", "GOG", "Legacy Games", "Microsoft Store"];
 
   // Maps the title-attribute suffix to the canonical store name.
-  // "on Microsoft Store" is UNVERIFIED against a live page (see todo). A wrong
-  // guess is safe: it just leaves Microsoft keys unrecognised, and those are
-  // refused rather than claimed.
+  // "on Microsoft Store" is UNVERIFIED against a live page (see todo).
   const STORE_PATTERNS = [
     ["on Amazon Games", "Amazon Games"],
     ["on Epic Games Store", "Epic Games"],
@@ -67,18 +51,6 @@
     ["on Legacy Games", "Legacy Games"],
     ["on Microsoft Store", "Microsoft Store"],
   ];
-
-  // GOG: after the Luna claim, the key is exposed with a "Claim code" link
-  // of the form https://www.gog.com/redeem/<game_key>. The handoff flag is
-  // per-tab (sessionStorage) so it survives Luna navigating this same tab
-  // to the page that exposes the key.
-  const GOG_HANDOFF_KEY = "lac_gog_handoff_v1";
-  const GOG_HANDOFF_TTL_MS = 2 * 60 * 1000;
-  const GOG_LINK_TIMEOUT_MS = 20000;
-
-  // Mutable — updated by the UI input
-  let revealDelayMs = DEFAULT_REVEAL_DELAY_MS;
-  let redeemDelayMs = DEFAULT_REDEEM_DELAY_MS;
 
   // ═══════════════════════════════════════════════════════════════════
   //  LOGGING
@@ -594,45 +566,88 @@
   // </autoclaim-kit>
 
   // ═══════════════════════════════════════════════════════════════════
-  //  DOM HELPERS
+  //  PURE LOGIC
   // ═══════════════════════════════════════════════════════════════════
 
-  // The page's own window — Luna's click handlers call *its* window.open.
-  const pageWindow = typeof unsafeWindow !== "undefined" ? unsafeWindow : window;
+  /**
+   * Match a set of title strings against STORE_PATTERNS.
+   * Returns the canonical store name, or null when none — or more than one
+   * — store matches, so an ambiguous scope never gets guessed at.
+   */
+  function matchStore(titles) {
+    const stores = new Set(
+      STORE_PATTERNS.filter(([pattern]) => titles.some((t) => t.includes(pattern))).map(
+        ([, store]) => store,
+      ),
+    );
+    return stores.size === 1 ? [...stores][0] : null;
+  }
 
   /**
-   * Click `el`, but keep whatever it opens in this tab: drop a
-   * target="_blank" on its anchor, and for a few seconds route the page's
-   * window.open() into a same-tab navigation. `onUrl` gets first refusal
-   * on each URL (return true when handled).
+   * The store-looking labels on the page ("on <Something>"), for telling
+   * the user what was seen when no known store matched.
    */
-  function clickInSameTab(el, onUrl = () => false, windowMs = 10000) {
-    const anchor = el.closest("a");
-    if (anchor && anchor.getAttribute("target") && anchor.getAttribute("target") !== "_self") {
-      anchor.removeAttribute("target");
-    }
-
-    const originalOpen = pageWindow.open;
-    const sameTabOpen = function (url, ...rest) {
-      // window.open() with no URL is the "open blank, set location later"
-      // pattern — there's nothing to redirect, so let the page have it.
-      if (!url) return originalOpen.call(pageWindow, url, ...rest);
-      const abs = new URL(String(url), window.location.href).href;
-      log(`Keeping window.open in this tab → ${abs.replace(GOG_REDEEM_URL_RE, "gog.com/redeem/…")}`);
-      if (!onUrl(abs)) window.location.assign(abs);
-      return null;
-    };
-    // Firefox's sandbox needs the function exported into the page scope.
-    pageWindow.open =
-      typeof exportFunction === "function" ? exportFunction(sameTabOpen, pageWindow) : sameTabOpen;
-    try {
-      el.click();
-    } finally {
-      setTimeout(() => {
-        pageWindow.open = originalOpen;
-      }, windowMs);
-    }
+  function describeSeenStoresFromTitles(titles) {
+    const seen = [...new Set(titles.filter((t) => /^on\s+\S/i.test(t.trim())))];
+    return seen.length ? seen.map((t) => `"${t.trim()}"`).join(", ") : "no store label";
   }
+
+  /**
+   * Split listing items by the store toggles.
+   * Items with an unknown store are still included in `toOpen` so the user
+   * can inspect the claim page themselves; known stores set to Skip are
+   * excluded from `toOpen` and placed in `skipped`.
+   */
+  function partitionClaimItems(items, disabledStores) {
+    const toOpen = [];
+    const skipped = [];
+    let unknown = 0;
+    for (const item of items) {
+      if (item.store && disabledStores.has(item.store)) {
+        skipped.push(item);
+      } else {
+        if (!item.store) unknown++;
+        toOpen.push(item);
+      }
+    }
+    return { toOpen, skipped, unknown };
+  }
+
+  /**
+   * Select the next eligible claim entry that hasn't been opened yet in this
+   * session, along with how many of the current `toOpen` list have already
+   * been opened.
+   */
+  function pickNextClaim(toOpen, openedUrls) {
+    let openedCount = 0;
+    let next = null;
+    for (const item of toOpen) {
+      if (openedUrls.has(item.href)) {
+        openedCount++;
+      } else if (!next) {
+        next = item;
+      }
+    }
+    return { next, openedCount, total: toOpen.length };
+  }
+
+  function describePlan({ toOpen, skipped, unknown }, verb) {
+    const parts = [`${verb} ${toOpen.length}`];
+    if (skipped.length) parts.push(`skipped ${skipped.length} (store set to Skip)`);
+    if (unknown) parts.push(`${unknown} store unknown`);
+    return parts.join(" · ");
+  }
+
+  function describeProgress(openedCount, { toOpen, skipped, unknown }) {
+    const parts = [`Opened ${openedCount} of ${toOpen.length}`];
+    if (skipped.length) parts.push(`skipped ${skipped.length} (store set to Skip)`);
+    if (unknown) parts.push(`${unknown} store unknown`);
+    return parts.join(" · ");
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  DOM HELPERS
+  // ═══════════════════════════════════════════════════════════════════
 
   function findButtonsByText(text) {
     const candidates = document.querySelectorAll(
@@ -652,20 +667,6 @@
     return h3 ? h3.getAttribute("title") : h3?.textContent?.trim() ?? "unknown";
   }
 
-  /**
-   * Match a set of title strings against STORE_PATTERNS.
-   * Returns the canonical store name, or null when none — or more than one
-   * — store matches, so an ambiguous scope never gets guessed at.
-   */
-  function matchStore(titles) {
-    const stores = new Set(
-      STORE_PATTERNS.filter(([pattern]) => titles.some((t) => t.includes(pattern))).map(
-        ([, store]) => store,
-      ),
-    );
-    return stores.size === 1 ? [...stores][0] : null;
-  }
-
   function titlesIn(root) {
     return Array.from(root.querySelectorAll("p[title]")).map((p) => p.getAttribute("title"));
   }
@@ -678,24 +679,8 @@
     return matchStore(titlesIn(document));
   }
 
-  /**
-   * The store-looking labels on the page ("on <Something>"), for telling
-   * the user what was seen when no known store matched.
-   */
   function describeSeenStores() {
-    const seen = [...new Set(titlesIn(document).filter((t) => /^on\s+\S/i.test(t.trim())))];
-    return seen.length ? seen.map((t) => `"${t.trim()}"`).join(", ") : "no store label";
-  }
-
-  /**
-   * Why this claim page must not be claimed, or null when it may be.
-   * An unrecognised store is a hard stop: clicking would claim a store the
-   * script doesn't understand.
-   */
-  function claimRefusal(store) {
-    if (!store) return `Store not recognised (saw ${describeSeenStores()}) — not claiming`;
-    if (isStoreDisabled(store)) return `${store} is set to Skip — not claiming`;
-    return null;
+    return describeSeenStoresFromTitles(titlesIn(document));
   }
 
   /**
@@ -709,40 +694,24 @@
     return card ? matchStore(titlesIn(card)) : null;
   }
 
-  /**
-   * Split the listing's claim buttons by the store toggles.
-   * `unknown` entries are still opened: the claim page resolves their store,
-   * enforces the toggle there, and refuses to claim a store it can't identify.
-   */
   function planClaims() {
-    const disabled = loadDisabledStores();
-    const toOpen = [];
-    const skipped = [];
-    let unknown = 0;
-    for (const btn of findButtonsByText("Claim game")) {
-      const store = getListingStore(btn);
-      if (store && disabled.has(store)) {
-        skipped.push({ btn, store });
-      } else {
-        if (!store) unknown++;
-        toOpen.push({ btn, store });
-      }
-    }
-    return { toOpen, skipped, unknown };
-  }
-
-  function describePlan({ toOpen, skipped, unknown }, verb) {
-    const parts = [`${verb} ${toOpen.length}`];
-    if (skipped.length) parts.push(`skipped ${skipped.length} (store set to Skip)`);
-    if (unknown) parts.push(`${unknown} store unknown`);
-    return parts.join(" · ");
+    const items = findButtonsByText("Claim game").map((btn) => ({
+      btn,
+      href: new URL(btn.href, window.location.href).href,
+      gameName: getGameName(btn),
+      store: getListingStore(btn),
+    }));
+    return partitionClaimItems(items, loadDisabledStores());
   }
 
   // ═══════════════════════════════════════════════════════════════════
   //  CORE ACTIONS — HOME PAGE
   // ═══════════════════════════════════════════════════════════════════
 
-  async function openAllClaims({ autoClaim = false } = {}) {
+  // Tracks claim URLs already opened via "Open Next" on the current listing.
+  const openedUrls = new Set();
+
+  function openNextClaim() {
     const plan = planClaims();
     const { toOpen, skipped } = plan;
     if (toOpen.length === 0 && skipped.length === 0) {
@@ -751,8 +720,8 @@
       return;
     }
 
-    skipped.forEach(({ btn, store }) =>
-      logItem(`Skipping ${getGameName(btn)} — ${store} is set to Skip`),
+    skipped.forEach(({ gameName, store }) =>
+      logItem(`Skipping ${gameName} — ${store} is set to Skip`),
     );
     if (toOpen.length === 0) {
       log(`All ${skipped.length} claim(s) are for stores set to Skip — nothing opened`);
@@ -760,472 +729,47 @@
       return;
     }
 
-    log(
-      `Found ${toOpen.length} key(s) to claim, ${skipped.length} skipped, ` +
-        `${plan.unknown} with unknown store (autoClaim=${autoClaim})`,
-    );
-    updateStatus(`Opening 0/${toOpen.length}...`);
-    setButtonsEnabled(false);
-
-    for (let i = 0; i < toOpen.length; i++) {
-      const { btn, store } = toOpen[i];
-      const gameName = getGameName(btn);
-
-      logItem(`Opening ${i + 1}/${toOpen.length}: ${gameName} (${store ?? "store unknown"})`);
-      updateStatus(`Opening ${i + 1}/${toOpen.length}: ${gameName}`);
-
-      const url = new URL(btn.href);
-      if (autoClaim) url.searchParams.set("lac_autoclaim", "1");
-      GM_openInTab(url.toString(), { active: false });
-
-      if (i < toOpen.length - 1) {
-        await sleep(revealDelayMs);
-      }
-    }
-
-    await sleep(revealDelayMs);
-    log("All claim pages opened");
-    updateStatus(describePlan(plan, "Opened"));
-    setButtonsEnabled(true);
-  }
-
-  // ═══════════════════════════════════════════════════════════════════
-  //  CORE ACTIONS — CLAIM PAGE
-  // ═══════════════════════════════════════════════════════════════════
-
-  function findClaimCta() {
-    return document.querySelector('[data-a-target="buy-box_call-to-action"]');
-  }
-
-  async function claimCurrentGame() {
-    const btn = findClaimCta();
-    if (!btn) {
-      warn("Claim button not found");
-      updateStatus("Claim button not found", "error");
+    const { next, openedCount, total } = pickNextClaim(toOpen, openedUrls);
+    if (!next) {
+      log(`All ${total} eligible claim page(s) have already been opened`);
+      updateStatus(describeProgress(openedCount, plan));
+      setButtonsEnabled(false);
       return;
     }
 
-    // Re-checked at click time: the panel may have been built before the
-    // page finished rendering, and the auto-claim path gets here directly.
-    const store = detectStore();
-    const refusal = claimRefusal(store);
-    if (refusal) {
-      warn(refusal);
-      updateStatus(refusal, "error");
-      return;
-    }
-    log(`Claiming via ${store}`);
-    updateStatus(`Claiming via ${store}…`);
-    setButtonsEnabled(false);
-
-    const before = snapshotClaimState(btn);
-    if (store === "GOG") {
-      // Luna opens a second claim page to expose the key — keep it in this
-      // tab, then carry on to GOG's "Claim code" link.
-      markGogHandoff();
-      clickInSameTab(btn, tryGogHandoffUrl);
-    } else {
-      btn.click();
-    }
-
-    updateStatus(`Claim clicked — checking it went through…`);
-    const result = await verifyClaim(before, store);
-    setButtonsEnabled(true);
-    reportClaimResult(result);
-
-    if (store !== "GOG") return;
-    if (result.ok) {
-      followGogClaimCode();
-    } else {
-      // Don't hand an unconfirmed claim to GOG.
-      clearGogHandoff();
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════════════
-  //  CLAIM VERIFICATION
-  // ═══════════════════════════════════════════════════════════════════
-  //
-  // A claim only counts once Luna shows it worked. Anything else — an error
-  // popup, or no signal before the timeout — is reported as a failure, and
-  // the tab is left exactly where it is so the user can reload and check.
-  //
-  // UNVERIFIED signals (no before/after capture exists yet — see todo):
-  //   success: the call-to-action reads "Claimed"/"Redeemed", a dialog or
-  //            alert says so, or (GOG) the "Claim code" link appears.
-  //   error:   a dialog/alert/live region, new since the click, whose text
-  //            reads like an error; or the call-to-action itself does.
-
-  const CLAIM_VERIFY_TIMEOUT_MS = 15000;
-  const CLAIM_SUCCESS_RE = /\b(claimed|redeemed|successfully)\b/i;
-  const CLAIM_ERROR_RE =
-    /\b(error|went wrong|try again|unable to|failed|couldn['’]t|could not|not available)\b/i;
-  const CLAIM_PENDING_RE = /\b(claiming|loading|processing)\b/i;
-
-  function noticeTexts() {
-    return Array.from(
-      document.querySelectorAll('[role="alert"], [role="alertdialog"], [role="dialog"], [aria-live]'),
-    )
-      .filter((el) => !el.closest("#lac-panel") && el.getClientRects().length > 0)
-      .map((el) => el.textContent.trim().replace(/\s+/g, " "))
-      .filter(Boolean);
-  }
-
-  function snapshotClaimState(btn) {
-    return { label: btn.textContent.trim(), notices: new Set(noticeTexts()) };
-  }
-
-  function probeClaim(before, store) {
-    const cta = findClaimCta();
-    const label = cta?.textContent.trim() ?? "";
-
-    const fresh = noticeTexts().filter((t) => !before.notices.has(t));
-    const errorNotice = fresh.find((t) => CLAIM_ERROR_RE.test(t));
-    if (errorNotice) return { ok: false, reason: `Luna says: "${errorNotice.slice(0, 120)}"` };
-    if (label && label !== before.label && CLAIM_ERROR_RE.test(label)) {
-      return { ok: false, reason: `Claim button now reads "${label}"` };
-    }
-
-    if (store === "GOG" && findGogClaimCode()) return { ok: true, signal: "GOG key exposed" };
-    if (label && label !== before.label && CLAIM_SUCCESS_RE.test(label)) {
-      return { ok: true, signal: `button reads "${label}"` };
-    }
-    const successNotice = fresh.find((t) => CLAIM_SUCCESS_RE.test(t));
-    if (successNotice) return { ok: true, signal: `"${successNotice.slice(0, 80)}"` };
-    return null;
-  }
-
-  async function verifyClaim(before, store) {
-    const result = await waitFor(() => probeClaim(before, store), CLAIM_VERIFY_TIMEOUT_MS);
-    if (result) return result;
-
-    const label = findClaimCta()?.textContent.trim();
-    let reason = `no confirmation from Luna after ${CLAIM_VERIFY_TIMEOUT_MS / 1000}s`;
-    if (!label) reason += " (claim button is gone)";
-    else if (label !== before.label) reason += ` (button now reads "${label}")`;
-    if (label && CLAIM_PENDING_RE.test(label)) reason += " — still pending";
-    return { ok: false, reason };
-  }
-
-  function reportClaimResult(result) {
-    if (result.ok) {
-      log(`Claim confirmed: ${result.signal}`);
-      updateStatus(`✓ Claimed — ${result.signal}`, "ok");
-    } else {
-      warn(`Claim NOT confirmed: ${result.reason}`);
-      updateStatus(`⚠ Claim not confirmed: ${result.reason}. Reload and check.`, "error");
-    }
-    // Background tabs from "Auto Claim All" are easiest to triage from the
-    // tab strip. Best effort — Luna may rewrite the title.
-    const mark = result.ok ? "✓ " : "⚠ ";
-    if (!document.title.startsWith(mark)) document.title = mark + document.title;
-  }
-
-  // ═══════════════════════════════════════════════════════════════════
-  //  GOG HANDOFF — Luna side
-  // ═══════════════════════════════════════════════════════════════════
-  //
-  // Order of events: Claim on Luna → Luna exposes the key (same tab, either
-  // in place or via a second claim page) → "Claim code" links to
-  // https://www.gog.com/redeem/<game_key> → this tab navigates there.
-
-  function markGogHandoff() {
-    try {
-      sessionStorage.setItem(GOG_HANDOFF_KEY, String(Date.now()));
-    } catch {
-      /* private mode — the in-page watcher still covers the SPA case */
-    }
-  }
-
-  function clearGogHandoff() {
-    try {
-      sessionStorage.removeItem(GOG_HANDOFF_KEY);
-    } catch {
-      /* nothing to clear */
-    }
-  }
-
-  function hasPendingGogHandoff() {
-    try {
-      const at = Number(sessionStorage.getItem(GOG_HANDOFF_KEY));
-      if (!at) return false;
-      if (Date.now() - at > GOG_HANDOFF_TTL_MS) {
-        clearGogHandoff();
-        return false;
-      }
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Find the "Claim code" target: an anchor whose href is a GOG redeem URL,
-   * else the "Claim code" button itself (its link may be wired in JS).
-   */
-  function findGogClaimCode() {
-    for (const a of document.querySelectorAll('a[href*="gog.com"]')) {
-      if (GOG_REDEEM_URL_RE.test(a.href)) return { url: a.href };
-    }
-    const button = Array.from(document.querySelectorAll('a, button, [role="button"]')).find(
-      (el) => !el.closest("#lac-panel") && el.textContent.trim().toLowerCase() === "claim code",
+    openedUrls.add(next.href);
+    const newOpenedCount = openedCount + 1;
+    logItem(
+      `Opened ${newOpenedCount} of ${total}: ${next.gameName} (${next.store ?? "store unknown"})`,
     );
-    if (!button) return null;
-    const href = button.closest("a")?.href;
-    return href && GOG_REDEEM_URL_RE.test(href) ? { url: href } : { el: button };
+    GM_openInTab(next.href, { active: false });
+    updateStatus(describeProgress(newOpenedCount, plan));
+    setButtonsEnabled(newOpenedCount < total);
   }
-
-  function handOffToGog(url) {
-    clearGogHandoff();
-    sendToGogRedeem(url, document.querySelector("h1")?.textContent?.trim());
-  }
-
-  // clickInSameTab() hook: take over any GOG redeem URL the page tries to open.
-  function tryGogHandoffUrl(url) {
-    if (!GOG_REDEEM_URL_RE.test(url)) return false;
-    handOffToGog(url);
-    return true;
-  }
-
-  let gogWatchActive = false;
-
-  async function followGogClaimCode() {
-    if (gogWatchActive) return;
-    gogWatchActive = true;
-    try {
-      log("GOG: waiting for the Claim code link…");
-      updateStatus("GOG: waiting for the key…");
-      const target = await waitFor(findGogClaimCode, GOG_LINK_TIMEOUT_MS);
-      if (!target) {
-        warn(`GOG: no Claim code link after ${GOG_LINK_TIMEOUT_MS}ms`);
-        updateStatus("GOG: Claim code link not found — finish on this page", "error");
-        clearGogHandoff();
-        return;
-      }
-      if (target.url) {
-        handOffToGog(target.url);
-      } else {
-        log("GOG: Claim code has no href — clicking it in this tab");
-        clickInSameTab(target.el, tryGogHandoffUrl);
-      }
-    } finally {
-      gogWatchActive = false;
-    }
-  }
-
-  // <gog-redeem>
-  // ═══════════════════════════════════════════════════════════════════
-  //  GOG REDEEM
-  //  Generated from tools/blocks/gog-redeem.template.js — do not edit here.
-  //  Change the template, then run: node tools/sync-blocks.mjs
-  // ═══════════════════════════════════════════════════════════════════
-  //
-  // Two halves, one script on two sites:
-  //   store side  sendToGogRedeem(url, game) records the key in GM storage
-  //               and navigates this tab to https://www.gog.com/redeem/<key>.
-  //   gog.com     runGogRedemption() acts only on a key the store side sent
-  //               in the last few minutes: Continue, then Redeem.
-  //
-  // localStorage/sessionStorage don't reach gog.com, so the handoff lives in
-  // GM storage (shared by the script on every site it matches). The key
-  // travels in the redeem URL; the GM entry is what gives the gog.com side
-  // permission to act on it, and records the Redeem click so it can never
-  // happen twice. One entry per key so parallel tabs don't clobber.
-  //
-  // gog.com pages: Page 1 "Redeem code" — key prefilled, green Continue.
-  // Page 2 "You are about to redeem 1 item …" — Cancel / Redeem. Buttons are
-  // found by visible text, never by GOG's generated classes. Any surprise
-  // stops the run.
-  //
-  // Expects KEY_PREFIX (e.g. 'lac'), log(), warn(), checkForUpdate() and the
-  // autoclaim-kit block. Needs @match https://www.gog.com/* and @grant
-  // GM_getValue, GM_setValue, GM_deleteValue.
-
-  const GOG_REDEEM_URL_RE =
-    /^https:\/\/(?:www\.)?gog\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?redeem\/([A-Za-z0-9-]+)\/?(?:[?#].*)?$/
-  const GOG_REDEEM_PATH_RE = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?redeem\/([A-Za-z0-9-]+)\/?$/
-
-  const GOG_PENDING_PREFIX = `${KEY_PREFIX}_gog_pending_v1:`
-  const GOG_PENDING_TTL_MS = 10 * 60 * 1000
-  const GOG_AUTO_REDEEM_KEY = `${KEY_PREFIX}_gog_auto_redeem_v1` // default false: stop before Redeem
-  const GOG_STEP_TIMEOUT_MS = 20000
-
-  function isGogHost() {
-    return /(^|\.)gog\.com$/.test(window.location.hostname)
-  }
-
-  function isGogAutoRedeem() {
-    return GM_getValue(GOG_AUTO_REDEEM_KEY, false) === true
-  }
-
-  function setGogAutoRedeem(on) {
-    GM_setValue(GOG_AUTO_REDEEM_KEY, on)
-  }
-
-  // ── Store side ──────────────────────────────────────────────────────
-
-  // `url` must match GOG_REDEEM_URL_RE. `game` is shown on the gog.com panel.
-  function sendToGogRedeem(url, game) {
-    const key = url.match(GOG_REDEEM_URL_RE)[1]
-    GM_setValue(GOG_PENDING_PREFIX + key.toUpperCase(), {
-      createdAt: Date.now(),
-      game: game || null,
-      stage: 'handoff',
-    })
-    log(`GOG: handing off key ${maskKey(key)} to gog.com`)
-    updateStatus(`GOG: opening redeem page for ${maskKey(key)}…`)
-    window.location.assign(url)
-  }
-
-  // ── gog.com side ────────────────────────────────────────────────────
-
-  // A prefilled input that holds a *different* key means we're on the wrong
-  // code — stop. An empty or missing input is left to GOG.
-  function prefilledKeyMismatch(key) {
-    const values = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'))
-      .filter(isVisible)
-      .map(i => normalizeKey(i.value))
-      .filter(Boolean)
-    return values.length > 0 && !values.includes(normalizeKey(key))
-  }
-
-  function createGogPanel(entry) {
-    const panel = buildPanelShell('Autoclaim · GOG')
-
-    const gameEl = document.createElement('div')
-    gameEl.id = `${UI_PREFIX}-store`
-    gameEl.textContent = entry.game ? `${entry.game}` : 'GOG key'
-    panel.appendChild(gameEl)
-
-    createStatusLine(panel)
-    document.body.appendChild(panel)
-    return panel
-  }
-
-  function stopGog(message) {
-    warn(`GOG: ${message}`)
-    updateStatus(`${message} — stopped`, 'error')
-  }
-
-  // Redeem is exactly-once: the GM entry is stamped "redeem-clicked" *before*
-  // the click, and a stamped entry is never clicked again — not after a
-  // reload, not from a second tab.
-  async function runGogRedemption() {
-    const match = window.location.pathname.match(GOG_REDEEM_PATH_RE)
-    if (!match) return
-    const key = match[1]
-    const entryKey = GOG_PENDING_PREFIX + key.toUpperCase()
-    const entry = GM_getValue(entryKey, null)
-    if (!entry) return // not a code we handed over — leave the page alone
-
-    if (Date.now() - entry.createdAt > GOG_PENDING_TTL_MS) {
-      log(`GOG: handoff for ${maskKey(key)} is stale — ignoring`)
-      GM_deleteValue(entryKey)
-      return
-    }
-
-    checkForUpdate()
-    injectPanelStyles()
-    const panel = createGogPanel(entry)
-
-    if (entry.stage === 'redeem-clicked') {
-      stopGog("Redeem was already clicked for this code — not clicking again. Check GOG's result")
-      return
-    }
-
-    // ── Page 1: Continue ─────────────────────────────────────────────
-    updateStatus('Waiting for Continue…')
-    const continueBtn = await waitFor(() => findOnlyButton('Continue'), GOG_STEP_TIMEOUT_MS)
-    if (!continueBtn) {
-      stopGog('Continue button not found (signed in to GOG?)')
-      return
-    }
-    if (prefilledKeyMismatch(key)) {
-      stopGog("The code on the page doesn't match the one handed over")
-      return
-    }
-    log(`GOG: clicking Continue for ${maskKey(key)}`)
-    GM_setValue(entryKey, { ...entry, stage: 'continue-clicked' })
-    continueBtn.click()
-
-    // ── Page 2: wait for the transition, then Redeem ────────────────
-    updateStatus('Waiting for the confirmation page…')
-    const redeemBtn = await waitFor(() => {
-      if (findVisibleButtonsByText('Continue').length) return null // still on page 1
-      if (!/you are about to redeem/i.test(document.body.innerText)) return null
-      return findOnlyButton('Redeem')
-    }, GOG_STEP_TIMEOUT_MS)
-    if (!redeemBtn) {
-      stopGog("Confirmation page with a single Redeem button didn't appear")
-      return
-    }
-
-    let confirmBtn = null
-    let redeemStarted = false
-    const redeemOnce = async () => {
-      if (redeemStarted) return
-      redeemStarted = true
-      confirmBtn?.remove()
-
-      // Re-read: another tab or an earlier run may have got here first.
-      const latest = GM_getValue(entryKey, null)
-      if (!latest || latest.stage === 'redeem-clicked') {
-        stopGog("This code's Redeem was already handled elsewhere")
-        return
-      }
-      if (!redeemBtn.isConnected || !isVisible(redeemBtn) || !isEnabled(redeemBtn)) {
-        stopGog('The Redeem button went away before it could be clicked')
-        return
-      }
-
-      GM_setValue(entryKey, { ...latest, stage: 'redeem-clicked', redeemedAt: Date.now() })
-      log(`GOG: clicking Redeem for ${maskKey(key)}`)
-      redeemBtn.click()
-      updateStatus('Redeem clicked — waiting for GOG…')
-
-      const gone = await waitFor(() => !redeemBtn.isConnected || !isVisible(redeemBtn), GOG_STEP_TIMEOUT_MS)
-      if (gone) {
-        GM_deleteValue(entryKey)
-        log(`GOG: Redeem accepted for ${maskKey(key)}`)
-        updateStatus("Redeem sent — GOG's result is on the page", 'ok')
-      } else {
-        // The entry stays stamped, so nothing will ever click Redeem again.
-        stopGog("GOG didn't move on after Redeem. Check the page before trying by hand")
-      }
-    }
-
-    if (isGogAutoRedeem()) {
-      await redeemOnce()
-      return
-    }
-
-    updateStatus('Ready to redeem — confirm below')
-    confirmBtn = document.createElement('button')
-    confirmBtn.className = `${UI_PREFIX}-btn ${UI_PREFIX}-btn-primary`
-    confirmBtn.textContent = '✔ Redeem on GOG'
-    confirmBtn.addEventListener('click', redeemOnce)
-    panel.appendChild(confirmBtn)
-  }
-  // </gog-redeem>
 
   // ═══════════════════════════════════════════════════════════════════
   //  UI — SHARED
   // ═══════════════════════════════════════════════════════════════════
 
   let claimBtn = null;
-  let autoClaimBtn = null;
 
-  // Home page only: preview what "Open All" would do under the current toggles.
+  // Home page only: preview what "Open Next" will do under the current toggles.
   function refreshListingStatus() {
-    // Don't clobber the "Opening i/n" progress line mid-run.
-    if (claimBtn?.disabled) return;
     const plan = planClaims();
+    const { next, openedCount, total } = pickNextClaim(plan.toOpen, openedUrls);
+    setButtonsEnabled(total === 0 || Boolean(next));
+    if (openedCount > 0) {
+      const progressText = describeProgress(openedCount, plan);
+      log(`Listing: ${progressText}`);
+      updateStatus(progressText);
+      return;
+    }
     log(`Listing: ${describePlan(plan, "to open")}`);
     updateStatus(describePlan(plan, "To open:"));
   }
 
   function setButtonsEnabled(enabled) {
-    setControlsEnabled([claimBtn, autoClaimBtn], enabled);
+    setControlsEnabled([claimBtn], enabled);
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -1260,66 +804,15 @@
     return row;
   }
 
-  // GOG's last step redeems the code for good, so the default stops and asks.
-  function createGogRedeemModeRow() {
-    const row = document.createElement("div");
-    row.className = "lac-store-row";
-
-    const label = document.createElement("span");
-    label.className = "lac-store-label";
-    label.textContent = "GOG final Redeem";
-
-    const toggle = document.createElement("button");
-    const render = (auto) => {
-      toggle.className = `lac-store-toggle ${auto ? "lac-store-toggle--on" : "lac-store-toggle--off"}`;
-      toggle.textContent = auto ? "Automatic" : "Ask first";
-      toggle.title = auto
-        ? "GOG's Redeem is clicked for you. Click to stop and ask first instead."
-        : "Stops on GOG's confirmation page until you click Redeem. Click to make it automatic.";
-    };
-    render(isGogAutoRedeem());
-    toggle.addEventListener("click", () => {
-      const auto = !isGogAutoRedeem();
-      setGogAutoRedeem(auto);
-      render(auto);
-      log(`GOG final Redeem: ${auto ? "automatic" : "ask first"}`);
-    });
-
-    row.appendChild(label);
-    row.appendChild(toggle);
-    return row;
-  }
-
   function createPanel() {
     const panel = buildPanelShell("Autoclaim");
 
-    autoClaimBtn = document.createElement("button");
-    autoClaimBtn.id = "lac-auto-claim-btn";
-    autoClaimBtn.className = "lac-btn lac-btn-primary";
-    autoClaimBtn.textContent = "Auto Claim All";
-    autoClaimBtn.addEventListener("click", () => openAllClaims({ autoClaim: true }));
-    panel.appendChild(autoClaimBtn);
-
     claimBtn = document.createElement("button");
     claimBtn.id = "lac-claim-btn";
-    claimBtn.className = "lac-btn";
-    claimBtn.textContent = "Open All";
-    claimBtn.addEventListener("click", () => openAllClaims());
+    claimBtn.className = "lac-btn lac-btn-primary";
+    claimBtn.textContent = "Open Next";
+    claimBtn.addEventListener("click", openNextClaim);
     panel.appendChild(claimBtn);
-
-    const delaySection = document.createElement("div");
-    delaySection.id = "lac-delays";
-    delaySection.appendChild(
-      createDelayInput("Open delay", DEFAULT_REVEAL_DELAY_MS, (v) => {
-        revealDelayMs = v;
-      }),
-    );
-    delaySection.appendChild(
-      createDelayInput("Redeem delay", DEFAULT_REDEEM_DELAY_MS, (v) => {
-        redeemDelayMs = v;
-      }),
-    );
-    panel.appendChild(delaySection);
 
     const storeSection = document.createElement("div");
     storeSection.id = "lac-stores";
@@ -1328,7 +821,6 @@
     storesLabel.textContent = "Stores";
     storeSection.appendChild(storesLabel);
     KNOWN_STORES.forEach((s) => storeSection.appendChild(createStoreToggleRow(s)));
-    storeSection.appendChild(createGogRedeemModeRow());
     panel.appendChild(storeSection);
 
     createStatusLine(panel, "Ready");
@@ -1353,10 +845,9 @@
     createStatusLine(panel);
 
     if (!store) {
-      // No Claim button: an unknown store is never claimed from here.
-      updateStatus(claimRefusal(store), "error");
+      updateStatus(`Store not recognised (saw ${describeSeenStores()})`, "error");
     } else if (isStoreDisabled(store)) {
-      updateStatus("Store set to Skip — not claiming");
+      updateStatus("Store set to Skip");
 
       // Allow re-enabling without going back to the home page.
       const enableBtn = document.createElement("button");
@@ -1367,18 +858,10 @@
         log(`${store} re-enabled`);
         panel.remove();
         createClaimPagePanel(store);
-        document.body.appendChild(document.getElementById("lac-panel"));
       });
       panel.appendChild(enableBtn);
     } else {
-      updateStatus("Ready");
-
-      claimBtn = document.createElement("button");
-      claimBtn.id = "lac-claim-btn";
-      claimBtn.className = "lac-btn lac-btn-primary";
-      claimBtn.textContent = "Claim";
-      claimBtn.addEventListener("click", claimCurrentGame);
-      panel.appendChild(claimBtn);
+      updateStatus("Ready — use page button to claim");
 
       const disableBtn = document.createElement("button");
       disableBtn.className = "lac-btn lac-btn-danger";
@@ -1388,7 +871,6 @@
         log(`${store} disabled`);
         panel.remove();
         createClaimPagePanel(store);
-        document.body.appendChild(document.getElementById("lac-panel"));
       });
       panel.appendChild(disableBtn);
     }
@@ -1528,17 +1010,12 @@
   function teardownPanel() {
     removePanel();
     claimBtn = null;
-    autoClaimBtn = null;
   }
 
   function handleRoute() {
     const path = window.location.pathname;
     const isHome = /\/claims\/home/.test(path);
     const isClaim = /\/claims\/.+\/dp\//.test(path);
-
-    // A GOG claim started in this tab carries on here, whatever route Luna
-    // used to expose the key.
-    if (hasPendingGogHandoff()) followGogClaimCode();
 
     if (!isHome && !isClaim) {
       if (currentPanelRoute !== null) {
@@ -1559,6 +1036,7 @@
     currentPanelRoute = newRoute;
 
     if (isHome) {
+      openedUrls.clear();
       waitForOrderContent(() => {
         if (generation !== routeGeneration) return;
         injectStyles();
@@ -1575,19 +1053,6 @@
       log(`Store: ${store ?? "unknown"}`);
       injectStyles();
       createClaimPagePanel(store);
-
-      const autoClaimParam =
-        new URLSearchParams(window.location.search).get("lac_autoclaim") === "1";
-      if (autoClaimParam) {
-        const refusal = claimRefusal(store);
-        if (refusal) {
-          warn(`Auto-claim stopped: ${refusal}`);
-        } else {
-          log("Auto-claim triggered by URL param");
-          // Brief delay so the page's own JS finishes binding before we click.
-          sleep(redeemDelayMs).then(claimCurrentGame);
-        }
-      }
     });
   }
 
@@ -1631,11 +1096,6 @@
   }
 
   function init() {
-    if (isGogHost()) {
-      // Silent on every GOG page except a redeem page Luna handed off.
-      runGogRedemption();
-      return;
-    }
     log(`v${SCRIPT_VERSION} loaded`);
     checkForUpdate();
     watchForNavigation();

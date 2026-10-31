@@ -179,16 +179,13 @@ A userscript for [Fanatical](https://www.fanatical.com) order pages that bulk-re
 
 ### `luna-autoclaim/`
 
-A userscript for [Amazon Luna](https://luna.amazon.com) claim pages that opens available Prime Gaming claim pages and redeems exposed keys with optional per-store filtering.
+A userscript for [Amazon Luna](https://luna.amazon.com) claim pages that opens available Prime Gaming claim pages one at a time with per-store filtering.
 
 **Features:**
 
-- Floating control panel on Luna claim pages with reveal/open and auto-claim controls
-- Opens claim pages in background tabs with configurable pacing
-- Auto-claim handoff via URL flag so newly opened claim tabs can continue the flow
-- Store detection for Amazon Games, Epic Games, GOG, Legacy Games, and Microsoft Store — a claim for a store it can't identify is refused, never guessed
-- GOG: follows the "Claim code" link to gog.com in the same tab, then clicks Continue and (after asking, or automatically) Redeem exactly once
-- Each claim is checked for a success signal instead of assumed; unconfirmed claims are flagged in red
+- Floating control panel on Luna claim pages with a per-click "Open Next" button (`Opened 3 of 12`)
+- Opens one eligible claim page per click in a background tab so you can click Claim yourself
+- Store detection for Amazon Games, Epic Games, GOG, Legacy Games, and Microsoft Store — entries for stores set to Skip are skipped before opening
 - Per-store enable/disable settings persisted in `localStorage`
 - Update banner using the repo's metadata check pattern
 
