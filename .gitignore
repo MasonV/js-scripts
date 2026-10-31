@@ -2,8 +2,8 @@
 enter
 
 # Local AI/tooling state
-.claude/settings.local.json
-.claude/worktrees/
+.claude/
+.autodev/
 
 # Userscript development captures and scratch resources
 **/*.dev.resources/
@@ -14,3 +14,9 @@ node_modules/
 coverage/
 *.log
 *.tmp
+# AutoDev & AI agents
+.codex/
+.gemini/
+.antigravity/
+adev
+.autodev-cache/
