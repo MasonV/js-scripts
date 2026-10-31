@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Fanatical Autoclaim
 // @namespace    fanatical-autoclaim
-// @version      1.4.1
-// @description  Bulk-reveal and bulk-redeem Steam keys on Fanatical order pages
+// @version      1.5.0
+// @description  Bulk-reveal Steam keys on Fanatical order pages and open Steam redeem pages one at a time
 // @match        https://www.fanatical.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
@@ -27,11 +27,16 @@
     const UI_PREFIX = 'fac'
 
     const DEFAULT_REVEAL_DELAY_MS = 500
-    const DEFAULT_REDEEM_DELAY_MS = 800
+    const REDEEM_LOG_KEY = 'fanatical_autoclaim_redeem_log_v1'
+    const REDEEM_WINDOW_MS = 60 * 60 * 1000
+
+    // Valve does not publish the activation limit; about 30 packages per hour
+    // (down from 50) is community-reported in 2024 and unofficial, so keep it
+    // conservative and revisit if Valve documents it.
+    const STEAM_REDEEMS_PER_HOUR = 30
 
     // Mutable — updated by the UI input
     let revealDelayMs = DEFAULT_REVEAL_DELAY_MS
-    let redeemDelayMs = DEFAULT_REDEEM_DELAY_MS
 
     // ═══════════════════════════════════════════════════════════════════
     //  LOGGING
@@ -39,7 +44,6 @@
 
     function log(...args) { console.log(LOG_PREFIX, ...args) }
     function warn(...args) { console.warn(LOG_PREFIX, ...args) }
-    function error(...args) { console.error(LOG_PREFIX, ...args) }
     function logItem(...args) { console.log(SHORT_PREFIX, ...args) }
 
     // <update-check>
@@ -553,6 +557,85 @@
     // </steam-redeem>
 
     // ═══════════════════════════════════════════════════════════════════
+    //  PURE LOGIC
+    // ═══════════════════════════════════════════════════════════════════
+
+    function pruneRedeemLog(timestamps, now, windowMs = REDEEM_WINDOW_MS) {
+        if (!Array.isArray(timestamps)) return []
+        return timestamps
+            .filter(t => typeof t === 'number' && Number.isFinite(t) && t <= now && now - t < windowMs)
+            .sort((a, b) => a - b)
+    }
+
+    function getRedeemPaceState(
+        timestamps,
+        now,
+        cap = STEAM_REDEEMS_PER_HOUR,
+        windowMs = REDEEM_WINDOW_MS,
+    ) {
+        const active = pruneRedeemLog(timestamps, now, windowMs)
+        const count = active.length
+        const allowed = count < cap
+        const nextSlotMs = !allowed && active.length > 0 ? Math.max(0, active[0] + windowMs - now) : 0
+        return { active, count, cap, allowed, nextSlotMs }
+    }
+
+    function formatWaitTime(ms) {
+        if (!ms || ms <= 0) return '0s'
+        if (ms < 60 * 1000) return `${Math.max(1, Math.ceil(ms / 1000))}s`
+        return `${Math.ceil(ms / (60 * 1000))}m`
+    }
+
+    function formatPaceLabel(paceState) {
+        const base = `${paceState.count} of ${paceState.cap} this hour`
+        if (paceState.allowed) return base
+        return `${base} — next slot in ${formatWaitTime(paceState.nextSlotMs)}`
+    }
+
+    function pickNextRedeem(urls, openedUrls) {
+        let openedCount = 0
+        let next = null
+        for (const item of urls) {
+            if (openedUrls.has(item.url)) {
+                openedCount++
+            } else if (!next) {
+                next = item
+            }
+        }
+        return { next, openedCount, total: urls.length }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PACING PERSISTENCE — rolling hour in localStorage
+    // ═══════════════════════════════════════════════════════════════════
+
+    function loadRedeemLog(now = Date.now()) {
+        try {
+            const raw = localStorage.getItem(REDEEM_LOG_KEY)
+            if (!raw) return []
+            return pruneRedeemLog(JSON.parse(raw), now)
+        } catch {
+            return []
+        }
+    }
+
+    function saveRedeemLog(timestamps) {
+        try {
+            localStorage.setItem(REDEEM_LOG_KEY, JSON.stringify(timestamps))
+        } catch {
+            /* private mode or quota exceeded */
+        }
+    }
+
+    function recordRedeemTimestamp(now = Date.now()) {
+        const active = loadRedeemLog(now)
+        active.push(now)
+        const pruned = pruneRedeemLog(active, now)
+        saveRedeemLog(pruned)
+        return pruned
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     //  DOM HELPERS
     // ═══════════════════════════════════════════════════════════════════
 
@@ -564,6 +647,7 @@
         const lowerText = text.toLowerCase().trim()
         const candidates = document.querySelectorAll('button, a[role="button"], a.btn, a[href*="steam"]')
         return Array.from(candidates).filter(el => {
+            if (el.closest(`#${UI_PREFIX}-panel`)) return false
             const elText = el.textContent.trim().toLowerCase()
             return elText === lowerText
         })
@@ -596,6 +680,10 @@
     //  CORE ACTIONS
     // ═══════════════════════════════════════════════════════════════════
 
+    // Tracks redeem URLs already opened on the current order page.
+    const openedRedeemUrls = new Set()
+    let isRevealing = false
+
     async function revealAllKeys() {
         const revealButtons = findButtonsByText('Reveal Key')
         if (revealButtons.length === 0) {
@@ -606,6 +694,7 @@
 
         log(`Found ${revealButtons.length} key(s) to reveal`)
         updateStatus(`Revealing 0/${revealButtons.length}...`)
+        isRevealing = true
         setButtonsEnabled(false)
 
         for (let i = 0; i < revealButtons.length; i++) {
@@ -624,9 +713,11 @@
 
         // Wait a moment for the last reveal to render
         await sleep(revealDelayMs)
+        isRevealing = false
         log('All keys revealed')
         updateStatus(`Revealed ${revealButtons.length} key(s)`)
         setButtonsEnabled(true)
+        refreshPaceUI()
     }
 
     /**
@@ -640,7 +731,7 @@
 
         for (const btn of redeemButtons) {
             const href = btn.href || btn.closest('a')?.href
-            if (href) {
+            if (href && !urls.some(u => u.url === href)) {
                 urls.push({ url: href, name: getGameName(btn) })
             }
         }
@@ -650,51 +741,52 @@
         // Fallback: build steam:// URLs from extracted keys
         const keys = findSteamKeys()
         for (const { key, element } of keys) {
-            urls.push({
-                url: steamRedeemUrl(key),
-                name: getGameName(element),
-            })
+            const url = steamRedeemUrl(key)
+            if (!urls.some(u => u.url === url)) {
+                urls.push({
+                    url,
+                    name: getGameName(element),
+                })
+            }
         }
 
         return urls
     }
 
-    async function redeemAllOnSteam() {
-        const urls = collectRedeemUrls()
+    function redeemNextOnSteam() {
+        const now = Date.now()
+        const pace = getRedeemPaceState(loadRedeemLog(now), now)
+        if (!pace.allowed) {
+            const waitStr = formatWaitTime(pace.nextSlotMs)
+            warn(`Steam activation cap reached (${pace.count}/${pace.cap} this hour) — next slot in ${waitStr}`)
+            updateStatus(`Cap reached (${pace.count}/${pace.cap}) — wait ${waitStr}`, 'error')
+            refreshPaceUI(now)
+            return
+        }
 
+        const urls = collectRedeemUrls()
         if (urls.length === 0) {
             log('No revealed keys or redeem buttons found — reveal keys first')
             updateStatus('No keys to redeem — reveal first')
             return
         }
 
-        log(`Opening ${urls.length} redeem URL(s) in background tabs`)
-        updateStatus(`Redeeming 0/${urls.length}...`)
-        setButtonsEnabled(false)
-
-        for (let i = 0; i < urls.length; i++) {
-            const { url, name } = urls[i]
-            logItem(`Redeeming ${i + 1}/${urls.length}: ${name}`)
-            updateStatus(`Redeeming ${i + 1}/${urls.length}: ${name}`)
-
-            // Open in a background tab so the script keeps running on this page
-            GM_openInTab(url, { active: false, insert: true, setParent: true })
-
-            if (i < urls.length - 1) {
-                await sleep(redeemDelayMs)
-            }
+        const { next, openedCount, total } = pickNextRedeem(urls, openedRedeemUrls)
+        if (!next) {
+            log(`All ${total} redeem URL(s) on this page have already been opened`)
+            updateStatus(`Opened ${openedCount} of ${total}`)
+            refreshPaceUI(now)
+            return
         }
 
-        log('All redeem tabs opened')
-        updateStatus(`Opened ${urls.length} redeem tab(s)`)
-        setButtonsEnabled(true)
-    }
+        openedRedeemUrls.add(next.url)
+        recordRedeemTimestamp(now)
+        const newOpenedCount = openedCount + 1
 
-    async function revealAndRedeem() {
-        await revealAllKeys()
-        // Brief pause to let the DOM update with revealed keys
-        await sleep(1000)
-        await redeemAllOnSteam()
+        logItem(`Opening ${newOpenedCount} of ${total}: ${next.name}`)
+        GM_openInTab(next.url, { active: false, insert: true, setParent: true })
+        updateStatus(`Opened ${newOpenedCount} of ${total}`)
+        refreshPaceUI(now)
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -703,10 +795,44 @@
 
     let revealBtn = null
     let redeemBtn = null
-    let revealAndRedeemBtn = null
+    let paceEl = null
+    let paceInterval = null
+    let fanaticalStylesInjected = false
 
     function setButtonsEnabled(enabled) {
-        setControlsEnabled([revealBtn, redeemBtn, revealAndRedeemBtn], enabled)
+        setControlsEnabled([revealBtn, redeemBtn], enabled)
+    }
+
+    function refreshPaceUI(now = Date.now()) {
+        const pace = getRedeemPaceState(loadRedeemLog(now), now)
+        if (paceEl) {
+            paceEl.textContent = formatPaceLabel(pace)
+            paceEl.classList.toggle('fac-pace--capped', !pace.allowed)
+        }
+        if (!isRevealing && redeemBtn) {
+            const urls = collectRedeemUrls()
+            const { next, total } = pickNextRedeem(urls, openedRedeemUrls)
+            const canRedeem = pace.allowed && (total === 0 || Boolean(next))
+            setControlsEnabled([redeemBtn], canRedeem)
+        }
+    }
+
+    function injectStyles() {
+        injectPanelStyles()
+        if (fanaticalStylesInjected) return
+        fanaticalStylesInjected = true
+        GM_addStyle(`
+            #fac-pace {
+                font-size: 11px;
+                color: #9e9e9e;
+                text-align: center;
+                min-height: 15px;
+            }
+            #fac-pace.fac-pace--capped {
+                color: #ef5350;
+                font-weight: 700;
+            }
+        `)
     }
 
     function createPanel() {
@@ -721,22 +847,18 @@
 
         redeemBtn = document.createElement('button')
         redeemBtn.id = 'fac-redeem-btn'
-        redeemBtn.className = 'fac-btn'
-        redeemBtn.textContent = 'Redeem All'
-        redeemBtn.addEventListener('click', redeemAllOnSteam)
+        redeemBtn.className = 'fac-btn fac-btn-primary'
+        redeemBtn.textContent = 'Redeem Next'
+        redeemBtn.addEventListener('click', redeemNextOnSteam)
         panel.appendChild(redeemBtn)
 
-        revealAndRedeemBtn = document.createElement('button')
-        revealAndRedeemBtn.id = 'fac-reveal-redeem-btn'
-        revealAndRedeemBtn.className = 'fac-btn fac-btn-primary'
-        revealAndRedeemBtn.textContent = 'Reveal + Redeem All'
-        revealAndRedeemBtn.addEventListener('click', revealAndRedeem)
-        panel.appendChild(revealAndRedeemBtn)
+        paceEl = document.createElement('div')
+        paceEl.id = 'fac-pace'
+        panel.appendChild(paceEl)
 
         const delaySection = document.createElement('div')
         delaySection.id = 'fac-delays'
         delaySection.appendChild(createDelayInput('Reveal delay', DEFAULT_REVEAL_DELAY_MS, v => { revealDelayMs = v }))
-        delaySection.appendChild(createDelayInput('Redeem delay', DEFAULT_REDEEM_DELAY_MS, v => { redeemDelayMs = v }))
         panel.appendChild(delaySection)
 
         createStatusLine(panel, 'Ready')
@@ -788,14 +910,19 @@
     }
 
     function teardownPanel() {
+        clearInterval(paceInterval)
+        paceInterval = null
         removePanel()
-        revealBtn = redeemBtn = revealAndRedeemBtn = null
+        revealBtn = redeemBtn = paceEl = null
     }
 
     function showPanel() {
-        injectPanelStyles()
+        injectStyles()
         teardownPanel()
+        openedRedeemUrls.clear()
         createPanel()
+        refreshPaceUI()
+        paceInterval = setInterval(() => refreshPaceUI(), 15000)
 
         const revealCount = findButtonsByText('Reveal Key').length
         const redeemCount = findButtonsByText('Redeem on Steam').length
