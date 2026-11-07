@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YTM Desktop Handoff
 // @namespace    ytm-desktop-handoff
-// @version      4.2.0
+// @version      4.2.1
 // @description  Adds a handoff button to YouTube Music /watch pages that sends the current track to the YouTube Music Desktop App via the ytmd:// protocol (pauses this tab so the desktop app plays alone)
 // @match        *://music.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -224,6 +224,21 @@
 		}
 	}
 
+	/**
+	 * Builds the ytmd:// URI for the current track.
+	 * Format per YTMDesktop wiki: ytmd://play/<VideoId>[/<PlaylistId>]
+	 * Any other shape (e.g. a watch?v= URL) still launches the app, because the
+	 * OS only matches the scheme — but the app ignores it and the track never
+	 * changes. That was the 4.1.0–4.2.0 bug.
+	 * @param {string} videoId
+	 * @param {string|null} playlistId
+	 * @returns {string}
+	 */
+	function buildHandoffUrl(videoId, playlistId) {
+		const base = `ytmd://play/${encodeURIComponent(videoId)}`
+		return playlistId ? `${base}/${encodeURIComponent(playlistId)}` : base
+	}
+
 	function handoff() {
 		const videoId = getVideoId()
 		if (!videoId) {
@@ -231,18 +246,16 @@
 			return
 		}
 
-		const params = new URLSearchParams({ v: videoId })
-		const playlistId = getPlaylistId()
-		if (playlistId) params.set('list', playlistId)
+		const url = buildHandoffUrl(videoId, getPlaylistId())
 
 		// Trigger the ytmd:// protocol handler without navigating away from the page.
 		const iframe = document.createElement('iframe')
 		iframe.style.cssText = 'display:none'
-		iframe.src = `ytmd://music.youtube.com/watch?${params}`
+		iframe.src = url
 		document.body.appendChild(iframe)
 		setTimeout(() => iframe.remove(), 1000)
 
-		log(`Handed off to YTMDesktop: videoId=${videoId}`)
+		log(`Handed off to YTMDesktop: ${url}`)
 		setPillState('success')
 		setTimeout(pauseYtmPlayback, 120)
 	}
