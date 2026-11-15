@@ -20,3 +20,10 @@ coverage/
 .antigravity/
 adev
 .autodev-cache/
+
+# devpod: supplementary ignores
+.env
+.env.*
+!.env.example
+.devpod-restore-uncommitted.patch
+.worktrees/
