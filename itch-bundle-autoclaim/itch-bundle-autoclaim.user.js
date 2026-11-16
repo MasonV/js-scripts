@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Itch Bundle Autoclaim
 // @namespace    itch-bundle-autoclaim
-// @version      1.2.0
+// @version      1.2.1
 // @description  Claims all unclaimed games on an itch.io bundle download page, with automatic pagination
 // @match        https://itch.io/bundle/download/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -150,6 +150,19 @@
         if (active.length < maxPerMinute) return 0
         const oldestInWindow = active[active.length - maxPerMinute]
         return Math.max(0, oldestInWindow + windowMs - now)
+    }
+
+    function recordClaimOutcome(consecutiveFailures, ok, maxFailures = MAX_CONSECUTIVE_FAILURES) {
+        const prev = Math.max(0, Math.floor(Number(consecutiveFailures) || 0))
+        const nextFailures = ok ? 0 : prev + 1
+        return {
+            consecutiveFailures: nextFailures,
+            halted: nextFailures >= maxFailures,
+        }
+    }
+
+    function shouldWaitAfterAttempt(index, totalForms, consecutiveFailures) {
+        return index < totalForms - 1 || consecutiveFailures > 0
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -405,9 +418,9 @@
     async function claimAllOnPage(state, onProgress) {
         const forms = getClaimableForms()
         let claimedThisPage = 0
-        let consecutiveFailures = 0
         let lastErrorReason = null
 
+        state.consecutiveFailures = Math.max(0, Math.floor(Number(state.consecutiveFailures) || 0))
         state.claimTimestamps = pruneClaimTimestamps(state.claimTimestamps, Date.now())
 
         for (let i = 0; i < forms.length; i++) {
@@ -432,50 +445,53 @@
             if (state.active) saveState(state)
 
             let retryAfterMs = 0
+            let outcome = null
             try {
                 const result = await claimForm(form)
                 retryAfterMs = result.retryAfterMs || 0
+                outcome = recordClaimOutcome(state.consecutiveFailures, result.ok)
+                state.consecutiveFailures = outcome.consecutiveFailures
                 if (result.ok) {
                     claimedThisPage++
-                    consecutiveFailures = 0
                     lastErrorReason = null
                 } else {
-                    consecutiveFailures++
                     lastErrorReason = result.reason || 'Claim failed'
                     warn(
-                        `Claim failed for "${gameName}" (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${lastErrorReason}`,
+                        `Claim failed for "${gameName}" (${state.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): ${lastErrorReason}`,
                     )
                 }
             } catch (e) {
-                consecutiveFailures++
+                outcome = recordClaimOutcome(state.consecutiveFailures, false)
+                state.consecutiveFailures = outcome.consecutiveFailures
                 lastErrorReason = (e && e.message) ? `Network error (${e.message})` : 'Network error'
                 warn(
-                    `Fetch error claiming "${gameName}" (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}):`,
+                    `Fetch error claiming "${gameName}" (${state.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}):`,
                     e,
                 )
             }
+            if (state.active) saveState(state)
 
-            if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            if (outcome.halted) {
                 error(
-                    `Halting after ${consecutiveFailures} consecutive failures. Last error: ${lastErrorReason}`,
+                    `Halting after ${state.consecutiveFailures} consecutive failures. Last error: ${lastErrorReason}`,
                 )
                 return { claimedThisPage, halted: true, errorReason: lastErrorReason }
             }
 
-            if (i < forms.length - 1 || consecutiveFailures > 0) {
+            if (shouldWaitAfterAttempt(i, forms.length, state.consecutiveFailures)) {
                 const delayMs = computeBackoffDelayMs(
                     CLAIM_DELAY_MS,
-                    consecutiveFailures,
+                    state.consecutiveFailures,
                     retryAfterMs,
                     MAX_BACKOFF_MS,
                 )
-                if (consecutiveFailures > 0) {
+                if (state.consecutiveFailures > 0) {
                     const waitSec = (delayMs / 1000).toFixed(1).replace(/\.0$/, '')
                     updateStatus(
-                        `Retry backoff (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): waiting ${waitSec}s (${lastErrorReason})`,
+                        `Retry backoff (${state.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}): waiting ${waitSec}s (${lastErrorReason})`,
                     )
                 }
-                if (delayMs > 0 && i < forms.length - 1) {
+                if (delayMs > 0 && shouldWaitAfterAttempt(i, forms.length, state.consecutiveFailures)) {
                     await sleep(delayMs)
                 }
             }
@@ -567,7 +583,13 @@
 
     async function runClaimAllPages() {
         isMultiPageRun = true
-        const state = { active: true, totalClaimed: 0, pagesVisited: 0, claimTimestamps: [] }
+        const state = {
+            active: true,
+            totalClaimed: 0,
+            pagesVisited: 0,
+            consecutiveFailures: 0,
+            claimTimestamps: [],
+        }
         saveState(state)
         setButtonsEnabled(false)
         await runCurrentPage(state)
@@ -576,7 +598,13 @@
     async function runClaimThisPage() {
         setButtonsEnabled(false)
         updateStatus('Claiming...')
-        const state = { active: false, totalClaimed: 0, pagesVisited: 0, claimTimestamps: [] }
+        const state = {
+            active: false,
+            totalClaimed: 0,
+            pagesVisited: 0,
+            consecutiveFailures: 0,
+            claimTimestamps: [],
+        }
         const { claimedThisPage, halted, errorReason } = await claimAllOnPage(
             state,
             makeProgressCallback(),
