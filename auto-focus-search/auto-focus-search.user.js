@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Focus Search
 // @namespace    auto-focus-search
-// @version      1.1.0
+// @version      1.1.1
 // @description  Automatically detects and focuses search input fields on any webpage
 // @match        *://*/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -384,7 +384,7 @@
             indicator.innerHTML = '<span class="afs-icon">&#128269;</span>'
             indicator.addEventListener('click', (e) => {
                 e.stopPropagation()
-                togglePopover(label)
+                togglePopover(indicator.dataset.label)
             })
             document.body.appendChild(indicator)
         }
@@ -442,52 +442,74 @@
         const excluded = isExcluded()
         const hostname = window.location.hostname
 
-        popover.innerHTML = `
-            <div class="afs-popover-header">
-                <span class="afs-popover-title">Auto Focus Search</span>
-                <button class="afs-popover-close">&times;</button>
-            </div>
-            <div class="afs-popover-body">
-                <div class="afs-popover-row">
-                    <span class="afs-popover-label">${hostname}</span>
-                    <button class="afs-popover-toggle ${excluded ? 'afs-off' : 'afs-on'}">
-                        ${excluded ? 'Disabled' : 'Enabled'}
-                    </button>
-                </div>
-                <div class="afs-popover-row afs-popover-element">
-                    <span class="afs-popover-label">Focused:</span>
-                    <code class="afs-popover-code">${displayLabel}</code>
-                </div>
-            </div>
-        `
+        const header = document.createElement('div')
+        header.className = 'afs-popover-header'
 
-        // Close button
-        popover.querySelector('.afs-popover-close').addEventListener('click', (e) => {
+        const titleEl = document.createElement('span')
+        titleEl.className = 'afs-popover-title'
+        titleEl.textContent = 'Auto Focus Search'
+
+        const closeBtn = document.createElement('button')
+        closeBtn.type = 'button'
+        closeBtn.className = 'afs-popover-close'
+        closeBtn.textContent = '\u00d7'
+        closeBtn.addEventListener('click', (e) => {
             e.stopPropagation()
             hidePopover()
             hideIndicator()
         })
 
-        // Toggle button
-        popover.querySelector('.afs-popover-toggle').addEventListener('click', (e) => {
+        header.append(titleEl, closeBtn)
+
+        const body = document.createElement('div')
+        body.className = 'afs-popover-body'
+
+        const siteRow = document.createElement('div')
+        siteRow.className = 'afs-popover-row'
+
+        const hostLabel = document.createElement('span')
+        hostLabel.className = 'afs-popover-label'
+        hostLabel.textContent = hostname
+
+        const toggleBtn = document.createElement('button')
+        toggleBtn.type = 'button'
+        toggleBtn.className = `afs-popover-toggle ${excluded ? 'afs-off' : 'afs-on'}`
+        toggleBtn.textContent = excluded ? 'Disabled' : 'Enabled'
+        toggleBtn.addEventListener('click', (e) => {
             e.stopPropagation()
             const nowExcluded = toggleExclusion()
-            const btn = e.target
             if (nowExcluded) {
-                btn.textContent = 'Disabled'
-                btn.classList.remove('afs-on')
-                btn.classList.add('afs-off')
+                toggleBtn.textContent = 'Disabled'
+                toggleBtn.classList.remove('afs-on')
+                toggleBtn.classList.add('afs-off')
                 stopObserver()
                 log(`Disabled on ${hostname}`)
             } else {
-                btn.textContent = 'Enabled'
-                btn.classList.remove('afs-off')
-                btn.classList.add('afs-on')
+                toggleBtn.textContent = 'Enabled'
+                toggleBtn.classList.remove('afs-off')
+                toggleBtn.classList.add('afs-on')
                 startObserver()
                 attemptFocus()
                 log(`Enabled on ${hostname}`)
             }
         })
+
+        siteRow.append(hostLabel, toggleBtn)
+
+        const elemRow = document.createElement('div')
+        elemRow.className = 'afs-popover-row afs-popover-element'
+
+        const focusedLabel = document.createElement('span')
+        focusedLabel.className = 'afs-popover-label'
+        focusedLabel.textContent = 'Focused:'
+
+        const codeEl = document.createElement('code')
+        codeEl.className = 'afs-popover-code'
+        codeEl.textContent = displayLabel
+
+        elemRow.append(focusedLabel, codeEl)
+        body.append(siteRow, elemRow)
+        popover.append(header, body)
 
         // Close on outside click
         popover._outsideClick = (e) => {
@@ -496,7 +518,10 @@
                 hideIndicator()
             }
         }
-        setTimeout(() => document.addEventListener('click', popover._outsideClick), 0)
+        popover._outsideClickTimer = setTimeout(() => {
+            if (!popover.isConnected) return
+            document.addEventListener('click', popover._outsideClick)
+        }, 0)
 
         document.body.appendChild(popover)
     }
@@ -504,6 +529,7 @@
     function hidePopover() {
         const popover = document.getElementById(POPOVER_ID)
         if (popover) {
+            clearTimeout(popover._outsideClickTimer)
             document.removeEventListener('click', popover._outsideClick)
             popover.remove()
         }
