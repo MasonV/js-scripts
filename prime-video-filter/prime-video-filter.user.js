@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prime Video Filter
 // @namespace    prime-video-filter
-// @version      0.2.1
+// @version      0.2.2
 // @description  Hide Prime Video titles you can't watch with Prime, titles you've already watched, and titles below an IMDb rating you choose
 // @match        https://www.primevideo.com/*
 // @match        https://www.amazon.com/gp/video/*
@@ -76,6 +76,10 @@
 	const RATING_TTL_MS = 14 * 24 * 60 * 60 * 1000
 	const NO_RATING_TTL_MS = 2 * 24 * 60 * 60 * 1000
 	const RATING_CACHE_MAX = 3000
+	const RATING_MAX_CONSECUTIVE_FAILURES = 3
+	const RATING_MAX_BACKOFF_MS = 10000
+	const RATING_MAX_PER_MINUTE = 60
+	const RATING_RATE_WINDOW_MS = 60 * 1000
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  LOGGING
@@ -245,6 +249,55 @@
 		return Number(n).toFixed(1)
 	}
 
+	function parseRetryAfterMs(headerValue, now = Date.now()) {
+		if (headerValue == null) return 0
+		const trimmed = String(headerValue).trim()
+		if (!trimmed) return 0
+		if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+			const seconds = Number(trimmed)
+			return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds * 1000) : 0
+		}
+		const dateMs = Date.parse(trimmed)
+		if (!Number.isNaN(dateMs)) {
+			return Math.max(0, dateMs - now)
+		}
+		return 0
+	}
+
+	function computeRatingBackoffMs(
+		baseGapMs,
+		consecutiveFailures,
+		retryAfterMs = 0,
+		maxBackoffMs = 10000
+	) {
+		const base = Math.max(0, Number(baseGapMs) || 0)
+		const failures = Math.max(0, Math.floor(Number(consecutiveFailures) || 0))
+		const retry = Math.max(0, Number(retryAfterMs) || 0)
+		const cap = Math.max(base, Number(maxBackoffMs) || 10000)
+		const delay = failures === 0 ? base : Math.min(cap, base * 2 ** failures)
+		return Math.max(delay, retry)
+	}
+
+	function pruneRatingTimestamps(timestamps, now = Date.now(), windowMs = 60000) {
+		if (!Array.isArray(timestamps)) return []
+		const cutoff = now - windowMs
+		return timestamps
+			.filter((t) => typeof t === 'number' && Number.isFinite(t) && t > cutoff && t <= now)
+			.sort((a, b) => a - b)
+	}
+
+	function computeRatingRateWaitMs(
+		timestamps,
+		now = Date.now(),
+		maxPerMinute = 60,
+		windowMs = 60000
+	) {
+		const active = pruneRatingTimestamps(timestamps, now, windowMs)
+		if (active.length < maxPerMinute) return 0
+		const oldestInWindow = active[active.length - maxPerMinute]
+		return Math.max(0, oldestInWindow + windowMs - now)
+	}
+
 	// ═══════════════════════════════════════════════════════════════════
 	//  SETTINGS
 	// ═══════════════════════════════════════════════════════════════════
@@ -364,8 +417,14 @@
 	let ratingCache = null
 	const ratingQueue = []
 	const ratingInFlight = new Set()
+	const failedRatingKeys = new Set()
 	let ratingActive = 0
 	let ratingCacheDirty = false
+	let consecutiveRatingFailures = 0
+	let ratingHaltedReason = null
+	let ratingFetchTimestamps = []
+	let ratingBackoffUntil = 0
+	let ratingPumpTimer = null
 
 	function loadRatingCache() {
 		if (ratingCache) return ratingCache
@@ -410,24 +469,91 @@
 
 		const entry = loadRatingCache()[key]
 		if (isRatingFresh(entry, Date.now())) return { rating: entry.r, settled: true }
+		if (failedRatingKeys.has(key) || ratingHaltedReason != null) {
+			return { rating: null, settled: true }
+		}
 		return { rating: null, settled: false, key, href }
 	}
 
 	function queueRatingLookup(key, href) {
+		if (ratingHaltedReason != null || failedRatingKeys.has(key)) return
 		if (ratingInFlight.has(key) || ratingQueue.some((job) => job.key === key)) return
 		ratingQueue.push({ key, href })
 		pumpRatingQueue()
 	}
 
+	function scheduleRatingPump(delayMs) {
+		if (ratingPumpTimer || ratingHaltedReason != null || !ratingQueue.length) return
+		ratingPumpTimer = setTimeout(() => {
+			ratingPumpTimer = null
+			pumpRatingQueue()
+		}, delayMs)
+	}
+
 	function pumpRatingQueue() {
+		if (ratingHaltedReason != null) {
+			ratingQueue.length = 0
+			return
+		}
 		while (ratingActive < RATING_FETCH_CONCURRENCY && ratingQueue.length) {
+			const now = Date.now()
+			ratingFetchTimestamps = pruneRatingTimestamps(
+				ratingFetchTimestamps,
+				now,
+				RATING_RATE_WINDOW_MS
+			)
+			const rateWaitMs = computeRatingRateWaitMs(
+				ratingFetchTimestamps,
+				now,
+				RATING_MAX_PER_MINUTE,
+				RATING_RATE_WINDOW_MS
+			)
+			const backoffWaitMs = Math.max(0, ratingBackoffUntil - now)
+			const waitMs = Math.max(rateWaitMs, backoffWaitMs)
+			if (waitMs > 0) {
+				scheduleRatingPump(waitMs)
+				return
+			}
+
 			// Newest first: the cards you just scrolled to matter more than
 			// the ones you scrolled past.
 			const job = ratingQueue.pop()
+			if (failedRatingKeys.has(job.key)) continue
 			ratingActive++
 			ratingInFlight.add(job.key)
+			ratingFetchTimestamps.push(now)
 			lookupRating(job)
-				.catch((e) => warn(`Rating lookup failed for ${job.key}:`, e))
+				.then(() => {
+					consecutiveRatingFailures = 0
+				})
+				.catch((e) => {
+					failedRatingKeys.add(job.key)
+					consecutiveRatingFailures++
+					const retryAfterMs = e && typeof e.retryAfterMs === 'number' ? e.retryAfterMs : 0
+					const delayMs = computeRatingBackoffMs(
+						RATING_FETCH_GAP_MS,
+						consecutiveRatingFailures,
+						retryAfterMs,
+						RATING_MAX_BACKOFF_MS
+					)
+					ratingBackoffUntil = Math.max(ratingBackoffUntil, Date.now() + delayMs)
+					warn(
+						`Rating lookup failed for ${job.key} (${consecutiveRatingFailures}/${RATING_MAX_CONSECUTIVE_FAILURES}):`,
+						e
+					)
+					if (consecutiveRatingFailures >= RATING_MAX_CONSECUTIVE_FAILURES) {
+						ratingHaltedReason = (e && e.message) || 'request failed'
+						ratingQueue.length = 0
+						if (ratingPumpTimer) {
+							clearTimeout(ratingPumpTimer)
+							ratingPumpTimer = null
+						}
+						console.error(
+							`${LOG_PREFIX} Halting rating lookups after ${consecutiveRatingFailures} consecutive failures: ${ratingHaltedReason}`
+						)
+					}
+					scheduleApply()
+				})
 				.finally(() => {
 					ratingInFlight.delete(job.key)
 					setTimeout(() => {
@@ -440,7 +566,15 @@
 
 	async function lookupRating({ key, href }) {
 		const res = await fetch(href, { credentials: 'include' })
-		if (!res.ok) throw new Error(`HTTP ${res.status}`)
+		if (!res.ok) {
+			const err = new Error(`HTTP ${res.status}`)
+			const rawRetryAfter =
+				res.headers && typeof res.headers.get === 'function'
+					? res.headers.get('Retry-After')
+					: null
+			err.retryAfterMs = parseRetryAfterMs(rawRetryAfter)
+			throw err
+		}
 		// Searched as text, not parsed: building a DOM for a whole detail page
 		// blocked the main thread for every title looked up.
 		const rating = findImdbRatingInHtml(await res.text())
@@ -842,6 +976,9 @@
 		if (parts.length) text += ` — ${parts.join(', ')}`
 		text += '.'
 		if (c.ratingPending) text += ` Looking up ${c.ratingPending} IMDb ratings as you scroll.`
+		if (settings.hideLowRated && ratingHaltedReason) {
+			text += ` Rating lookups halted after ${RATING_MAX_CONSECUTIVE_FAILURES} consecutive errors (${ratingHaltedReason}).`
+		}
 		if (settings.hideNotIncluded && c.entitlementUnknown) {
 			text += ` ${c.entitlementUnknown} couldn’t be checked for Prime, so they stay.`
 		}
@@ -885,7 +1022,9 @@
 			`Keeps IMDb ${formatRating(settings.minRating)} and up; hides anything lower`
 		)
 
-		setText(panelEl.querySelector('#pvf-summary'), summaryText())
+		const summaryEl = panelEl.querySelector('#pvf-summary')
+		setText(summaryEl, summaryText())
+		summaryEl?.classList.toggle('pvf-summary-error', Boolean(settings.hideLowRated && ratingHaltedReason))
 
 		panelEl.querySelector('[data-for="watched"]').classList.toggle('pvf-inert', !settings.hideWatched)
 		panelEl.querySelector('[data-for="rated"]').classList.toggle('pvf-inert', !settings.hideLowRated)
@@ -1269,6 +1408,10 @@
 			border-radius: 6px;
 			background: #13202b;
 			color: #a9dff2;
+		}
+		#${PANEL_ID} .pvf-summary.pvf-summary-error {
+			background: #3b1215;
+			color: #fca5a5;
 		}
 
 		#${PANEL_ID}.pvf-disabled .pvf-group,
