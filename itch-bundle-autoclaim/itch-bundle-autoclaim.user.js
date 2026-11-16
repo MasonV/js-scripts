@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Itch Bundle Autoclaim
 // @namespace    itch-bundle-autoclaim
-// @version      1.2.2
+// @version      1.3.0
 // @description  Claims all unclaimed games on an itch.io bundle download page, with automatic pagination
 // @match        https://itch.io/bundle/download/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -27,6 +27,7 @@
             : '__DEV__'
     const LOG_PREFIX = '[Itch Autoclaim]'
     const SHORT_PREFIX = '[ICA]'
+    const UI_PREFIX = 'ica'
 
     const STORAGE_KEY = 'itch_autoclaim_v1'
     const CLAIM_DELAY_MS = 400    // base delay between individual fetch() claims
@@ -338,6 +339,319 @@
     }
     // </update-check>
 
+    // <autoclaim-kit>
+    // ═══════════════════════════════════════════════════════════════════
+    //  AUTOCLAIM KIT — shared helpers and panel UI
+    //  Generated from tools/blocks/autoclaim-kit.template.js — do not edit here.
+    //  Change the template, then run: node tools/sync-blocks.mjs
+    // ═══════════════════════════════════════════════════════════════════
+    //
+    // Expects UI_PREFIX (e.g. 'lac') in the enclosing scope: every id and class
+    // the panel uses is `${UI_PREFIX}-…`, so two autoclaim scripts on one page
+    // never collide. Needs @grant GM_addStyle.
+
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms))
+    }
+
+    /**
+     * Poll `probe` until it returns something truthy or `timeoutMs` elapses.
+     * Resolves with the probe's value, or null on timeout.
+     */
+    async function waitFor(probe, timeoutMs, intervalMs = 250) {
+        const deadline = Date.now() + timeoutMs
+        for (;;) {
+            const value = probe()
+            if (value) return value
+            if (Date.now() >= deadline) return null
+            await sleep(intervalMs)
+        }
+    }
+
+    function isVisible(el) {
+        return el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
+    }
+
+    function isEnabled(el) {
+        return !el.disabled && el.getAttribute('aria-disabled') !== 'true'
+    }
+
+    // Visible buttons/links whose text is exactly `text` (case-insensitive),
+    // ignoring our own panel.
+    function findVisibleButtonsByText(text) {
+        const want = text.toLowerCase()
+        return Array.from(
+            document.querySelectorAll('button, a, [role="button"], input[type="submit"]'),
+        ).filter(
+            el =>
+                !el.closest(`#${UI_PREFIX}-panel`) &&
+                (el.value || el.textContent).trim().toLowerCase() === want &&
+                isVisible(el),
+        )
+    }
+
+    // The single visible, enabled button with this text — or null, so an
+    // ambiguous page is never guessed at.
+    function findOnlyButton(text) {
+        const matches = findVisibleButtonsByText(text).filter(isEnabled)
+        return matches.length === 1 ? matches[0] : null
+    }
+
+    function normalizeKey(key) {
+        return key.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+    }
+
+    // Keys end up in the console and the status line — show only enough to
+    // tell two apart.
+    function maskKey(key) {
+        return key.length > 5 ? `${key.slice(0, 5)}…` : key
+    }
+
+    // ── Panel ───────────────────────────────────────────────────────────
+
+    let statusEl = null
+    let panelStylesInjected = false
+
+    // Floating panel with a title and a close button. The caller appends its
+    // own controls, then the panel to document.body.
+    function buildPanelShell(titleText) {
+        const panel = document.createElement('div')
+        panel.id = `${UI_PREFIX}-panel`
+
+        const header = document.createElement('div')
+        header.id = `${UI_PREFIX}-header`
+
+        const title = document.createElement('div')
+        title.id = `${UI_PREFIX}-title`
+        title.textContent = titleText
+        header.appendChild(title)
+
+        const closeBtn = document.createElement('button')
+        closeBtn.id = `${UI_PREFIX}-close-btn`
+        closeBtn.textContent = '×'
+        closeBtn.title = 'Close panel'
+        closeBtn.addEventListener('click', () => panel.remove())
+        header.appendChild(closeBtn)
+
+        panel.appendChild(header)
+        return panel
+    }
+
+    // The one status line updateStatus() writes to.
+    function createStatusLine(panel, text = '') {
+        statusEl = document.createElement('div')
+        statusEl.id = `${UI_PREFIX}-status`
+        statusEl.textContent = text
+        panel.appendChild(statusEl)
+        return statusEl
+    }
+
+    // tone: undefined (neutral) | 'ok' | 'error'
+    function updateStatus(text, tone) {
+        if (!statusEl) return
+        statusEl.textContent = text
+        statusEl.classList.toggle(`${UI_PREFIX}-status--ok`, tone === 'ok')
+        statusEl.classList.toggle(`${UI_PREFIX}-status--error`, tone === 'error')
+    }
+
+    function setControlsEnabled(controls, enabled) {
+        controls.forEach(btn => {
+            if (!btn) return
+            btn.disabled = !enabled
+            btn.style.opacity = enabled ? '1' : '0.5'
+            btn.style.pointerEvents = enabled ? 'auto' : 'none'
+        })
+    }
+
+    function createDelayInput(labelText, defaultValue, onChange) {
+        const row = document.createElement('div')
+        row.className = `${UI_PREFIX}-delay-row`
+
+        const label = document.createElement('label')
+        label.className = `${UI_PREFIX}-delay-label`
+        label.textContent = labelText
+
+        const input = document.createElement('input')
+        input.type = 'number'
+        input.className = `${UI_PREFIX}-delay-input`
+        input.min = '100'
+        input.max = '10000'
+        input.step = '100'
+        input.value = defaultValue
+        input.addEventListener('change', () => {
+            const val = parseInt(input.value, 10)
+            if (!isNaN(val) && val >= 100) onChange(val)
+        })
+
+        const unit = document.createElement('span')
+        unit.className = `${UI_PREFIX}-delay-unit`
+        unit.textContent = 'ms'
+
+        row.appendChild(label)
+        row.appendChild(input)
+        row.appendChild(unit)
+        return row
+    }
+
+    function removePanel() {
+        document.getElementById(`${UI_PREFIX}-panel`)?.remove()
+        statusEl = null
+    }
+
+    // Base panel styles. Safe to call on every route — only the first call
+    // injects. Script-specific rules go in the script's own GM_addStyle.
+    function injectPanelStyles() {
+        if (panelStylesInjected) return
+        panelStylesInjected = true
+        const p = UI_PREFIX
+        GM_addStyle(`
+            #${p}-panel {
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                z-index: 10000;
+                background: #2b2b2b;
+                border: 1px solid #424242;
+                border-radius: 8px;
+                padding: 12px 16px;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                min-width: 200px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+                font-family: Lato, 'Open Sans', sans-serif;
+                font-size: 14px;
+                color: #eee;
+            }
+
+            #${p}-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+
+            #${p}-title {
+                font-weight: 700;
+                font-size: 13px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                color: #ff9800;
+                flex: 1;
+                text-align: center;
+                padding-left: 20px;
+            }
+
+            #${p}-close-btn {
+                background: none;
+                border: none;
+                color: #757575;
+                font-size: 18px;
+                cursor: pointer;
+                padding: 0;
+                line-height: 1;
+                width: 20px;
+                font-family: inherit;
+            }
+
+            #${p}-close-btn:hover { color: #eee; }
+
+            /* One-line context under the title, e.g. "Store: GOG" */
+            #${p}-store {
+                font-size: 12px;
+                color: #bdbdbd;
+                text-align: center;
+                padding: 2px 0;
+            }
+
+            .${p}-btn {
+                background: #424242;
+                color: #eee;
+                border: 1px solid #616161;
+                border-radius: 4px;
+                padding: 8px 12px;
+                font-size: 13px;
+                font-weight: 400;
+                cursor: pointer;
+                transition: background 0.15s ease, opacity 0.15s ease;
+                font-family: inherit;
+            }
+
+            .${p}-btn:hover { background: #616161; }
+
+            .${p}-btn-primary {
+                background: #ff9800;
+                color: #212121;
+                border-color: #ff9800;
+                font-weight: 700;
+            }
+
+            .${p}-btn-primary:hover { background: #ffb74d; }
+
+            .${p}-btn-danger {
+                background: transparent;
+                color: #ef5350;
+                border-color: #ef5350;
+                font-size: 11px;
+                padding: 4px 8px;
+            }
+
+            .${p}-btn-danger:hover {
+                background: #ef5350;
+                color: #fff;
+            }
+
+            #${p}-delays {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+                border-top: 1px solid #424242;
+                padding-top: 8px;
+                margin-top: 2px;
+            }
+
+            .${p}-delay-row {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+
+            .${p}-delay-label {
+                font-size: 11px;
+                color: #9e9e9e;
+                flex: 1;
+                margin: 0;
+            }
+
+            .${p}-delay-input {
+                width: 60px;
+                background: #333;
+                color: #eee;
+                border: 1px solid #616161;
+                border-radius: 3px;
+                padding: 2px 4px;
+                font-size: 12px;
+                font-family: inherit;
+                text-align: right;
+            }
+
+            .${p}-delay-unit {
+                font-size: 11px;
+                color: #757575;
+            }
+
+            #${p}-status {
+                font-size: 12px;
+                color: #9e9e9e;
+                text-align: center;
+                min-height: 16px;
+            }
+
+            #${p}-status.${p}-status--ok { color: #81c784; }
+            #${p}-status.${p}-status--error { color: #ef5350; font-weight: 700; }
+        `)
+    }
+    // </autoclaim-kit>
+
     // ═══════════════════════════════════════════════════════════════════
     //  STATE
     // ═══════════════════════════════════════════════════════════════════
@@ -384,10 +698,6 @@
     // ═══════════════════════════════════════════════════════════════════
     //  PAGE HELPERS
     // ═══════════════════════════════════════════════════════════════════
-
-    function sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms))
-    }
 
     function getCurrentPage() {
         const params = new URLSearchParams(window.location.search)
@@ -538,29 +848,18 @@
     //  UI
     // ═══════════════════════════════════════════════════════════════════
 
-    let panelEl      = null
-    let statusEl     = null
-    let counterEl    = null
-    let claimAllBtn  = null
-    let claimPageBtn = null
-
-    function updateStatus(text, isError = false) {
-        if (!statusEl) return
-        statusEl.textContent = text
-        statusEl.classList.toggle('ica-status--error', Boolean(isError))
-    }
+    let panelEl            = null
+    let counterEl          = null
+    let claimAllBtn        = null
+    let claimPageBtn       = null
+    let itchStylesInjected = false
 
     function updateCounter(n) {
         if (counterEl) counterEl.textContent = `${n} claimed total`
     }
 
     function setButtonsEnabled(enabled) {
-        ;[claimAllBtn, claimPageBtn].forEach(btn => {
-            if (!btn) return
-            btn.disabled = !enabled
-            btn.style.opacity = enabled ? '1' : '0.5'
-            btn.style.pointerEvents = enabled ? 'auto' : 'none'
-        })
+        setControlsEnabled([claimAllBtn, claimPageBtn], enabled)
     }
 
     function makeProgressCallback() {
@@ -606,7 +905,7 @@
             isMultiPageRun = false
             updateStatus(
                 `Halted after ${MAX_CONSECUTIVE_FAILURES} failures: ${errorReason}`,
-                true,
+                'error',
             )
             updateCounter(state.totalClaimed)
             setButtonsEnabled(true)
@@ -662,7 +961,7 @@
         if (halted) {
             updateStatus(
                 `Halted after ${MAX_CONSECUTIVE_FAILURES} failures: ${errorReason}`,
-                true,
+                'error',
             )
         } else if (claimedThisPage > 0) {
             updateStatus(`Done — claimed ${claimedThisPage} game(s) on this page`)
@@ -672,30 +971,15 @@
     }
 
     function createPanel() {
-        panelEl = document.createElement('div')
-        panelEl.id = 'ica-panel'
-
-        const header = document.createElement('div')
-        header.id = 'ica-header'
-
-        const title = document.createElement('div')
-        title.id = 'ica-title'
-        title.textContent = 'Itch Autoclaim'
-        header.appendChild(title)
-
-        const closeBtn = document.createElement('button')
-        closeBtn.id = 'ica-close-btn'
-        closeBtn.textContent = '\u00D7'
-        closeBtn.title = 'Close panel'
-        closeBtn.addEventListener('click', () => {
-            runAborted = true
-            isMultiPageRun = false
-            clearState()
-            panelEl.remove()
-        })
-        header.appendChild(closeBtn)
-
-        panelEl.appendChild(header)
+        panelEl = buildPanelShell('Itch Autoclaim')
+        const closeBtn = panelEl.querySelector('#ica-close-btn')
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                runAborted = true
+                isMultiPageRun = false
+                clearState()
+            })
+        }
 
         claimAllBtn = document.createElement('button')
         claimAllBtn.id = 'ica-claim-all-btn'
@@ -711,10 +995,7 @@
         claimPageBtn.addEventListener('click', runClaimThisPage)
         panelEl.appendChild(claimPageBtn)
 
-        statusEl = document.createElement('div')
-        statusEl.id = 'ica-status'
-        statusEl.textContent = 'Ready'
-        panelEl.appendChild(statusEl)
+        createStatusLine(panelEl, 'Ready')
 
         counterEl = document.createElement('div')
         counterEl.id = 'ica-counter'
@@ -725,93 +1006,28 @@
     }
 
     function injectStyles() {
+        injectPanelStyles()
+        if (itchStylesInjected) return
+        itchStylesInjected = true
         GM_addStyle(`
             #ica-panel {
-                position: fixed;
-                bottom: 20px;
-                right: 20px;
-                z-index: 10000;
-                background: #2b2b2b;
-                border: 1px solid #424242;
-                border-radius: 8px;
-                padding: 12px 16px;
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
                 min-width: 210px;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
                 font-family: 'Itch Sans', 'Helvetica Neue', Helvetica, sans-serif;
-                font-size: 14px;
-                color: #eee;
-            }
-
-            #ica-header {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
             }
 
             #ica-title {
-                font-weight: 700;
-                font-size: 13px;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
                 color: #FA5C5C;
-                flex: 1;
-                text-align: center;
-                padding-left: 20px;
-            }
-
-            #ica-close-btn {
-                background: none;
-                border: none;
-                color: #757575;
-                font-size: 18px;
-                cursor: pointer;
-                padding: 0;
-                line-height: 1;
-                width: 20px;
-                font-family: inherit;
-            }
-
-            #ica-close-btn:hover {
-                color: #eee;
-            }
-
-            .ica-btn {
-                background: #424242;
-                color: #eee;
-                border: 1px solid #616161;
-                border-radius: 4px;
-                padding: 8px 12px;
-                font-size: 13px;
-                font-weight: 400;
-                cursor: pointer;
-                transition: background 0.15s ease, opacity 0.15s ease;
-                font-family: inherit;
-            }
-
-            .ica-btn:hover {
-                background: #616161;
             }
 
             .ica-btn-primary {
                 background: #FA5C5C;
                 color: #fff;
                 border-color: #FA5C5C;
-                font-weight: 700;
             }
 
             .ica-btn-primary:hover {
                 background: #e04848;
                 border-color: #e04848;
-            }
-
-            #ica-status {
-                font-size: 12px;
-                color: #9e9e9e;
-                text-align: center;
-                min-height: 16px;
             }
 
             #ica-status.ica-status--error {
