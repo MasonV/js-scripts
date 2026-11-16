@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Odoo HEIC to JPEG
 // @namespace    odoo-heic-to-jpeg
-// @version      1.4.0
+// @version      1.4.1
 // @description  Converts HEIC/HEIF images to JPEG client-side before Odoo uploads them
 // @match        *://*.odoo.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -360,22 +360,41 @@
 				var key = entries[i][0]
 				var value = entries[i][1]
 				if (value instanceof Blob && isHeic(value)) {
-					conversions.push({ key: key, blob: value })
+					conversions.push({ index: i, key: key, blob: value })
 				}
 			}
 
 			if (conversions.length === 0) return Promise.resolve()
 
+			var replacements = {}
+			var affectedKeys = {}
 			var promises = conversions.map(function (item) {
+				affectedKeys[item.key] = true
 				return convertBlob(item.blob).then(function (jpeg) {
-					formData.delete(item.key)
-					formData.append(item.key, jpeg, jpeg.name)
+					replacements[item.index] = jpeg
 				}).catch(function (err) {
 					console.error(LOG, 'FormData conversion failed for', item.blob.name, err)
+					replacements[item.index] = item.blob
 				})
 			})
 
 			return Promise.all(promises).then(function () {
+				var keys = Object.keys(affectedKeys)
+				for (var k = 0; k < keys.length; k++) {
+					formData.delete(keys[k])
+				}
+				for (var j = 0; j < entries.length; j++) {
+					var entryKey = entries[j][0]
+					if (!affectedKeys[entryKey]) continue
+					var val = Object.prototype.hasOwnProperty.call(replacements, j)
+						? replacements[j]
+						: entries[j][1]
+					if (val instanceof Blob) {
+						formData.append(entryKey, val, val.name || 'blob')
+					} else {
+						formData.append(entryKey, val)
+					}
+				}
 				showToast('Converted ' + conversions.length + ' HEIC image' + (conversions.length > 1 ? 's' : '') + ' to JPEG')
 			})
 		}
