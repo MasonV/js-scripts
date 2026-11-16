@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YourTube
 // @namespace    yourtube
-// @version      1.2.0
+// @version      1.2.1
 // @description  YouTube without the garbage — duration filtering, and more features to come
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -12,7 +12,7 @@
 // @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/yourtube/yourtube.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
-// @grant        unsafeWindow
+// @grant        GM_registerMenuCommand
 // @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
@@ -735,6 +735,12 @@
 				observer = null
 				flog.log('Observer torn down')
 			}
+			// YouTube recycles ytd-rich-item-renderer elements across routes, so
+			// strip hidden classes before leaving /feed/subscriptions.
+			document.querySelectorAll('.' + HIDDEN_CLASS).forEach((el) => {
+				el.classList.remove(HIDDEN_CLASS)
+			})
+			lastScanSignature = ''
 		}
 
 		function init() {
@@ -771,251 +777,6 @@
 	//
 	//  Next milestone: dual-handle slider with user notches table.
 	// ═══════════════════════════════════════════════════════════════════
-
-	// ═══════════════════════════════════════════════════════════════════
-	//  DEBUG PROBE — multi-variant UI mount test
-	//
-	//  The v1.1.1 production UI isn't appearing for the user. This probe
-	//  mounts five highly-visible debug markers using different DOM mount
-	//  strategies so we can see which approach survives on their specific
-	//  YouTube setup. When the user reports which markers are visible
-	//  (and which aren't), we'll know exactly which mount strategy to
-	//  adopt for the real gear button.
-	//
-	//  Variants:
-	//    A (red)     — document.body.appendChild (current strategy)
-	//    B (orange)  — document.documentElement.appendChild (sibling of body)
-	//    C (yellow)  — ytd-app.appendChild (into YouTube's app shell)
-	//    D (green)   — Shadow DOM (impervious to YT's CSS leakage)
-	//    E (purple)  — full-width top bar, prepended to body
-	//
-	//  Each marker is inline-styled (no GM_addStyle dependency), placed at
-	//  fixed position with max-int z-index, and clickable. Clicking any
-	//  marker pops an alert() — if that works, event wiring is intact.
-	//  The probe retries every 500ms for the first ~10s and audits the
-	//  DOM every 2s for 30s, logging which markers survived.
-	// ═══════════════════════════════════════════════════════════════════
-
-	const DebugProbe = (() => {
-		const dlog = makeLogger('[YourTube/Debug]')
-		const PROBE_PREFIX = 'yourtube-debug-probe-'
-
-		// Fires BEFORE any deferred work. If this line is missing from the
-		// console, the script didn't even reach the probe definition.
-		dlog.log('⭐ MODULE LOADED at', new Date().toISOString())
-
-		// Creates a fixed-position badge element. Uses setAttribute('style')
-		// rather than style.cssText so it's impossible for YT's CSS or our
-		// own stylesheet to override critical positioning.
-		function makeBadge(id, label, bg, color, posCss) {
-			const el = document.createElement('div')
-			el.id = PROBE_PREFIX + id
-			el.textContent = label
-			el.setAttribute(
-				'style',
-				[
-					'position: fixed',
-					posCss,
-					`background: ${bg}`,
-					`color: ${color}`,
-					'padding: 8px 14px',
-					'font: bold 13px/1 monospace',
-					'z-index: 2147483647',
-					'border-radius: 6px',
-					'border: 2px solid #fff',
-					'box-shadow: 0 2px 12px rgba(0,0,0,0.7)',
-					'cursor: pointer',
-					'pointer-events: auto',
-					'user-select: none',
-				].join('; '),
-			)
-			el.addEventListener('click', () => {
-				dlog.log(`Marker ${id} clicked`)
-				try {
-					alert(`[YourTube Debug] Marker ${id} is alive and clickable.`)
-				} catch (_) {}
-			})
-			return el
-		}
-
-		function tryA_Body() {
-			try {
-				if (document.getElementById(PROBE_PREFIX + 'A')) return
-				if (!document.body) {
-					dlog.warn('A (body): document.body missing')
-					return
-				}
-				document.body.appendChild(
-					makeBadge('A', 'A: BODY', '#e53935', '#fff', 'top: 8px; left: 8px'),
-				)
-				dlog.log('✅ A (body): mounted')
-			} catch (e) {
-				dlog.warn('A (body): failed', e)
-			}
-		}
-
-		function tryB_DocElement() {
-			try {
-				if (document.getElementById(PROBE_PREFIX + 'B')) return
-				document.documentElement.appendChild(
-					makeBadge('B', 'B: HTML', '#fb8c00', '#fff', 'top: 8px; left: 130px'),
-				)
-				dlog.log('✅ B (html): mounted')
-			} catch (e) {
-				dlog.warn('B (html): failed', e)
-			}
-		}
-
-		function tryC_YtdApp() {
-			try {
-				if (document.getElementById(PROBE_PREFIX + 'C')) return
-				const host = document.querySelector('ytd-app')
-				if (!host) {
-					dlog.warn('C (ytd-app): ytd-app element not found')
-					return
-				}
-				host.appendChild(
-					makeBadge('C', 'C: YTD-APP', '#fdd835', '#000', 'top: 8px; left: 260px'),
-				)
-				dlog.log('✅ C (ytd-app): mounted')
-			} catch (e) {
-				dlog.warn('C (ytd-app): failed', e)
-			}
-		}
-
-		function tryD_Shadow() {
-			try {
-				if (document.getElementById(PROBE_PREFIX + 'D-host')) return
-				if (!document.body) {
-					dlog.warn('D (shadow): document.body missing')
-					return
-				}
-				const host = document.createElement('div')
-				host.id = PROBE_PREFIX + 'D-host'
-				host.setAttribute(
-					'style',
-					'position: fixed; top: 8px; left: 400px; z-index: 2147483647;',
-				)
-				const root = host.attachShadow({ mode: 'open' })
-				const style = document.createElement('style')
-				style.textContent = `
-					.marker {
-						background: #43a047;
-						color: #fff;
-						padding: 8px 14px;
-						font: bold 13px/1 monospace;
-						border-radius: 6px;
-						border: 2px solid #fff;
-						box-shadow: 0 2px 12px rgba(0,0,0,0.7);
-						cursor: pointer;
-						user-select: none;
-					}
-				`
-				const badge = document.createElement('div')
-				badge.className = 'marker'
-				badge.textContent = 'D: SHADOW'
-				badge.addEventListener('click', () => {
-					dlog.log('Marker D clicked')
-					try {
-						alert('[YourTube Debug] Marker D (shadow DOM) is alive.')
-					} catch (_) {}
-				})
-				root.appendChild(style)
-				root.appendChild(badge)
-				document.body.appendChild(host)
-				dlog.log('✅ D (shadow): mounted')
-			} catch (e) {
-				dlog.warn('D (shadow): failed', e)
-			}
-		}
-
-		function tryE_TopBar() {
-			try {
-				if (document.getElementById(PROBE_PREFIX + 'E')) return
-				if (!document.body) {
-					dlog.warn('E (top-bar): document.body missing')
-					return
-				}
-				const el = document.createElement('div')
-				el.id = PROBE_PREFIX + 'E'
-				el.textContent =
-					'[YourTube DEBUG] v1.1.2 LOADED — click this bar to confirm script is running'
-				el.setAttribute(
-					'style',
-					[
-						'position: fixed',
-						'top: 0',
-						'left: 0',
-						'right: 0',
-						'background: #6a1b9a',
-						'color: #fff',
-						'padding: 12px 16px',
-						'font: bold 14px/1.2 sans-serif',
-						'z-index: 2147483647',
-						'text-align: center',
-						'border-bottom: 3px solid #fff',
-						'box-shadow: 0 2px 20px rgba(0,0,0,0.8)',
-						'cursor: pointer',
-						'pointer-events: auto',
-						'user-select: none',
-					].join('; '),
-				)
-				el.addEventListener('click', () => {
-					dlog.log('Marker E clicked')
-					try {
-						alert('[YourTube Debug] Marker E (top bar) is alive.')
-					} catch (_) {}
-				})
-				document.body.appendChild(el)
-				dlog.log('✅ E (top-bar): mounted')
-			} catch (e) {
-				dlog.warn('E (top-bar): failed', e)
-			}
-		}
-
-		function audit(label) {
-			const present = []
-			const missing = []
-			for (const id of ['A', 'B', 'C', 'D', 'E']) {
-				const lookup = id === 'D' ? PROBE_PREFIX + 'D-host' : PROBE_PREFIX + id
-				if (document.getElementById(lookup)) {
-					present.push(id)
-				} else {
-					missing.push(id)
-				}
-			}
-			dlog.log(
-				`📊 AUDIT [${label}] present: [${present.join(', ') || 'none'}] | missing: [${missing.join(', ') || 'none'}]`,
-			)
-		}
-
-		function mountAll() {
-			tryA_Body()
-			tryB_DocElement()
-			tryC_YtdApp()
-			tryD_Shadow()
-			tryE_TopBar()
-		}
-
-		function init() {
-			dlog.log('init() called — launching probes')
-			mountAll()
-			// Retry cadence: catches cases where body/ytd-app appear after
-			// our first attempt, or where YT clobbers our mount.
-			const retries = [200, 500, 1000, 2000, 4000, 7000, 10000]
-			for (const delay of retries) {
-				setTimeout(() => {
-					mountAll()
-					audit(`${delay}ms`)
-				}, delay)
-			}
-			// Long-running audit to see if YT removes our markers later.
-			setTimeout(() => audit('15s'), 15000)
-			setTimeout(() => audit('30s'), 30000)
-		}
-
-		return { init, mountAll, audit }
-	})()
 
 	const SettingsUI = (() => {
 		const ulog = makeLogger('[YourTube/UI]')
@@ -1400,9 +1161,9 @@
 
 		// localStorage key that remembers whether the user dismissed the
 		// header pill. When set, mountGear() is a no-op and the self-heal
-		// observer won't remount — the user explicitly said "hide me". A
-		// dev-exposed `__yourtube_showHeader()` clears the flag so the
-		// user can recover from the console if they want the pill back.
+		// observer won't remount — the user explicitly said "hide me". The
+		// Tampermonkey menu command "Restore YourTube Header Pill" clears
+		// the flag so the user can recover anytime.
 		const HEADER_HIDDEN_KEY = 'yourtube_header_hidden_v1'
 
 		function isHeaderHidden() {
@@ -1457,7 +1218,7 @@
 			if (document.getElementById(GEAR_ID)) return false
 			// Respect the "dismissed" flag — if the user explicitly closed
 			// the pill, don't fight them by remounting. Recovery path is
-			// __yourtube_showHeader() from the devtools console.
+			// the Tampermonkey menu command "Restore YourTube Header Pill".
 			if (isHeaderHidden()) return false
 			// Mount target is document.documentElement (the <html> element),
 			// not document.body. The v1.1.2 debug probe proved that YouTube
@@ -1516,7 +1277,7 @@
 			closeBtn.setAttribute('aria-label', 'Hide YourTube header')
 			closeBtn.setAttribute(
 				'title',
-				'Hide header (run __yourtube_showHeader() in console to restore)',
+				'Hide header (use Tampermonkey menu "Restore YourTube Header Pill" to restore)',
 			)
 			closeBtn.textContent = '\u00d7' // ×
 
@@ -1529,7 +1290,7 @@
 				e.stopPropagation()
 				setHeaderHidden(true)
 				pill.remove()
-				ulog.log('Header hidden — restore with __yourtube_showHeader()')
+				ulog.log('Header hidden — restore via Tampermonkey menu "Restore YourTube Header Pill"')
 			})
 			root.appendChild(pill)
 			ulog.log('Gear mounted (header pill)')
@@ -1538,8 +1299,8 @@
 
 		/**
 		 * Clears the hidden flag and force-remounts the pill. Used by the
-		 * dev expose `__yourtube_showHeader()` for console-based recovery
-		 * if the user dismissed the header and wants it back.
+		 * Tampermonkey menu command if the user dismissed the header and
+		 * wants it back.
 		 */
 		function showHeader() {
 			setHeaderHidden(false)
@@ -1842,6 +1603,23 @@
 				ulog.warn('Apply blocked — one or more fields cannot be parsed')
 				return
 			}
+			const shorterInput = document.getElementById(FIELD_SHORTER)
+			const longerInput = document.getElementById(FIELD_LONGER)
+			shorterInput?.classList.remove('yourtube-error')
+			longerInput?.classList.remove('yourtube-error')
+			if (shorter.value != null && longer.value != null && shorter.value > longer.value) {
+				shorterInput?.classList.add('yourtube-error')
+				longerInput?.classList.add('yourtube-error')
+				const longerPreview = document.querySelector(
+					`.yourtube-preview[data-preview-for="${FIELD_LONGER}"]`,
+				)
+				if (longerPreview) {
+					longerPreview.className = 'yourtube-preview yourtube-preview-error'
+					longerPreview.textContent = 'must be \u2265 minimum duration'
+				}
+				ulog.warn('Apply blocked — shorterThan exceeds longerThan')
+				return
+			}
 			const next = {
 				...getSettings(),
 				duration: {
@@ -1997,24 +1775,7 @@
 	//  ROUTING / INIT
 	// ═══════════════════════════════════════════════════════════════════
 
-	// Opt-in flag: set `localStorage.setItem('yourtube_debug_probe_v1', '1')`
-	// in the devtools console and reload to enable the DebugProbe for UI
-	// mount diagnostics. Defaults to off so the markers don't clutter the
-	// page in normal use.
-	function isDebugProbeEnabled() {
-		try {
-			return localStorage.getItem('yourtube_debug_probe_v1') === '1'
-		} catch (_) {
-			return false
-		}
-	}
-
 	function runFeatures() {
-		if (isDebugProbeEnabled()) {
-			// Probe runs FIRST so we see mount results even if the
-			// real SettingsUI mount crashes later in the chain.
-			DebugProbe.init()
-		}
 		SettingsUI.init()
 		DurationFilter.init()
 		// Future features register here.
@@ -2022,6 +1783,11 @@
 
 	selfTestParser()
 	runFeatures()
+
+	if (typeof GM_registerMenuCommand === 'function') {
+		GM_registerMenuCommand('Open YourTube Settings', () => SettingsUI.openPanel())
+		GM_registerMenuCommand('Restore YourTube Header Pill', () => SettingsUI.showHeader())
+	}
 
 	// YouTube is a SPA. On client-side navigation, YT can tear down
 	// and rebuild large sections of the DOM — including our mounted
@@ -2057,61 +1823,6 @@
 
 	log(
 		`Initialized v${SCRIPT_VERSION} — look for the "YourTube" pill top-right of the page. ` +
-			`Click × on the pill to hide it; run __yourtube_showHeader() in this console to restore.`,
+			`Click × on the pill to hide it; use the Tampermonkey menu "Restore YourTube Header Pill" to restore.`,
 	)
-
-	// Dev-only exposes for in-browser inspection. Removed before shipping.
-	// Firefox's content script sandbox wraps function references crossing the
-	// boundary — direct assignment to unsafeWindow gives the page side a wrapper
-	// it can't call. exportFunction() is Firefox's official escape hatch.
-	// Chrome's Tampermonkey doesn't need it, so we fall back to direct assignment.
-	function devExpose(name, fn) {
-		if (typeof exportFunction === 'function') {
-			exportFunction(fn, unsafeWindow, { defineAs: name })
-		} else {
-			unsafeWindow[name] = fn
-		}
-	}
-	devExpose('__yourtube_parseDuration', parseDuration)
-	devExpose('__yourtube_formatDuration', formatDuration)
-	devExpose('__yourtube_getSettings', getSettings)
-	devExpose('__yourtube_applyFilter', DurationFilter.applyFilter)
-
-	// Recovery command: if the user dismissed the header pill and wants
-	// it back, they can run `__yourtube_showHeader()` from the devtools
-	// console. Not a "dev-only" expose — this is the only re-entry point
-	// once the pill is hidden, so it ships with the script.
-	devExpose('__yourtube_showHeader', () => {
-		try {
-			SettingsUI.showHeader()
-			console.log('[YourTube] Header restored')
-		} catch (e) {
-			console.warn('[YourTube] Failed to restore header:', e)
-		}
-	})
-
-	// Toggles for the UI-mount debug probe. Use from devtools console:
-	//   __yourtube_enableDebugProbe()  then reload
-	//   __yourtube_disableDebugProbe() then reload
-	// The probe mounts labeled test badges using five different DOM
-	// strategies so we can diagnose future UI insertion failures on
-	// YouTube variants or page layouts where our current approach breaks.
-	devExpose('__yourtube_enableDebugProbe', () => {
-		try {
-			localStorage.setItem('yourtube_debug_probe_v1', '1')
-			console.log('[YourTube] Debug probe ENABLED — reload the page')
-		} catch (e) {
-			console.warn('[YourTube] Failed to enable debug probe:', e)
-		}
-	})
-	devExpose('__yourtube_disableDebugProbe', () => {
-		try {
-			localStorage.removeItem('yourtube_debug_probe_v1')
-			console.log('[YourTube] Debug probe DISABLED — reload the page')
-		} catch (e) {
-			console.warn('[YourTube] Failed to disable debug probe:', e)
-		}
-	})
-	// Also allow invoking the probe one-shot without persisting the flag.
-	devExpose('__yourtube_runDebugProbe', () => DebugProbe.init())
 })()
