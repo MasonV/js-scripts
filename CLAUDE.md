@@ -106,7 +106,6 @@ Code that more than one script needs is kept once in `tools/blocks/` and copied 
 | --- | --- | --- |
 | `autoclaim-kit` | `sleep`, `waitFor`, visible-button lookup, `maskKey`/`normalizeKey`; the floating panel (`buildPanelShell`, `createStatusLine`, `updateStatus`, `createDelayInput`, `setControlsEnabled`, `removePanel`) and its base CSS (`injectPanelStyles`) | `UI_PREFIX` (e.g. `'lac'` → `#lac-panel`); `@grant GM_addStyle` |
 | `steam-redeem` | `STEAM_KEY_RE`, `steamRedeemUrl(key)`, `findSteamKeys()` | nothing |
-| `gog-redeem` | Store side `sendToGogRedeem(url, game)`; gog.com side `runGogRedemption()` (Continue → Redeem, exactly once, "Ask first" by default); `isGogHost()` | `autoclaim-kit`, `KEY_PREFIX`, `log`, `warn`, `checkForUpdate`; `@match https://www.gog.com/*`; `@grant GM_getValue`, `GM_setValue`, `GM_deleteValue` |
 
 Place `autoclaim-kit` before any block that uses it. Changing a template changes every script that includes it, so each of those scripts needs its own version bump in the same commit.
 

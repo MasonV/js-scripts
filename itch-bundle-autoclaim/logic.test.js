@@ -33,6 +33,9 @@ function loadPureLogic() {
             computeBackoffDelayMs,
             pruneClaimTimestamps,
             computeRateCapWaitMs,
+            recordClaimOutcome,
+            shouldWaitAfterAttempt,
+            buildClearedState,
         };
     `)
     return factory()
@@ -45,6 +48,9 @@ const {
     computeBackoffDelayMs,
     pruneClaimTimestamps,
     computeRateCapWaitMs,
+    recordClaimOutcome,
+    shouldWaitAfterAttempt,
+    buildClearedState,
 } = loadPureLogic()
 
 describe('parseRetryAfterMs', () => {
@@ -198,5 +204,63 @@ describe('pruneClaimTimestamps & computeRateCapWaitMs', () => {
         const now = 100_000
         const stamps = [10_000, 39_999, 40_000, 40_001, 99_500]
         assert.deepEqual(pruneClaimTimestamps(stamps, now, 60_000), [40_001, 99_500])
+    })
+})
+
+describe('recordClaimOutcome & shouldWaitAfterAttempt', () => {
+    test('accumulates consecutive failures across page boundaries and halts at 3', () => {
+        // Page 1 has 1 failing form, persisted as consecutiveFailures = 1
+        const page1 = recordClaimOutcome(0, false)
+        assert.deepEqual(page1, { consecutiveFailures: 1, halted: false })
+
+        // Page 2 starts with persisted failure count 1 and fails twice more
+        const page2First = recordClaimOutcome(page1.consecutiveFailures, false)
+        assert.deepEqual(page2First, { consecutiveFailures: 2, halted: false })
+
+        const page2Second = recordClaimOutcome(page2First.consecutiveFailures, false)
+        assert.deepEqual(page2Second, { consecutiveFailures: 3, halted: true })
+    })
+
+    test('resets consecutive failure counter on a successful claim', () => {
+        assert.deepEqual(recordClaimOutcome(2, true), { consecutiveFailures: 0, halted: false })
+        assert.deepEqual(recordClaimOutcome(undefined, false), { consecutiveFailures: 1, halted: false })
+    })
+
+    test('waits after the last form of a page when a failure occurred, but not on last-form success', () => {
+        // Non-last form always waits (0-based index < total - 1)
+        assert.equal(shouldWaitAfterAttempt(0, 3, 0), true)
+        assert.equal(shouldWaitAfterAttempt(1, 3, 0), true)
+
+        // Last form with 0 failures skips extra claim sleep (NAV_DELAY_MS handles page pause)
+        assert.equal(shouldWaitAfterAttempt(2, 3, 0), false)
+        assert.equal(shouldWaitAfterAttempt(0, 1, 0), false)
+
+        // Last form with failure MUST await backoff / Retry-After before navigating
+        assert.equal(shouldWaitAfterAttempt(2, 3, 1), true)
+        assert.equal(shouldWaitAfterAttempt(0, 1, 2), true)
+    })
+})
+
+describe('buildClearedState', () => {
+    test('resets run flags while preserving recent claimTimestamps for rate limiting', () => {
+        const now = 100_000
+        const cleared = buildClearedState(
+            {
+                active: true,
+                totalClaimed: 15,
+                pagesVisited: 3,
+                consecutiveFailures: 2,
+                claimTimestamps: [10_000, 50_000, 90_000],
+            },
+            now,
+            60_000,
+        )
+        assert.deepEqual(cleared, {
+            active: false,
+            totalClaimed: 0,
+            pagesVisited: 0,
+            consecutiveFailures: 0,
+            claimTimestamps: [50_000, 90_000],
+        })
     })
 })

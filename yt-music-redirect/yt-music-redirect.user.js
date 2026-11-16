@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.4.0
+// @version      1.4.2
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.meta.js
 // @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/yt-music-redirect/yt-music-redirect.user.js
+// @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
@@ -262,37 +263,62 @@
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
-	//  VIDEO DETECTION
+	//  PURE LOGIC
 	// ═══════════════════════════════════════════════════════════════════
 
-	/** @returns {string|null} Video ID from the current URL */
-	function getVideoId() {
-		const params = new URLSearchParams(window.location.search)
+	/** @returns {string|null} Video ID from a query string */
+	function getVideoId(search = window.location.search) {
+		const params = new URLSearchParams(search)
 		return params.get('v')
 	}
 
+	function extractVideoDetailsFromPlayerResponse(resp, expectedVideoId) {
+		if (!resp || !resp.videoDetails) return null
+		if (expectedVideoId && resp.videoDetails.videoId !== expectedVideoId) return null
+		// YouTube moved category out of videoDetails into microformat at some point;
+		// fall back through both locations.
+		const category =
+			resp.microformat?.playerMicroformatRenderer?.category ||
+			resp.videoDetails.category ||
+			null
+		return {
+			category,
+			channelId: resp.videoDetails.channelId || null,
+			channelName: resp.videoDetails.author || null,
+		}
+	}
+
+	function isMusicFromPlayerResponse(resp, expectedVideoId) {
+		const details = extractVideoDetailsFromPlayerResponse(resp, expectedVideoId)
+		return Boolean(details && details.category === 'Music')
+	}
+
+	function parsePlayerResponseFromHtml(html) {
+		const text = String(html || '')
+		return {
+			category: text.match(/"category":"([^"]+)"/)?.[1] || null,
+			channelId: text.match(/"channelId":"([^"]+)"/)?.[1] || null,
+			channelName: text.match(/"author":"([^"]+)"/)?.[1] || null,
+		}
+	}
+
+	// ═══════════════════════════════════════════════════════════════════
+	//  VIDEO DETECTION
+	// ═══════════════════════════════════════════════════════════════════
+
 	/**
-	 * Reads video details from YouTube's embedded player response.
-	 * Returns details only when the response matches the requested video ID
-	 * (guards against stale data during SPA navigation).
+	 * Reads video details from YouTube's live player element or embedded
+	 * player response. Returns details only when the response matches the
+	 * requested video ID (guards against stale data during SPA navigation).
 	 */
 	function getVideoDetails(videoId) {
 		// unsafeWindow needed because GM_xmlhttpRequest grant puts us in sandbox
-		const resp = unsafeWindow.ytInitialPlayerResponse
-		if (resp?.videoDetails?.videoId === videoId) {
-			// YouTube moved category out of videoDetails into microformat at some point;
-			// fall back through both locations.
-			const category =
-				resp.microformat?.playerMicroformatRenderer?.category ||
-				resp.videoDetails.category ||
-				null
-			return {
-				category,
-				channelId: resp.videoDetails.channelId || null,
-				channelName: resp.videoDetails.author || null,
-			}
-		}
-		return null
+		const pageDoc = unsafeWindow.document || document
+		const liveResp = pageDoc.getElementById('movie_player')?.getPlayerResponse?.()
+		return (
+			extractVideoDetailsFromPlayerResponse(liveResp, videoId) ||
+			extractVideoDetailsFromPlayerResponse(unsafeWindow.ytInitialPlayerResponse, videoId)
+		)
 	}
 
 	/**
@@ -303,11 +329,7 @@
 		try {
 			const resp = await fetch(`/watch?v=${videoId}`, { credentials: 'omit' })
 			const html = await resp.text()
-			return {
-				category: html.match(/"category":"([^"]+)"/)?.[1] || null,
-				channelId: html.match(/"channelId":"([^"]+)"/)?.[1] || null,
-				channelName: html.match(/"author":"([^"]+)"/)?.[1] || null,
-			}
+			return parsePlayerResponseFromHtml(html)
 		} catch (e) {
 			warn('Failed to fetch video details:', e)
 			return { category: null, channelId: null, channelName: null }
@@ -320,6 +342,16 @@
 
 	// Tracks video IDs already evaluated this session to avoid repeat work
 	const checked = new Set()
+	let pollTimer = null
+	let activePollVideoId = null
+
+	function cancelPoll() {
+		if (pollTimer) {
+			clearTimeout(pollTimer)
+			pollTimer = null
+		}
+		activePollVideoId = null
+	}
 
 	function redirectToMusic(videoId) {
 		log(`Redirecting ${videoId} to YouTube Music`)
@@ -331,6 +363,8 @@
 	 * Channel list takes priority, then category check, then manual UI.
 	 */
 	function processVideoDetails(videoId, { category, channelId, channelName }) {
+		if (getVideoId() !== videoId) return
+
 		if (!category && !channelId) {
 			warn(`Could not determine details for ${videoId}`)
 			injectRedirectButton(videoId, null, null)
@@ -360,22 +394,27 @@
 	}
 
 	function handleWatch() {
+		cancelPoll()
 		const videoId = getVideoId()
 		if (!videoId || checked.has(videoId)) return
 
+		activePollVideoId = videoId
 		log(`Checking details for ${videoId}`)
 		pollForDetails(videoId, MAX_POLL_ATTEMPTS)
 	}
 
 	/**
-	 * Polls ytInitialPlayerResponse until it reflects the current video.
+	 * Polls player response until it reflects the current video.
 	 * Falls back to a page fetch if polling times out — this covers SPA
 	 * navigations where YouTube doesn't update the global.
 	 */
 	function pollForDetails(videoId, remaining) {
+		if (activePollVideoId !== videoId || getVideoId() !== videoId) return
+
 		if (remaining <= 0) {
 			log(`Player response stale for ${videoId}, fetching page as fallback`)
 			fetchVideoDetails(videoId).then((details) => {
+				if (activePollVideoId !== videoId || getVideoId() !== videoId) return
 				checked.add(videoId)
 				processVideoDetails(videoId, details)
 			})
@@ -389,7 +428,10 @@
 			return
 		}
 
-		setTimeout(() => pollForDetails(videoId, remaining - 1), POLL_INTERVAL_MS)
+		pollTimer = setTimeout(() => {
+			pollTimer = null
+			pollForDetails(videoId, remaining - 1)
+		}, POLL_INTERVAL_MS)
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -398,13 +440,13 @@
 
 	const MENU_BTN_ID = 'ytmr-menu-btn'
 	const DROPDOWN_ID = 'ytmr-dropdown'
+	let stylesInjected = false
 
 	function injectStyles() {
-		if (document.getElementById('ytmr-styles')) return
+		if (stylesInjected) return
+		stylesInjected = true
 
-		const style = document.createElement('style')
-		style.id = 'ytmr-styles'
-		style.textContent = `
+		GM_addStyle(`
 			/* ── Floating icon button (fixed, below masthead) ── */
 			#${MENU_BTN_ID} {
 				position: fixed;
@@ -487,8 +529,7 @@
 				background: #444;
 				margin: 4px 0;
 			}
-		`
-		document.head.appendChild(style)
+		`)
 	}
 
 	function positionDropdown(btn, dropdown) {
@@ -677,6 +718,7 @@
 
 	// YouTube SPA navigation — fired after client-side route changes
 	document.addEventListener('yt-navigate-finish', () => {
+		cancelPoll()
 		// Clear cache so returning to the same video recreates the dropdown
 		checked.clear()
 		if (window.location.pathname === '/watch') {

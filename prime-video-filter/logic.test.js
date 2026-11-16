@@ -32,6 +32,10 @@ function loadPureLogic() {
 		'detailKey',
 		'formatRating',
 		'roundTo',
+		'parseRetryAfterMs',
+		'computeRatingBackoffMs',
+		'pruneRatingTimestamps',
+		'computeRatingRateWaitMs',
 	]
 	// eslint-disable-next-line no-new-func
 	return new Function(
@@ -193,4 +197,34 @@ test('formatRating and roundTo', () => {
 	// A title rated exactly at the threshold must survive it.
 	const at = { ...UNKNOWN, rating: 6.9, ratingSettled: true }
 	assert.equal(L.hideReason(at, { ...ALL_ON, minRating: L.roundTo(6.9, 0.1) }), null)
+})
+
+test('parseRetryAfterMs parses seconds and HTTP dates', () => {
+	const now = Date.parse('2026-11-15T12:00:00Z')
+	assert.equal(L.parseRetryAfterMs(null, now), 0)
+	assert.equal(L.parseRetryAfterMs('', now), 0)
+	assert.equal(L.parseRetryAfterMs('5', now), 5000)
+	assert.equal(L.parseRetryAfterMs('1.5', now), 1500)
+	assert.equal(L.parseRetryAfterMs('Sun, 15 Nov 2026 12:00:08 GMT', now), 8000)
+	assert.equal(L.parseRetryAfterMs('Sun, 15 Nov 2026 11:59:50 GMT', now), 0)
+})
+
+test('computeRatingBackoffMs applies exponential backoff and honours Retry-After', () => {
+	assert.equal(L.computeRatingBackoffMs(100, 0, 0, 10000), 100)
+	assert.equal(L.computeRatingBackoffMs(100, 1, 0, 10000), 200)
+	assert.equal(L.computeRatingBackoffMs(100, 2, 0, 10000), 400)
+	assert.equal(L.computeRatingBackoffMs(100, 8, 0, 10000), 10000)
+	assert.equal(L.computeRatingBackoffMs(100, 1, 6000, 10000), 6000)
+})
+
+test('pruneRatingTimestamps & computeRatingRateWaitMs enforce 60/min rate cap', () => {
+	const now = 100_000
+	const stamps = [10_000, 39_999, 40_000, 40_001, 99_500]
+	assert.deepEqual(L.pruneRatingTimestamps(stamps, now, 60_000), [40_001, 99_500])
+
+	const under = Array.from({ length: 59 }, (_, i) => now - i * 500)
+	assert.equal(L.computeRatingRateWaitMs(under, now, 60, 60_000), 0)
+
+	const atCap = Array.from({ length: 60 }, (_, i) => 60_000 + i * 500)
+	assert.equal(L.computeRatingRateWaitMs(atCap, now, 60, 60_000), 20_000)
 })

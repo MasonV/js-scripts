@@ -24,7 +24,6 @@ export const BLOCKS = [
   { name: 'update-check', template: 'tools/update-check.template.js', required: true },
   { name: 'autoclaim-kit', template: 'tools/blocks/autoclaim-kit.template.js' },
   { name: 'steam-redeem', template: 'tools/blocks/steam-redeem.template.js' },
-  { name: 'gog-redeem', template: 'tools/blocks/gog-redeem.template.js' },
 ]
 
 const SKIP_DIRS = new Set(['.git', '.claude', 'archive', 'node_modules', 'diagnostics'])

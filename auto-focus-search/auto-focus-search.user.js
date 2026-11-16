@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Auto Focus Search
 // @namespace    auto-focus-search
-// @version      1.1.0
+// @version      1.1.3
 // @description  Automatically detects and focuses search input fields on any webpage
 // @match        *://*/*
+// @noframes
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.meta.js
@@ -172,8 +173,24 @@
     //  SAFETY CHECKS
     // ═══════════════════════════════════════════════════════════════════
 
+    let _userInteracted = false
+
+    function setupInteractionTracking() {
+        const onUserInteract = (e) => {
+            if (e.type === 'keydown' && e.altKey && e.shiftKey) return
+            const target = e.target
+            if (target instanceof Element && target.closest(`#${INDICATOR_ID}, #${POPOVER_ID}`)) return
+            if (!_userInteracted) {
+                _userInteracted = true
+                stopObserver()
+            }
+        }
+        window.addEventListener('pointerdown', onUserInteract, true)
+        window.addEventListener('keydown', onUserInteract, true)
+    }
+
     function shouldFocus() {
-        if (isExcluded()) return false
+        if (isExcluded() || _userInteracted) return false
 
         const active = document.activeElement
         if (!active || active === document.body || active === document.documentElement) return true
@@ -214,8 +231,8 @@
         el.addEventListener('blur', _onBlur, { once: true })
     }
 
-    function attemptFocus() {
-        if (!shouldFocus()) {
+    function attemptFocus({ force = false } = {}) {
+        if (!force && !shouldFocus()) {
             logVerbose('Skipped focus (safety check)')
             return false
         }
@@ -227,6 +244,7 @@
         }
 
         el.focus({ preventScroll: true })
+        stopObserver()
         highlightElement(el)
         cycleIndex = 0
         const label = describeElement(el)
@@ -251,12 +269,69 @@
         showIndicator(label)
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    //  PURE LOGIC
+    // ═══════════════════════════════════════════════════════════════════
+
     function describeElement(el) {
-        const tag = el.tagName.toLowerCase()
+        const tag = (el.tagName || 'input').toLowerCase()
         const id = el.id ? `#${el.id}` : ''
         const name = el.name ? `[name="${el.name}"]` : ''
         const placeholder = el.placeholder ? `"${el.placeholder}"` : ''
         return `${tag}${id}${name} ${placeholder}`.trim()
+    }
+
+    function scoreCandidate(el) {
+        if (!el) return 0
+        const tag = String(el.tagName || '').toLowerCase()
+        if (tag && tag !== 'input' && tag !== 'textarea') return 0
+
+        const readAttr = (attr, prop) => {
+            if (typeof el.getAttribute === 'function') {
+                const v = el.getAttribute(attr)
+                if (v != null) return String(v)
+            }
+            return el[prop] != null ? String(el[prop]) : ''
+        }
+
+        const type = readAttr('type', 'type').toLowerCase()
+        if (type === 'hidden' || type === 'submit' || type === 'button' || type === 'checkbox' || type === 'radio') {
+            return 0
+        }
+
+        const inSearchRole = Boolean(
+            el.inSearchRole ||
+                (typeof el.closest === 'function' && el.closest('[role="search"]')),
+        )
+        const name = readAttr('name', 'name').toLowerCase()
+        const id = readAttr('id', 'id').toLowerCase()
+        const className = readAttr('class', 'className').toLowerCase()
+        const placeholder = readAttr('placeholder', 'placeholder').toLowerCase()
+        const ariaLabel = readAttr('aria-label', 'ariaLabel').toLowerCase()
+
+        let score = 0
+        if (inSearchRole) score += 100
+        if (type === 'search') score += 80
+        if (['q', 'query', 'search', 'search_query', 's'].includes(name)) score += 60
+        if (placeholder.includes('search') || ariaLabel.includes('search')) score += 40
+        if (
+            ['search-input', 'searchbox', 'search', 'q'].includes(id) ||
+            /\bsearch(?:-input|-box|-field)?\b/.test(className)
+        ) {
+            score += 20
+        }
+        return score
+    }
+
+    function isSearchPath(pathname = window.location.pathname, search = window.location.search) {
+        const path = String(pathname || '').toLowerCase()
+        if (/\/(?:search|results|find)(?:\/|$)/.test(path)) return true
+        const params = new URLSearchParams(String(search || ''))
+        for (const key of ['q', 'query', 'search', 'search_query', 's', 'k']) {
+            const val = params.get(key)
+            if (val != null && val.trim() !== '') return true
+        }
+        return false
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -332,11 +407,12 @@
             lastUrl = location.href
             logVerbose('SPA navigation detected')
             cycleIndex = -1
+            _userInteracted = false
+            stopObserver()
             hideIndicator()
             setTimeout(() => {
                 if (!isExcluded()) {
-                    attemptFocus()
-                    startObserver()
+                    if (!attemptFocus()) startObserver()
                 }
             }, FOCUS_DELAY_MS)
         }
@@ -384,7 +460,7 @@
             indicator.innerHTML = '<span class="afs-icon">&#128269;</span>'
             indicator.addEventListener('click', (e) => {
                 e.stopPropagation()
-                togglePopover(label)
+                togglePopover(indicator.dataset.label)
             })
             document.body.appendChild(indicator)
         }
@@ -442,52 +518,74 @@
         const excluded = isExcluded()
         const hostname = window.location.hostname
 
-        popover.innerHTML = `
-            <div class="afs-popover-header">
-                <span class="afs-popover-title">Auto Focus Search</span>
-                <button class="afs-popover-close">&times;</button>
-            </div>
-            <div class="afs-popover-body">
-                <div class="afs-popover-row">
-                    <span class="afs-popover-label">${hostname}</span>
-                    <button class="afs-popover-toggle ${excluded ? 'afs-off' : 'afs-on'}">
-                        ${excluded ? 'Disabled' : 'Enabled'}
-                    </button>
-                </div>
-                <div class="afs-popover-row afs-popover-element">
-                    <span class="afs-popover-label">Focused:</span>
-                    <code class="afs-popover-code">${displayLabel}</code>
-                </div>
-            </div>
-        `
+        const header = document.createElement('div')
+        header.className = 'afs-popover-header'
 
-        // Close button
-        popover.querySelector('.afs-popover-close').addEventListener('click', (e) => {
+        const titleEl = document.createElement('span')
+        titleEl.className = 'afs-popover-title'
+        titleEl.textContent = 'Auto Focus Search'
+
+        const closeBtn = document.createElement('button')
+        closeBtn.type = 'button'
+        closeBtn.className = 'afs-popover-close'
+        closeBtn.textContent = '\u00d7'
+        closeBtn.addEventListener('click', (e) => {
             e.stopPropagation()
             hidePopover()
             hideIndicator()
         })
 
-        // Toggle button
-        popover.querySelector('.afs-popover-toggle').addEventListener('click', (e) => {
+        header.append(titleEl, closeBtn)
+
+        const body = document.createElement('div')
+        body.className = 'afs-popover-body'
+
+        const siteRow = document.createElement('div')
+        siteRow.className = 'afs-popover-row'
+
+        const hostLabel = document.createElement('span')
+        hostLabel.className = 'afs-popover-label'
+        hostLabel.textContent = hostname
+
+        const toggleBtn = document.createElement('button')
+        toggleBtn.type = 'button'
+        toggleBtn.className = `afs-popover-toggle ${excluded ? 'afs-off' : 'afs-on'}`
+        toggleBtn.textContent = excluded ? 'Disabled' : 'Enabled'
+        toggleBtn.addEventListener('click', (e) => {
             e.stopPropagation()
             const nowExcluded = toggleExclusion()
-            const btn = e.target
             if (nowExcluded) {
-                btn.textContent = 'Disabled'
-                btn.classList.remove('afs-on')
-                btn.classList.add('afs-off')
+                toggleBtn.textContent = 'Disabled'
+                toggleBtn.classList.remove('afs-on')
+                toggleBtn.classList.add('afs-off')
                 stopObserver()
                 log(`Disabled on ${hostname}`)
             } else {
-                btn.textContent = 'Enabled'
-                btn.classList.remove('afs-off')
-                btn.classList.add('afs-on')
-                startObserver()
-                attemptFocus()
+                toggleBtn.textContent = 'Enabled'
+                toggleBtn.classList.remove('afs-off')
+                toggleBtn.classList.add('afs-on')
+                _userInteracted = false
+                if (!attemptFocus({ force: true })) startObserver()
                 log(`Enabled on ${hostname}`)
             }
         })
+
+        siteRow.append(hostLabel, toggleBtn)
+
+        const elemRow = document.createElement('div')
+        elemRow.className = 'afs-popover-row afs-popover-element'
+
+        const focusedLabel = document.createElement('span')
+        focusedLabel.className = 'afs-popover-label'
+        focusedLabel.textContent = 'Focused:'
+
+        const codeEl = document.createElement('code')
+        codeEl.className = 'afs-popover-code'
+        codeEl.textContent = displayLabel
+
+        elemRow.append(focusedLabel, codeEl)
+        body.append(siteRow, elemRow)
+        popover.append(header, body)
 
         // Close on outside click
         popover._outsideClick = (e) => {
@@ -496,7 +594,10 @@
                 hideIndicator()
             }
         }
-        setTimeout(() => document.addEventListener('click', popover._outsideClick), 0)
+        popover._outsideClickTimer = setTimeout(() => {
+            if (!popover.isConnected) return
+            document.addEventListener('click', popover._outsideClick)
+        }, 0)
 
         document.body.appendChild(popover)
     }
@@ -504,6 +605,7 @@
     function hidePopover() {
         const popover = document.getElementById(POPOVER_ID)
         if (popover) {
+            clearTimeout(popover._outsideClickTimer)
             document.removeEventListener('click', popover._outsideClick)
             popover.remove()
         }
@@ -516,8 +618,10 @@
 
     function setupKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
+            if (!e.altKey || !e.shiftKey || e.ctrlKey || e.metaKey) return
+
             // Alt+Shift+S — toggle on current site
-            if (e.altKey && e.shiftKey && e.key === 'S') {
+            if (e.code === 'KeyS') {
                 e.preventDefault()
                 const nowExcluded = toggleExclusion()
                 const hostname = window.location.hostname
@@ -527,14 +631,14 @@
                     hideIndicator()
                 } else {
                     log(`Enabled on ${hostname}`)
-                    startObserver()
-                    attemptFocus()
+                    _userInteracted = false
+                    if (!attemptFocus({ force: true })) startObserver()
                 }
                 return
             }
 
             // Alt+Shift+N — cycle through search inputs
-            if (e.altKey && e.shiftKey && e.key === 'N') {
+            if (e.code === 'KeyN') {
                 e.preventDefault()
                 if (isExcluded()) return
                 cycleFocus()
@@ -841,8 +945,11 @@
     // ═══════════════════════════════════════════════════════════════════
 
     function init() {
+        if (window.top !== window.self) return
+
         log(`v${SCRIPT_VERSION} loaded on ${window.location.hostname}`)
         checkForUpdate()
+        setupInteractionTracking()
         setupKeyboardShortcuts()
         setupSPADetection()
 
@@ -852,8 +959,7 @@
         }
 
         setTimeout(() => {
-            attemptFocus()
-            startObserver()
+            if (!attemptFocus()) startObserver()
         }, FOCUS_DELAY_MS)
     }
 
