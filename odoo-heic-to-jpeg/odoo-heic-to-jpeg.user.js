@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Odoo HEIC to JPEG
 // @namespace    odoo-heic-to-jpeg
-// @version      1.4.1
+// @version      1.4.2
 // @description  Converts HEIC/HEIF images to JPEG client-side before Odoo uploads them
 // @match        *://*.odoo.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -243,13 +243,14 @@
 		}
 
 		// ── Conversion ─────────────────────────────────────────────────
-		//  converting flag guards against re-entrancy: heic2any uses
-		//  FileReader internally, which would trigger our FileReader patch
-		//  and create an infinite loop without this guard.
-		var converting = false
+		//  activeConversions counter guards against re-entrancy across
+		//  concurrent conversions: heic2any uses FileReader internally,
+		//  which would trigger our FileReader patch recursively without
+		//  this guard.
+		var activeConversions = 0
 
 		function convertBlob(blob) {
-			converting = true
+			activeConversions++
 			return heic2anyReady.then(function (heic2any) {
 				var name = blob.name || 'image.heic'
 				console.log(LOG, 'Converting ' + name + ' (' + (blob.size / 1024).toFixed(1) + ' KB)')
@@ -258,25 +259,26 @@
 					blob: blob,
 					toType: 'image/jpeg',
 					quality: JPEG_QUALITY,
-				}).then(function (result) {
-					converting = false
-					var outputBlob = Array.isArray(result) ? result[0] : result
-					var newName = name.replace(/\.hei[cf]$/i, '.jpg')
-					var converted = new File([outputBlob], newName, {
-						type: 'image/jpeg',
-						lastModified: blob.lastModified || Date.now(),
-					})
-					console.log(LOG, 'Done → ' + converted.name + ' (' + (converted.size / 1024).toFixed(1) + ' KB)')
-					return converted
-				}).catch(function (err) {
-					converting = false
-					// heic2any code 1 = "already browser readable" — pass through
-					if (err && err.code === 1) {
-						console.log(LOG, 'File already browser-readable, skipping conversion')
-						return blob
-					}
-					throw err
 				})
+			}).then(function (result) {
+				activeConversions = Math.max(0, activeConversions - 1)
+				var name = blob.name || 'image.heic'
+				var outputBlob = Array.isArray(result) ? result[0] : result
+				var newName = name.replace(/\.hei[cf]$/i, '.jpg')
+				var converted = new File([outputBlob], newName, {
+					type: 'image/jpeg',
+					lastModified: blob.lastModified || Date.now(),
+				})
+				console.log(LOG, 'Done → ' + converted.name + ' (' + (converted.size / 1024).toFixed(1) + ' KB)')
+				return converted
+			}).catch(function (err) {
+				activeConversions = Math.max(0, activeConversions - 1)
+				// heic2any code 1 = "already browser readable" — pass through
+				if (err && err.code === 1) {
+					console.log(LOG, 'File already browser-readable, skipping conversion')
+					return blob
+				}
+				throw err
 			})
 		}
 
@@ -300,13 +302,14 @@
 			var original = FileReader.prototype[methodName]
 			if (!original) return
 			FileReader.prototype[methodName] = function (blob) {
-				if (!converting && isHeic(blob)) {
+				if (activeConversions === 0 && isHeic(blob)) {
 					var self = this
 					convertBlob(blob).then(function (jpeg) {
-						showToast('Converted HEIC image to JPEG')
+						if (jpeg !== blob) showToast('Converted HEIC image to JPEG')
 						original.call(self, jpeg)
 					}).catch(function (err) {
 						console.error(LOG, 'Conversion failed, passing through original:', err)
+						showToast('Failed to convert HEIC image — uploading original')
 						original.call(self, blob)
 					})
 					return
@@ -368,12 +371,16 @@
 
 			var replacements = {}
 			var affectedKeys = {}
+			var actualConverted = 0
+			var failedCount = 0
 			var promises = conversions.map(function (item) {
 				affectedKeys[item.key] = true
 				return convertBlob(item.blob).then(function (jpeg) {
 					replacements[item.index] = jpeg
+					if (jpeg !== item.blob) actualConverted++
 				}).catch(function (err) {
 					console.error(LOG, 'FormData conversion failed for', item.blob.name, err)
+					failedCount++
 					replacements[item.index] = item.blob
 				})
 			})
@@ -395,7 +402,11 @@
 						formData.append(entryKey, val)
 					}
 				}
-				showToast('Converted ' + conversions.length + ' HEIC image' + (conversions.length > 1 ? 's' : '') + ' to JPEG')
+				if (actualConverted > 0) {
+					showToast('Converted ' + actualConverted + ' HEIC image' + (actualConverted > 1 ? 's' : '') + ' to JPEG')
+				} else if (failedCount > 0) {
+					showToast('Failed to convert ' + failedCount + ' HEIC image' + (failedCount > 1 ? 's' : '') + ' — uploading original')
+				}
 			})
 		}
 
