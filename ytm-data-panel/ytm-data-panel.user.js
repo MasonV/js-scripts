@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         YTM Data Panel
 // @namespace    ytm-data-panel
-// @version      1.1.0
+// @version      1.1.1
 // @description  Shows a data-rich floating panel on YouTube Music /watch pages — description, views, publish date, tags, and auto-detected chapters parsed from the YouTube video metadata
 // @match        *://music.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-data-panel/ytm-data-panel.meta.js
 // @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-data-panel/ytm-data-panel.user.js
+// @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
@@ -27,7 +28,6 @@
 			? GM_info.script.version
 			: '__DEV__'
 	const PANEL_ID = 'ytmdp-panel'
-	const STYLES_ID = 'ytmdp-styles'
 	const COLLAPSED_KEY = 'ytmdp_collapsed_v1'
 
 	// How many times to retry reading ytInitialPlayerResponse if it's stale
@@ -216,15 +216,26 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	/**
-	 * Reads the YTM/YT player bootstrap blob. It lives on `window` in the
-	 * page context, so we go through unsafeWindow to bypass Tampermonkey's
-	 * sandbox wrapping.
+	 * Reads the live YTM/YT player response first (which updates across SPA
+	 * navigations and queue auto-advance), falling back to the initial page-load
+	 * `ytInitialPlayerResponse` blob via `unsafeWindow`.
 	 */
-	function readPlayerResponse() {
+	function readPlayerResponse(expectedVideoId) {
 		try {
+			const pageDoc = unsafeWindow.document || document
+			const liveCandidates = [
+				pageDoc.getElementById('movie_player')?.getPlayerResponse?.(),
+				pageDoc.querySelector('ytmusic-player')?.playerApi?.getPlayerResponse?.(),
+			]
+			for (const resp of liveCandidates) {
+				if (!resp || !resp.videoDetails) continue
+				if (!expectedVideoId || resp.videoDetails.videoId === expectedVideoId) {
+					return resp
+				}
+			}
 			return unsafeWindow.ytInitialPlayerResponse || null
 		} catch (e) {
-			warn('Could not access ytInitialPlayerResponse:', e)
+			warn('Could not access player response:', e)
 			return null
 		}
 	}
@@ -279,7 +290,7 @@
 
 			let attempts = 0
 			const tick = () => {
-				const response = readPlayerResponse()
+				const response = readPlayerResponse(videoId)
 				const data = extractTrackData(response, videoId)
 				if (data) {
 					resolve(data)
@@ -375,23 +386,29 @@
 	function formatPublishDate(iso) {
 		if (!iso) return '—'
 		// YT gives us ISO like "2020-05-15" or full RFC3339; take just the
-		// date portion and render it human-readable.
+		// date portion and render it human-readable in UTC to avoid off-by-one.
 		const datePart = iso.slice(0, 10)
 		const d = new Date(datePart)
 		if (Number.isNaN(d.getTime())) return iso
-		return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+		return d.toLocaleDateString('en-US', {
+			year: 'numeric',
+			month: 'short',
+			day: 'numeric',
+			timeZone: 'UTC',
+		})
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  UI — STYLES
 	// ═══════════════════════════════════════════════════════════════════
 
-	function injectStyles() {
-		if (document.getElementById(STYLES_ID)) return
+	let stylesInjected = false
 
-		const style = document.createElement('style')
-		style.id = STYLES_ID
-		style.textContent = `
+	function injectStyles() {
+		if (stylesInjected) return
+		stylesInjected = true
+
+		GM_addStyle(`
 			/* ── Floating data panel — anchored top-right below the handoff pill ── */
 			#${PANEL_ID} {
 				position: fixed;
@@ -585,8 +602,7 @@
 				color: #777;
 				font-style: italic;
 			}
-		`
-		document.head.appendChild(style)
+		`)
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -833,8 +849,10 @@
 	// ═══════════════════════════════════════════════════════════════════
 
 	let lastRenderedVideoId = null
+	let routeSeq = 0
 
 	async function handleRoute() {
+		const mySeq = ++routeSeq
 		if (window.location.pathname !== '/watch' || !getVideoIdFromUrl()) {
 			removePanel()
 			lastRenderedVideoId = null
@@ -842,6 +860,7 @@
 		}
 
 		const data = await fetchTrackDataForCurrentUrl()
+		if (mySeq !== routeSeq) return
 		if (!data) {
 			warn('No track data available — hiding panel')
 			removePanel()
@@ -863,8 +882,16 @@
 	checkForUpdate()
 	handleRoute()
 
-	// YTM is a Polymer/Lit SPA — same navigation event as youtube.com.
+	// YTM is a Polymer/Lit SPA — listen to navigation and within-/watch queue changes.
 	document.addEventListener('yt-navigate-finish', handleRoute)
+	document.addEventListener('yt-page-data-updated', handleRoute)
+	document.addEventListener(
+		'loadeddata',
+		(e) => {
+			if (e.target && e.target.tagName === 'VIDEO') handleRoute()
+		},
+		true
+	)
 
 	log(`Initialized v${SCRIPT_VERSION}`)
 })()
