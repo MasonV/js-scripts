@@ -35,6 +35,7 @@ function loadPureLogic() {
             computeRateCapWaitMs,
             recordClaimOutcome,
             shouldWaitAfterAttempt,
+            buildClearedState,
         };
     `)
     return factory()
@@ -49,6 +50,7 @@ const {
     computeRateCapWaitMs,
     recordClaimOutcome,
     shouldWaitAfterAttempt,
+    buildClearedState,
 } = loadPureLogic()
 
 describe('parseRetryAfterMs', () => {
@@ -236,5 +238,29 @@ describe('recordClaimOutcome & shouldWaitAfterAttempt', () => {
         // Last form with failure MUST await backoff / Retry-After before navigating
         assert.equal(shouldWaitAfterAttempt(2, 3, 1), true)
         assert.equal(shouldWaitAfterAttempt(0, 1, 2), true)
+    })
+})
+
+describe('buildClearedState', () => {
+    test('resets run flags while preserving recent claimTimestamps for rate limiting', () => {
+        const now = 100_000
+        const cleared = buildClearedState(
+            {
+                active: true,
+                totalClaimed: 15,
+                pagesVisited: 3,
+                consecutiveFailures: 2,
+                claimTimestamps: [10_000, 50_000, 90_000],
+            },
+            now,
+            60_000,
+        )
+        assert.deepEqual(cleared, {
+            active: false,
+            totalClaimed: 0,
+            pagesVisited: 0,
+            consecutiveFailures: 0,
+            claimTimestamps: [50_000, 90_000],
+        })
     })
 })

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Itch Bundle Autoclaim
 // @namespace    itch-bundle-autoclaim
-// @version      1.2.1
+// @version      1.2.2
 // @description  Claims all unclaimed games on an itch.io bundle download page, with automatic pagination
 // @match        https://itch.io/bundle/download/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -35,7 +35,7 @@
     const MAX_CONSECUTIVE_FAILURES = 3
     const MAX_CLAIMS_PER_MINUTE = 60
     const RATE_WINDOW_MS = 60 * 1000
-    const GAME_ROW_SELECTOR = '.game_row form.form'
+    const GAME_ROW_SELECTOR = '.game_row form.form:not([data-ica-claimed="1"])'
 
     // ═══════════════════════════════════════════════════════════════════
     //  PURE LOGIC
@@ -163,6 +163,16 @@
 
     function shouldWaitAfterAttempt(index, totalForms, consecutiveFailures) {
         return index < totalForms - 1 || consecutiveFailures > 0
+    }
+
+    function buildClearedState(existingState, now = Date.now(), windowMs = RATE_WINDOW_MS) {
+        return {
+            active: false,
+            totalClaimed: 0,
+            pagesVisited: 0,
+            consecutiveFailures: 0,
+            claimTimestamps: pruneClaimTimestamps(existingState?.claimTimestamps, now, windowMs),
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -334,6 +344,7 @@
 
     // In-memory flag so within-page code knows if a multi-page run is active
     let isMultiPageRun = false
+    let runAborted = false
 
     function loadState() {
         try {
@@ -343,6 +354,10 @@
             warn('Failed to read sessionStorage:', e)
             return null
         }
+    }
+
+    function loadClaimTimestamps(now = Date.now()) {
+        return pruneClaimTimestamps(loadState()?.claimTimestamps, now)
     }
 
     function saveState(state) {
@@ -355,7 +370,12 @@
 
     function clearState() {
         try {
-            sessionStorage.removeItem(STORAGE_KEY)
+            const next = buildClearedState(loadState())
+            if (next.claimTimestamps.length > 0) {
+                sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+            } else {
+                sessionStorage.removeItem(STORAGE_KEY)
+            }
         } catch (e) {
             warn('Failed to clear sessionStorage:', e)
         }
@@ -424,6 +444,10 @@
         state.claimTimestamps = pruneClaimTimestamps(state.claimTimestamps, Date.now())
 
         for (let i = 0; i < forms.length; i++) {
+            if (runAborted) {
+                return { claimedThisPage, halted: false, aborted: true, errorReason: null }
+            }
+
             const form = forms[i]
             const gameName = getGameName(form)
 
@@ -433,6 +457,9 @@
                 log(`Rate cap (${MAX_CLAIMS_PER_MINUTE}/min) reached — waiting ${waitSec}s`)
                 updateStatus(`Rate cap (${MAX_CLAIMS_PER_MINUTE}/min) — waiting ${waitSec}s...`)
                 await sleep(rateWaitMs)
+                if (runAborted) {
+                    return { claimedThisPage, halted: false, aborted: true, errorReason: null }
+                }
                 state.claimTimestamps = pruneClaimTimestamps(state.claimTimestamps, Date.now())
             }
 
@@ -442,7 +469,7 @@
             const now = Date.now()
             state.claimTimestamps = pruneClaimTimestamps(state.claimTimestamps, now)
             state.claimTimestamps.push(now)
-            if (state.active) saveState(state)
+            if (!runAborted) saveState(state)
 
             let retryAfterMs = 0
             let outcome = null
@@ -452,6 +479,7 @@
                 outcome = recordClaimOutcome(state.consecutiveFailures, result.ok)
                 state.consecutiveFailures = outcome.consecutiveFailures
                 if (result.ok) {
+                    form.dataset.icaClaimed = '1'
                     claimedThisPage++
                     lastErrorReason = null
                 } else {
@@ -469,13 +497,16 @@
                     e,
                 )
             }
-            if (state.active) saveState(state)
+            if (runAborted) {
+                return { claimedThisPage, halted: false, aborted: true, errorReason: null }
+            }
+            saveState(state)
 
             if (outcome.halted) {
                 error(
                     `Halting after ${state.consecutiveFailures} consecutive failures. Last error: ${lastErrorReason}`,
                 )
-                return { claimedThisPage, halted: true, errorReason: lastErrorReason }
+                return { claimedThisPage, halted: true, aborted: false, errorReason: lastErrorReason }
             }
 
             if (shouldWaitAfterAttempt(i, forms.length, state.consecutiveFailures)) {
@@ -493,11 +524,14 @@
                 }
                 if (delayMs > 0 && shouldWaitAfterAttempt(i, forms.length, state.consecutiveFailures)) {
                     await sleep(delayMs)
+                    if (runAborted) {
+                        return { claimedThisPage, halted: false, aborted: true, errorReason: null }
+                    }
                 }
             }
         }
 
-        return { claimedThisPage, halted: false, errorReason: null }
+        return { claimedThisPage, halted: false, aborted: false, errorReason: null }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -555,11 +589,17 @@
         log(`Page ${getCurrentPage()}: ${forms.length} claimable game(s)`)
         saveState(state)
 
-        const { claimedThisPage, halted, errorReason } = await claimAllOnPage(
+        const { claimedThisPage, halted, aborted, errorReason } = await claimAllOnPage(
             state,
             makeProgressCallback(),
         )
         state.totalClaimed += claimedThisPage
+
+        if (aborted || runAborted) {
+            clearState()
+            isMultiPageRun = false
+            return
+        }
 
         if (halted) {
             clearState()
@@ -578,17 +618,23 @@
 
         updateStatus(`Page ${getCurrentPage()} done — moving to next page...`)
         await sleep(NAV_DELAY_MS)
+        if (runAborted) {
+            clearState()
+            isMultiPageRun = false
+            return
+        }
         window.location.replace(getNextPageUrl())
     }
 
     async function runClaimAllPages() {
+        runAborted = false
         isMultiPageRun = true
         const state = {
             active: true,
             totalClaimed: 0,
             pagesVisited: 0,
             consecutiveFailures: 0,
-            claimTimestamps: [],
+            claimTimestamps: loadClaimTimestamps(),
         }
         saveState(state)
         setButtonsEnabled(false)
@@ -596,6 +642,7 @@
     }
 
     async function runClaimThisPage() {
+        runAborted = false
         setButtonsEnabled(false)
         updateStatus('Claiming...')
         const state = {
@@ -603,12 +650,13 @@
             totalClaimed: 0,
             pagesVisited: 0,
             consecutiveFailures: 0,
-            claimTimestamps: [],
+            claimTimestamps: loadClaimTimestamps(),
         }
-        const { claimedThisPage, halted, errorReason } = await claimAllOnPage(
+        const { claimedThisPage, halted, aborted, errorReason } = await claimAllOnPage(
             state,
             makeProgressCallback(),
         )
+        if (aborted || runAborted) return
         setButtonsEnabled(true)
         updateCounter(claimedThisPage)
         if (halted) {
@@ -640,7 +688,9 @@
         closeBtn.textContent = '\u00D7'
         closeBtn.title = 'Close panel'
         closeBtn.addEventListener('click', () => {
-            if (isMultiPageRun) clearState()
+            runAborted = true
+            isMultiPageRun = false
+            clearState()
             panelEl.remove()
         })
         header.appendChild(closeBtn)
