@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YourTube
 // @namespace    yourtube
-// @version      1.2.1
+// @version      1.2.2
 // @description  YouTube without the garbage — duration filtering, and more features to come
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Focus Search
 // @namespace    auto-focus-search
-// @version      1.1.2
+// @version      1.1.3
 // @description  Automatically detects and focuses search input fields on any webpage
 // @match        *://*/*
 // @noframes

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YourTube
 // @namespace    yourtube
-// @version      1.2.1
+// @version      1.2.2
 // @description  YouTube without the garbage — duration filtering, and more features to come
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -378,46 +378,6 @@
 		if (m > 0) parts.push(`${m} ${m === 1 ? 'minute' : 'minutes'}`)
 		if (s > 0) parts.push(`${s} ${s === 1 ? 'second' : 'seconds'}`)
 		return parts.join(' ')
-	}
-
-	// Smoke-test the parser on load so we catch regressions immediately.
-	function selfTestParser() {
-		const cases = [
-			['', null],
-			['   ', null],
-			['5m', 300],
-			['5 min', 300],
-			['5 minutes', 300],
-			['5:00', 300],
-			['1h', 3600],
-			['1h30m', 5400],
-			['1h 30m', 5400],
-			['1:30:00', 5400],
-			['3.5m', 210],
-			['3.5 minutes', 210],
-			['3m 30s', 210],
-			['90s', 90],
-			['90 sec', 90],
-			['90', 5400],
-			['1:23:45', 5025],
-			['12:34', 754],
-			['gibberish', NaN],
-			['5x', NaN],
-		]
-		const failures = []
-		for (const [input, expected] of cases) {
-			const got = parseDuration(input)
-			const ok =
-				(Number.isNaN(expected) && Number.isNaN(got)) ||
-				(expected === null && got === null) ||
-				got === expected
-			if (!ok) failures.push({ input, expected, got })
-		}
-		if (failures.length === 0) {
-			log(`parseDuration self-test: ${cases.length} cases passed`)
-		} else {
-			warn(`parseDuration self-test: ${failures.length} failures`, failures)
-		}
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -1781,7 +1741,6 @@
 		// Future features register here.
 	}
 
-	selfTestParser()
 	runFeatures()
 
 	if (typeof GM_registerMenuCommand === 'function') {

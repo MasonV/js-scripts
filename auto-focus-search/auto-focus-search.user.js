@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Focus Search
 // @namespace    auto-focus-search
-// @version      1.1.2
+// @version      1.1.3
 // @description  Automatically detects and focuses search input fields on any webpage
 // @match        *://*/*
 // @noframes
@@ -269,12 +269,69 @@
         showIndicator(label)
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    //  PURE LOGIC
+    // ═══════════════════════════════════════════════════════════════════
+
     function describeElement(el) {
-        const tag = el.tagName.toLowerCase()
+        const tag = (el.tagName || 'input').toLowerCase()
         const id = el.id ? `#${el.id}` : ''
         const name = el.name ? `[name="${el.name}"]` : ''
         const placeholder = el.placeholder ? `"${el.placeholder}"` : ''
         return `${tag}${id}${name} ${placeholder}`.trim()
+    }
+
+    function scoreCandidate(el) {
+        if (!el) return 0
+        const tag = String(el.tagName || '').toLowerCase()
+        if (tag && tag !== 'input' && tag !== 'textarea') return 0
+
+        const readAttr = (attr, prop) => {
+            if (typeof el.getAttribute === 'function') {
+                const v = el.getAttribute(attr)
+                if (v != null) return String(v)
+            }
+            return el[prop] != null ? String(el[prop]) : ''
+        }
+
+        const type = readAttr('type', 'type').toLowerCase()
+        if (type === 'hidden' || type === 'submit' || type === 'button' || type === 'checkbox' || type === 'radio') {
+            return 0
+        }
+
+        const inSearchRole = Boolean(
+            el.inSearchRole ||
+                (typeof el.closest === 'function' && el.closest('[role="search"]')),
+        )
+        const name = readAttr('name', 'name').toLowerCase()
+        const id = readAttr('id', 'id').toLowerCase()
+        const className = readAttr('class', 'className').toLowerCase()
+        const placeholder = readAttr('placeholder', 'placeholder').toLowerCase()
+        const ariaLabel = readAttr('aria-label', 'ariaLabel').toLowerCase()
+
+        let score = 0
+        if (inSearchRole) score += 100
+        if (type === 'search') score += 80
+        if (['q', 'query', 'search', 'search_query', 's'].includes(name)) score += 60
+        if (placeholder.includes('search') || ariaLabel.includes('search')) score += 40
+        if (
+            ['search-input', 'searchbox', 'search', 'q'].includes(id) ||
+            /\bsearch(?:-input|-box|-field)?\b/.test(className)
+        ) {
+            score += 20
+        }
+        return score
+    }
+
+    function isSearchPath(pathname = window.location.pathname, search = window.location.search) {
+        const path = String(pathname || '').toLowerCase()
+        if (/\/(?:search|results|find)(?:\/|$)/.test(path)) return true
+        const params = new URLSearchParams(String(search || ''))
+        for (const key of ['q', 'query', 'search', 'search_query', 's', 'k']) {
+            const val = params.get(key)
+            if (val != null && val.trim() !== '') return true
+        }
+        return false
     }
 
     // ═══════════════════════════════════════════════════════════════════

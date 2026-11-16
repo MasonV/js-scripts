@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.4.1
+// @version      1.4.2
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -263,14 +263,48 @@
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
-	//  VIDEO DETECTION
+	//  PURE LOGIC
 	// ═══════════════════════════════════════════════════════════════════
 
-	/** @returns {string|null} Video ID from the current URL */
-	function getVideoId() {
-		const params = new URLSearchParams(window.location.search)
+	/** @returns {string|null} Video ID from a query string */
+	function getVideoId(search = window.location.search) {
+		const params = new URLSearchParams(search)
 		return params.get('v')
 	}
+
+	function extractVideoDetailsFromPlayerResponse(resp, expectedVideoId) {
+		if (!resp || !resp.videoDetails) return null
+		if (expectedVideoId && resp.videoDetails.videoId !== expectedVideoId) return null
+		// YouTube moved category out of videoDetails into microformat at some point;
+		// fall back through both locations.
+		const category =
+			resp.microformat?.playerMicroformatRenderer?.category ||
+			resp.videoDetails.category ||
+			null
+		return {
+			category,
+			channelId: resp.videoDetails.channelId || null,
+			channelName: resp.videoDetails.author || null,
+		}
+	}
+
+	function isMusicFromPlayerResponse(resp, expectedVideoId) {
+		const details = extractVideoDetailsFromPlayerResponse(resp, expectedVideoId)
+		return Boolean(details && details.category === 'Music')
+	}
+
+	function parsePlayerResponseFromHtml(html) {
+		const text = String(html || '')
+		return {
+			category: text.match(/"category":"([^"]+)"/)?.[1] || null,
+			channelId: text.match(/"channelId":"([^"]+)"/)?.[1] || null,
+			channelName: text.match(/"author":"([^"]+)"/)?.[1] || null,
+		}
+	}
+
+	// ═══════════════════════════════════════════════════════════════════
+	//  VIDEO DETECTION
+	// ═══════════════════════════════════════════════════════════════════
 
 	/**
 	 * Reads video details from YouTube's live player element or embedded
@@ -281,24 +315,10 @@
 		// unsafeWindow needed because GM_xmlhttpRequest grant puts us in sandbox
 		const pageDoc = unsafeWindow.document || document
 		const liveResp = pageDoc.getElementById('movie_player')?.getPlayerResponse?.()
-		const resp =
-			liveResp?.videoDetails?.videoId === videoId
-				? liveResp
-				: unsafeWindow.ytInitialPlayerResponse
-		if (resp?.videoDetails?.videoId === videoId) {
-			// YouTube moved category out of videoDetails into microformat at some point;
-			// fall back through both locations.
-			const category =
-				resp.microformat?.playerMicroformatRenderer?.category ||
-				resp.videoDetails.category ||
-				null
-			return {
-				category,
-				channelId: resp.videoDetails.channelId || null,
-				channelName: resp.videoDetails.author || null,
-			}
-		}
-		return null
+		return (
+			extractVideoDetailsFromPlayerResponse(liveResp, videoId) ||
+			extractVideoDetailsFromPlayerResponse(unsafeWindow.ytInitialPlayerResponse, videoId)
+		)
 	}
 
 	/**
@@ -309,11 +329,7 @@
 		try {
 			const resp = await fetch(`/watch?v=${videoId}`, { credentials: 'omit' })
 			const html = await resp.text()
-			return {
-				category: html.match(/"category":"([^"]+)"/)?.[1] || null,
-				channelId: html.match(/"channelId":"([^"]+)"/)?.[1] || null,
-				channelName: html.match(/"author":"([^"]+)"/)?.[1] || null,
-			}
+			return parsePlayerResponseFromHtml(html)
 		} catch (e) {
 			warn('Failed to fetch video details:', e)
 			return { category: null, channelId: null, channelName: null }
