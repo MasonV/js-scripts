@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Auto Focus Search
 // @namespace    auto-focus-search
-// @version      1.1.1
+// @version      1.1.2
 // @description  Automatically detects and focuses search input fields on any webpage
 // @match        *://*/*
+// @noframes
 // @homepageURL  https://github.com/MasonV/js-scripts
 // @supportURL   https://github.com/MasonV/js-scripts/issues
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/auto-focus-search/auto-focus-search.meta.js
@@ -172,8 +173,24 @@
     //  SAFETY CHECKS
     // ═══════════════════════════════════════════════════════════════════
 
+    let _userInteracted = false
+
+    function setupInteractionTracking() {
+        const onUserInteract = (e) => {
+            if (e.type === 'keydown' && e.altKey && e.shiftKey) return
+            const target = e.target
+            if (target instanceof Element && target.closest(`#${INDICATOR_ID}, #${POPOVER_ID}`)) return
+            if (!_userInteracted) {
+                _userInteracted = true
+                stopObserver()
+            }
+        }
+        window.addEventListener('pointerdown', onUserInteract, true)
+        window.addEventListener('keydown', onUserInteract, true)
+    }
+
     function shouldFocus() {
-        if (isExcluded()) return false
+        if (isExcluded() || _userInteracted) return false
 
         const active = document.activeElement
         if (!active || active === document.body || active === document.documentElement) return true
@@ -214,8 +231,8 @@
         el.addEventListener('blur', _onBlur, { once: true })
     }
 
-    function attemptFocus() {
-        if (!shouldFocus()) {
+    function attemptFocus({ force = false } = {}) {
+        if (!force && !shouldFocus()) {
             logVerbose('Skipped focus (safety check)')
             return false
         }
@@ -227,6 +244,7 @@
         }
 
         el.focus({ preventScroll: true })
+        stopObserver()
         highlightElement(el)
         cycleIndex = 0
         const label = describeElement(el)
@@ -332,11 +350,12 @@
             lastUrl = location.href
             logVerbose('SPA navigation detected')
             cycleIndex = -1
+            _userInteracted = false
+            stopObserver()
             hideIndicator()
             setTimeout(() => {
                 if (!isExcluded()) {
-                    attemptFocus()
-                    startObserver()
+                    if (!attemptFocus()) startObserver()
                 }
             }, FOCUS_DELAY_MS)
         }
@@ -488,8 +507,8 @@
                 toggleBtn.textContent = 'Enabled'
                 toggleBtn.classList.remove('afs-off')
                 toggleBtn.classList.add('afs-on')
-                startObserver()
-                attemptFocus()
+                _userInteracted = false
+                if (!attemptFocus({ force: true })) startObserver()
                 log(`Enabled on ${hostname}`)
             }
         })
@@ -542,8 +561,10 @@
 
     function setupKeyboardShortcuts() {
         document.addEventListener('keydown', (e) => {
+            if (!e.altKey || !e.shiftKey || e.ctrlKey || e.metaKey) return
+
             // Alt+Shift+S — toggle on current site
-            if (e.altKey && e.shiftKey && e.key === 'S') {
+            if (e.code === 'KeyS') {
                 e.preventDefault()
                 const nowExcluded = toggleExclusion()
                 const hostname = window.location.hostname
@@ -553,14 +574,14 @@
                     hideIndicator()
                 } else {
                     log(`Enabled on ${hostname}`)
-                    startObserver()
-                    attemptFocus()
+                    _userInteracted = false
+                    if (!attemptFocus({ force: true })) startObserver()
                 }
                 return
             }
 
             // Alt+Shift+N — cycle through search inputs
-            if (e.altKey && e.shiftKey && e.key === 'N') {
+            if (e.code === 'KeyN') {
                 e.preventDefault()
                 if (isExcluded()) return
                 cycleFocus()
@@ -867,8 +888,11 @@
     // ═══════════════════════════════════════════════════════════════════
 
     function init() {
+        if (window.top !== window.self) return
+
         log(`v${SCRIPT_VERSION} loaded on ${window.location.hostname}`)
         checkForUpdate()
+        setupInteractionTracking()
         setupKeyboardShortcuts()
         setupSPADetection()
 
@@ -878,8 +902,7 @@
         }
 
         setTimeout(() => {
-            attemptFocus()
-            startObserver()
+            if (!attemptFocus()) startObserver()
         }, FOCUS_DELAY_MS)
     }
 
