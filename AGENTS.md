@@ -1,9 +1,25 @@
 # Agent Instructions
 
+<!-- devpod:third-party-policy:begin -->
 ## Third-Party Services
 
-- Before code that automates, scrapes or bulk-acts on a third-party site or API, read its terms first-hand and record the URL, date and clause wording in the repo. If the terms can not be read, do not ship the automation.
-- Default design: one external action per human click. No scripts that submit, activate or navigate on third-party pages without a human triggering each action.
-- Follow explicit agent/bot rules (e.g. required user-agent identification). Never mimic human pacing to avoid detection.
-- Every automated client has a rate cap, backoff on errors (honouring Retry-After), and a halt after N consecutive failures that reports the error loudly.
-- If the terms are ambiguous or a project may conflict with them, flag it for the owner as a human-delegated task so they can ask the service's support team. Agents never contact third parties themselves. Record the owner's answer in the repo.
+Policy: devpod third-party services, version 2026-11-16.1 (bounded experimentation).
+
+Carry out the user's development request with proportionate checks. This section governs third-party access, including the review exception to default-on feature shipping. Treat local implementation, bounded live experiments, established collection, and redistribution as different activities.
+
+- Continue local coding, mocks, fixture-based tests, parser work and ordinary outbound-link work without requiring a terms capture or a new matrix entry first.
+- For a small read-only experiment on public pages or an authorized API, proceed within the user's requested scope when no known applicable restriction prevents it. Missing terms records, `unclear` status, or an unavailable policy page alone do not require asking the user before such a test. Prefer the publisher's documented API, feed, export or supported client.
+- Bound live experiments before running them. Unless the user or publisher sets a different limit, use at most 10 top-level page/API requests per host across the experiment, one in flight, at least two seconds apart, and finite timeouts. Include retries and pagination in the budget; do not reset it on each agent turn. Browser activity must also account for subrequests and disable unnecessary resource loads. These are internal limits, not permission or a legal exemption.
+- Keep only the small local sample needed to debug. Do not turn experimentation into a background job, broad crawl, accumulated corpus or public data feed. Record the purpose, endpoints, request budget, sample retained and unresolved questions in a short task note when useful; avoid creating paperwork for every routine request.
+- Use existing project review records and scoped owner decisions. Do not repeatedly demand reapproval or recapture unchanged terms. Distinguish a publisher's permission from the owner's interpretation or acceptance of risk, and do not label the latter as confirmed compliance.
+- Follow known applicable publisher restrictions and specific project stop decisions, including those that apply to testing. Small scale, personal use and public reachability do not override them. A restriction on collection does not automatically prohibit ordinary links or independent local work.
+- Stop the affected retrieval on an access denial or bot challenge; do not evade it with proxies, disguised identity or alternate credentials. Honor rate-limit and `Retry-After` responses and bound any retries within the original experiment budget. A failed fetch does not by itself establish a legal prohibition on all use of that service.
+- Review the applicable terms and operational scope before enabling new recurring collection, building a permanent dataset, materially increasing an established integration's access, or sharing/redistributing retrieved data. This applies to private systems too. Build and test disabled-by-default components and fixtures while that review is pending. Continue unrelated work.
+- For established retrieval, record the access method, schedule/volume, authentication category, retained fields and deletion policy, display/redistribution, applicable document versions, conditions and unresolved decisions. Use rate caps, caching, finite backoff and a visible failure halt appropriate to the publisher and workload.
+- Obtain accessible evidence yourself using normal supported tools and canonical sources. Reuse stored snapshots and fetch only relevant missing documents. If evidence cannot be obtained, identify the exact question and the smallest relevant excerpt needed. Do not ask the user to paste full policy libraries merely to perform a bounded experiment.
+- Agents may record routine evidence and scoped assessments under this policy. A review does not automatically require a publisher email or a human review of every page. Keep agent assessments, owner decisions and publisher authorization distinguishable.
+- Escalate only a specific unresolved issue that affects the proposed activity. State the source or known restriction, the affected endpoint/action, what can still proceed and a recommended next step. Treat ordinary missing documentation as a follow-up; do not repeatedly stop an entire project over the same unresolved row.
+- Changes to third-party accounts or transactions, such as claiming, redeeming, submitting or deleting, require authorization within the user's task and any specific service restrictions. A request to inspect or scrape read-only data does not authorize those changes. Existing scoped authorization remains valid; do not demand one click per read request.
+- Do not send permission requests or other correspondence, accept new contractual commitments, or publish private snapshots without the user's explicit authorization. Agents may prepare a concise review or correspondence draft for the owner when needed.
+
+<!-- devpod:third-party-policy:end -->
