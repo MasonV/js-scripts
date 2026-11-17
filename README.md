@@ -68,13 +68,15 @@ A global userscript that automatically detects and focuses search input fields o
 
 ### `yourtube/`
 
-A unified userscript for [YouTube](https://www.youtube.com) — "YouTube without the garbage." v1.0.0 is a scaffolding milestone: the shared duration parser is in place and the subscription-feed duration filter is registered as the first feature module, with DOM detection and UI landing in follow-up commits.
+A unified userscript for [YouTube](https://www.youtube.com) — “YouTube without the garbage.” It filters the subscriptions feed by video duration and provides controls for hiding Shorts, live streams, and Premieres.
 
 **Features:**
 
 - Pure duration parser / formatter (HH:MM:SS ↔ seconds) — extractable, testable utility shared across features
 - Feature-module architecture — each feature is route-scoped and re-runs on `yt-navigate-finish` so it activates/deactivates as you move between YouTube pages
-- Duration Filter module (subscription feed) — scaffolded in v1.0.0; full DOM detection, filtering, and settings UI land in subsequent versions
+- Subscription Duration Filter with configurable minimum and maximum lengths
+- Circuit-breaker toggles for Shorts, live streams, and Premieres
+- Slide-over Settings UI for duration and content filters
 - Per-feature logging prefixes (`[YourTube]`, `[YourTube/Duration]`) for easy console scanning
 - Shared versioned settings blob (`yourtube_settings_v1`) keyed per-feature
 
@@ -128,20 +130,20 @@ A userscript for [ChatGPT](https://chatgpt.com), [Claude](https://claude.ai), an
 
 ### `barter-bundle-scorer/`
 
-A userscript for [Barter.vg](https://barter.vg) bundle pages that scores each game and provides a side-panel evaluation of the overall bundle.
+A userscript for [Barter.vg](https://barter.vg) bundle pages that replaces the bundle table with a full-page dashboard of scored game cards.
 
 **Features:**
 
 - Per-game scoring (0–100) based on Steam rating, review count, MSRP, rebundle frequency, and wishlist status
 - Bundle-level ratings: top-N average, depth score, and personal score (excluding owned games)
 - Deal quality metric (unowned MSRP vs. bundle cost)
-- Side evaluation panel with score histogram, top picks, and per-tier breakdowns
+- Modern and Classic card-grid layouts with score histogram, top picks, and per-tier breakdowns
 - Collapsible header stats dashboard with individually hideable/restorable stat cards (persisted in `localStorage`)
 - Automatic owned-game detection (via Barter's library indicator) with manual toggle
 - DLC / soundtrack / artbook detection — excluded from bundle scores
 - Tiered bundle support with per-tier average and best scores
-- Review column split (separate # and Rating columns)
-- All-column sorting (group-aware, preserving paired bargraph rows)
+- Scoring presets: All-Rounder, Collector, Trader, and Raw
+- Multi-currency tier price display and JSON export
 - Configurable weights, MSRP cap, confidence anchor, and Wilson-adjusted rating mode
 - One-click "Copy Summary" to clipboard
 - Settings persist in `localStorage`
@@ -265,7 +267,7 @@ A userscript for [Odoo](https://www.odoo.com) that converts HEIC/HEIF images to 
 
 ### `yt-music-redirect/`
 
-A userscript for [YouTube](https://www.youtube.com) that automatically redirects music videos to [YouTube Music](https://music.youtube.com).
+A userscript for [YouTube](https://www.youtube.com) that opens music videos in [YouTube Music](https://music.youtube.com), with per-channel redirect controls.
 
 **Features:**
 
@@ -273,6 +275,8 @@ A userscript for [YouTube](https://www.youtube.com) that automatically redirects
 - Redirects to the equivalent YouTube Music URL (`music.youtube.com/watch?v=...`)
 - Handles both initial page loads and YouTube's SPA client-side navigation
 - Fallback fetch for cases where the player response is stale after navigation
+- Per-channel auto-redirect allowlist and blocklist; blocked channels show “Not a music channel” instead of redirect controls
+- Floating `♫` menu for manual opening in YouTube Music and managing channel preferences
 
 **Install / download:**
 
