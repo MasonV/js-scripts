@@ -1,168 +1,36 @@
-// Unit tests for barter-bundle-scorer pure scoring functions.
-// Run: node --test barter-bundle-scorer/scoring.test.js
-//
-// Functions are copied from the userscript since there's no module system.
-// Keep in sync with barter-bundle-scorer.user.js MATH + SCORING + CURRENCY sections.
-
+// The production functions have no module system, so extract their marked source
+// sections and evaluate them with the same small state surface the userscript uses.
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-// ═══════════════════════════════════════
-// EXTRACTED PURE FUNCTIONS (mirror of userscript)
-// ═══════════════════════════════════════
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const source = fs.readFileSync(path.join(__dirname, 'barter-bundle-scorer.user.js'), 'utf8');
 
-const clamp01 = x => Math.max(0, Math.min(1, x));
-
-function confidenceFromReviews(n, confidenceAnchor = 800) {
-  if (!n || n <= 0) return 0;
-  return clamp01(n / (n + confidenceAnchor));
+function between(startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start);
+  assert.ok(start >= 0 && end > start, `Could not find source markers: ${startMarker} / ${endMarker}`);
+  return source.slice(start, end);
 }
 
-function wilsonLowerBound(p, n) {
-  if (!n || n <= 0) return 0;
-  const z = 1.96, z2 = z * z;
-  const denom = 1 + z2 / n;
-  const centre = p + z2 / (2 * n);
-  const adj = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n);
-  return clamp01((centre - adj) / denom);
-}
+const pureLogic = between('// PURE FUNCTIONS — START', '// PURE FUNCTIONS — END');
+const classifyLogic = between('  const DLC_KEYWORDS =', '\n  function extractGame');
+const scoringLogic = between('  function scoreGame(g)', '\n  // ═══════════════════════════════════════\n  // BUNDLE COST DETECTION');
+const bundleLogic = between('  function computeBundleScores(scored, ownedSet)', '\n  // ═══════════════════════════════════════\n  // HISTOGRAM');
+const currencyLogic = between('  const CURRENCY_DEFS =', '\n  function collectAvailableCurrencies');
 
-const DLC_KEYWORDS = /\b(soundtrack|ost|artbook|art\s*book|wallpaper|skin\s*pack|costume|dlc|season\s*pass|expansion|bonus\s*content|digital\s*deluxe|deluxe\s*edition|collector[''\u2019]?s\s*edition|upgrade)\b/i;
-const DLC_REVIEW_THRESHOLD = 50;
-
-// Simplified classifyItem for testing — takes structured input instead of DOM elements.
-// In the real script this walks the DOM; here we simulate with explicit packageContext.
-function classifyItem(title, reviews, ratingPct, { isInPackage = false } = {}) {
-  const titleLower = title.toLowerCase();
-  if (DLC_KEYWORDS.test(titleLower)) {
-    if (reviews && reviews >= DLC_REVIEW_THRESHOLD) return 'game';
-    return 'dlc';
-  }
-  if (isInPackage) {
-    if (!reviews || reviews < DLC_REVIEW_THRESHOLD) return 'dlc';
-    return 'game';
-  }
-  if (!ratingPct && !reviews) return 'package';
-  return 'game';
-}
-
-// scoreGame with explicit settings injection for testability
-function scoreGame(g, settings, bundleCost) {
-  const isUnrated = g.ratingPct == null && (!g.reviews || g.reviews <= 0);
-  const ratingRaw = g.ratingPct ? clamp01(g.ratingPct / 100) : (isUnrated ? 0.5 : 0);
-  const conf = isUnrated ? 0.3 : confidenceFromReviews(g.reviews, settings.confidenceAnchor);
-  const rating = settings.useWilsonAdjustedRating && !isUnrated
-    ? wilsonLowerBound(ratingRaw, g.reviews || 0)
-    : ratingRaw;
-  const val = clamp01((g.msrp || 0) / settings.msrpCap);
-  const bundleValue = bundleCost
-    ? clamp01((g.msrp || 0) / Math.max(bundleCost, 0.01))
-    : val;
-  const wishlistBonus = g.wishlistedDOM ? 1 : 0;
-  const pen = g.bundledTimes != null ? clamp01(g.bundledTimes / settings.bundledPenaltyCap) : 0;
-  const w = settings.weights;
-  const posSum = w.rating + w.confidence + w.value + w.bundleValue + w.wishlist;
-  const n = posSum > 0 ? posSum : 1;
-  const raw = (w.rating / n) * rating + (w.confidence / n) * conf + (w.value / n) * val + (w.bundleValue / n) * bundleValue + (w.wishlist / n) * wishlistBonus - (w.rebundlePenalty / n) * pen;
-  return {
-    score: Math.max(0, raw * 100),
-    breakdown: { rating, ratingRaw, conf, val, bundleValue, wishlistBonus, pen, isUnrated },
-  };
-}
-
-function scoreColor(s) {
-  if (s >= 85) return '#1a7f37';
-  if (s >= 70) return '#6e6411';
-  if (s >= 50) return '#7c4518';
-  return '#7a1d1d';
-}
-
-function scoreBg(s) {
-  if (s >= 85) return 'linear-gradient(135deg, #1a7f37 0%, #238636 100%)';
-  if (s >= 70) return 'linear-gradient(135deg, #5c5410 0%, #7a6d12 100%)';
-  if (s >= 50) return 'linear-gradient(135deg, #6b3a14 0%, #8a4f1f 100%)';
-  return 'linear-gradient(135deg, #611919 0%, #8a1f1f 100%)';
-}
-
-function scoreTierLabel(s) {
-  if (s >= 85) return 'Great';
-  if (s >= 70) return 'Good';
-  if (s >= 50) return 'Fair';
-  return 'Poor';
-}
-
-function ratingColor(r) {
-  if (r >= 80) return '#22863a';
-  if (r >= 60) return '#7a6d12';
-  if (r >= 40) return '#8a4f1f';
-  return '#8a1f1f';
-}
-
-function formatBreakdown(b) {
-  const lines = [];
-  if (b.isUnrated) {
-    lines.push('Rating:     N/A (unrated — using neutral 50%)');
-    lines.push('Confidence: N/A (unrated — using 30% baseline)');
-  } else {
-    lines.push(`Rating:     ${(b.ratingRaw * 100).toFixed(0)}%` +
-      (b.rating !== b.ratingRaw ? ` (Wilson: ${(b.rating * 100).toFixed(1)}%)` : ''));
-    lines.push(`Confidence: ${(b.conf * 100).toFixed(1)}%`);
-  }
-  lines.push(`Value:      ${(b.val * 100).toFixed(1)}%`);
-  lines.push(`Bundle $:   ${(b.bundleValue * 100).toFixed(1)}%`);
-  lines.push(`Wishlist:  +${(b.wishlistBonus * 100).toFixed(0)}%`);
-  lines.push(`Rebundle:  -${(b.pen * 100).toFixed(1)}%`);
-  return lines.join('\n');
-}
-
-const CURRENCY_DEFS = [
-  { code: 'USD', symbol: '$',  re: /(?:\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*USD)/ },
-  { code: 'EUR', symbol: '\u20AC', re: /(?:\u20AC\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*EUR)/ },
-  { code: 'GBP', symbol: '\u00A3', re: /(?:\u00A3\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*GBP)/ },
-  { code: 'CAD', symbol: 'C$', re: /(?:C\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*CAD)/ },
-  { code: 'AUD', symbol: 'A$', re: /(?:A\$\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*AUD)/ },
-  { code: 'RUB', symbol: '\u20BD', re: /(?:\u20BD\s*(\d+(?:\.\d{1,2})?)|(\d+(?:\.\d{1,2})?)\s*(?:\u20BD|RUB))/ },
-];
-
-function formatTierPrice(tier, currencyPref) {
-  if (!tier.prices || !Object.keys(tier.prices).length) {
-    return tier.price != null ? `$${tier.price.toFixed(2)}` : null;
-  }
-  if (currencyPref && tier.prices[currencyPref] != null) {
-    const def = CURRENCY_DEFS.find(c => c.code === currencyPref);
-    const sym = def ? def.symbol : currencyPref;
-    return `${sym}${tier.prices[currencyPref].toFixed(2)}`;
-  }
-  if (tier.prices.USD != null) return `$${tier.prices.USD.toFixed(2)}`;
-  const first = Object.keys(tier.prices)[0];
-  if (first) {
-    const def = CURRENCY_DEFS.find(c => c.code === first);
-    const sym = def ? def.symbol : first;
-    return `${sym}${tier.prices[first].toFixed(2)}`;
-  }
-  return tier.price != null ? `$${tier.price.toFixed(2)}` : null;
-}
-
-function computeBundleScores(scored, ownedSet, settings = DEFAULT_SETTINGS, bundleCost = null) {
-  const scorable = scored.filter(g => g.itemType === 'game');
-  const sorted = [...scorable].sort((a, b) => b.score - a.score);
-  const topMain  = sorted.slice(0, settings.topNMain);
-  const topDepth = sorted.slice(0, settings.topNDepth);
-  const personal = sorted.filter(g => !ownedSet.has(g.title));
-  const personalTop = personal.slice(0, settings.topNMain);
-  const avg = (arr) => arr.length > 0 ? arr.reduce((s, g) => s + g.score, 0) / arr.length : 0;
-  const unownedMsrpSum = personal.reduce((s, g) => s + (g.msrp || 0), 0);
-  const dealQuality = bundleCost && bundleCost > 0
-    ? unownedMsrpSum / bundleCost : null;
-  return {
-    bundleRating:  avg(topMain),
-    depthRating:   avg(topDepth),
-    personalRating: avg(personalTop),
-    topMain,
-    dealQuality,
-    unownedMsrpSum,
-  };
-}
+const sandbox = { SETTINGS: {}, CURRENT_BUNDLE_COST: null };
+vm.createContext(sandbox);
+vm.runInContext(`${pureLogic}\n${classifyLogic}\n${scoringLogic}\n${bundleLogic}\n${currencyLogic}\nglobalThis.__scoring = { clamp01, confidenceFromReviews, wilsonLowerBound, classifyItem, scoreGame, scoreColor, scoreBg, scoreTierLabel, ratingColor, formatBreakdown, formatTierPrice, computeBundleScores };`, sandbox);
+const {
+  clamp01, confidenceFromReviews, wilsonLowerBound, classifyItem: classifyProductionItem,
+  scoreGame: scoreProductionGame, scoreColor, scoreBg, scoreTierLabel, ratingColor,
+  formatBreakdown, formatTierPrice, computeBundleScores: computeProductionBundleScores,
+} = sandbox.__scoring;
 
 const DEFAULT_SETTINGS = {
   useWilsonAdjustedRating: false,
@@ -170,6 +38,23 @@ const DEFAULT_SETTINGS = {
   msrpCap: 39.99, bundledPenaltyCap: 10, confidenceAnchor: 800,
   weights: { rating: 0.55, confidence: 0.20, value: 0.20, bundleValue: 0.15, wishlist: 0.08, rebundlePenalty: 0.20 },
 };
+
+function fakeRow(isInPackage) {
+  return { previousElementSibling: isInPackage ? { textContent: '3 item package', previousElementSibling: null, querySelector: () => null } : null };
+}
+function classifyItem(title, reviews, ratingPct, { isInPackage = false } = {}) {
+  return classifyProductionItem(title, fakeRow(isInPackage), ratingPct, reviews);
+}
+function scoreGame(game, settings = DEFAULT_SETTINGS, bundleCost = null) {
+  sandbox.SETTINGS = settings;
+  sandbox.CURRENT_BUNDLE_COST = bundleCost;
+  return scoreProductionGame(game);
+}
+function computeBundleScores(scored, ownedSet, settings = DEFAULT_SETTINGS, bundleCost = null) {
+  sandbox.SETTINGS = settings;
+  sandbox.CURRENT_BUNDLE_COST = bundleCost;
+  return computeProductionBundleScores(scored, ownedSet);
+}
 
 // ═══════════════════════════════════════
 // TESTS
