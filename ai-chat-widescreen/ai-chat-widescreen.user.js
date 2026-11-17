@@ -490,7 +490,13 @@
 	// All three apps are SPAs: opening a conversation swaps the whole thread
 	// out, and the new nodes arrive untagged.
 	function startWatching() {
+		let lastHref = location.href
+		const onNavigate = () => {
+			lastHref = location.href
+			scheduleApply()
+		}
 		const observer = new MutationObserver(mutations => {
+			if (location.href !== lastHref) onNavigate()
 			for (const mutation of mutations) {
 				const target = mutation.target
 				const ours = `#${PANEL_ID}, #${LAUNCHER_ID}, #aiws-dynamic-style`
@@ -502,15 +508,10 @@
 
 		observer.observe(document.documentElement, { childList: true, subtree: true })
 
-		for (const method of ['pushState', 'replaceState']) {
-			const original = history[method]
-			history[method] = function (...args) {
-				const result = original.apply(this, args)
-				scheduleApply()
-				return result
-			}
+		if (typeof navigation !== 'undefined' && navigation.addEventListener) {
+			navigation.addEventListener('navigatesuccess', onNavigate)
 		}
-		window.addEventListener('popstate', scheduleApply)
+		window.addEventListener('popstate', onNavigate)
 
 		// vw does the resizing on its own; only the panel's px readout has to
 		// catch up.
