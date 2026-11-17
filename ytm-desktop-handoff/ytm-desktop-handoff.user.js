@@ -9,6 +9,7 @@
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.meta.js
 // @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.user.js
 // @grant        GM_xmlhttpRequest
+// @grant        GM_addStyle
 // @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
@@ -26,6 +27,8 @@
 			? GM_info.script.version
 			: '__DEV__'
 	const PILL_ID = 'ytmdh-pill'
+	let avToggleObserver = null
+	let pillResetTimer = null
 
 	// ═══════════════════════════════════════════════════════════════════
 	//  LOGGING
@@ -272,7 +275,8 @@
 		const { icon, label } = PILL_STATES[state] ?? PILL_STATES.idle
 		pill.querySelector('.ytmdh-pill-icon').textContent = icon
 		pill.querySelector('.ytmdh-pill-label').textContent = label
-		if (state === 'success') setTimeout(() => setPillState('idle'), 2000)
+		clearTimeout(pillResetTimer)
+		if (state === 'success') pillResetTimer = setTimeout(() => setPillState('idle'), 2000)
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -282,9 +286,7 @@
 	function injectStyles() {
 		if (document.getElementById('ytmdh-styles')) return
 
-		const style = document.createElement('style')
-		style.id = 'ytmdh-styles'
-		style.textContent = `
+		GM_addStyle(`
 			/* ── Inline pill — sits inside .av-toggle alongside Song/Video ── */
 			#${PILL_ID} {
 				display: inline-flex;
@@ -356,7 +358,7 @@
 				font-size: 15px;
 			}
 		`
-		document.head.appendChild(style)
+		)
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -413,6 +415,10 @@
 	}
 
 	function removePill() {
+		if (avToggleObserver) {
+			avToggleObserver.disconnect()
+			avToggleObserver = null
+		}
 		document.getElementById(PILL_ID)?.remove()
 	}
 
@@ -447,10 +453,12 @@
 	 * user navigates away.
 	 */
 	function waitForAvToggle() {
+		if (avToggleObserver) avToggleObserver.disconnect()
 		const observer = new MutationObserver(() => {
 			const avToggle = document.querySelector('.av-toggle')
 			if (!avToggle) return
 			observer.disconnect()
+			if (avToggleObserver === observer) avToggleObserver = null
 
 			// Only re-mount if the pill is still in fixed-fallback mode.
 			const pill = document.getElementById(PILL_ID)
@@ -460,10 +468,14 @@
 			}
 		})
 
+		avToggleObserver = observer
 		observer.observe(document.body, { childList: true, subtree: true })
 
 		// Bail if the user navigates away before av-toggle appears.
-		document.addEventListener('yt-navigate-start', () => observer.disconnect(), { once: true })
+		document.addEventListener('yt-navigate-start', () => {
+			observer.disconnect()
+			if (avToggleObserver === observer) avToggleObserver = null
+		}, { once: true })
 	}
 
 	// ═══════════════════════════════════════════════════════════════════

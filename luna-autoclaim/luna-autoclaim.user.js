@@ -1067,22 +1067,8 @@
     };
 
     // Modern browsers: fires on SPA (pushState/replaceState-driven) navigation.
-    if (typeof window.navigation !== "undefined") {
-      window.navigation.addEventListener("navigate", () => {
-        // The path isn't always updated yet when this fires — defer a tick.
-        setTimeout(onLocationChange, 0);
-      });
-    }
-
-    // Fallback for browsers without the Navigation API, and belt-and-braces
-    // in case Luna's router doesn't fire "navigate" reliably.
-    for (const method of ["pushState", "replaceState"]) {
-      const original = history[method];
-      history[method] = function (...args) {
-        const result = original.apply(this, args);
-        onLocationChange();
-        return result;
-      };
+    if (typeof window.navigation !== "undefined" && window.navigation.addEventListener) {
+      window.navigation.addEventListener("navigatesuccess", onLocationChange);
     }
     window.addEventListener("popstate", onLocationChange);
 

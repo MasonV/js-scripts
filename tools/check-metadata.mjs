@@ -153,8 +153,12 @@ for (const [group, files] of groupedScripts(walk(ROOT))) {
 
       const updateUrl = values(user.meta, 'updateURL')[0] || ''
       const downloadUrl = values(user.meta, 'downloadURL')[0] || ''
-      if (!updateUrl.endsWith('.meta.js')) groupErrors.push('@updateURL should point at .meta.js')
-      if (!downloadUrl.endsWith('.user.js')) groupErrors.push('@downloadURL should point at .user.js')
+      const scriptDir = path.basename(path.dirname(files.user))
+      const rawBase = `https://raw.githubusercontent.com/MasonV/js-scripts/main/${scriptDir}/${scriptDir}`
+      const namespace = values(user.meta, 'namespace')[0] || ''
+      if (namespace !== scriptDir) groupErrors.push(`@namespace should equal directory name (${scriptDir})`)
+      if (updateUrl !== `${rawBase}.meta.js`) groupErrors.push(`@updateURL should be ${rawBase}.meta.js`)
+      if (downloadUrl !== `${rawBase}.user.js`) groupErrors.push(`@downloadURL should be ${rawBase}.user.js`)
 
       if (!hasUpdateCheckMarkers(user.text)) {
         groupErrors.push('missing // <update-check> … // </update-check> region (run: node tools/sync-blocks.mjs)')
