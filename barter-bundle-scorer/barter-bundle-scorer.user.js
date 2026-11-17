@@ -2102,14 +2102,18 @@
 
     // Close on backdrop click
     backdrop.addEventListener('click', (e) => {
-      if (e.target === backdrop) backdrop.remove();
+      if (e.target === backdrop) closeModal();
     });
     // Close on X button
-    modal.querySelector('.bvg-modal-close')?.addEventListener('click', () => backdrop.remove());
+    modal.querySelector('.bvg-modal-close')?.addEventListener('click', closeModal);
     // Close on Escape
     const onEsc = (e) => {
-      if (e.key === 'Escape') { backdrop.remove(); document.removeEventListener('keydown', onEsc); }
+      if (e.key === 'Escape') closeModal();
     };
+    function closeModal() {
+      backdrop.remove();
+      document.removeEventListener('keydown', onEsc);
+    }
     document.addEventListener('keydown', onEsc);
 
     // Event delegation on modal — survives innerHTML refreshes of the settings panel
@@ -2120,12 +2124,12 @@
 
       if (id === 'bvg-settings-apply') {
         readSettingsFromPanel();
-        backdrop.remove();
+        closeModal();
         run();
       } else if (id === 'bvg-settings-reset') {
         SETTINGS = clone(DEFAULT_SETTINGS);
         saveSettings(SETTINGS);
-        backdrop.remove();
+        closeModal();
         run();
       } else if (id === 'bvg-preset-load') {
         const select = modal.querySelector('#bvg-preset-select');
