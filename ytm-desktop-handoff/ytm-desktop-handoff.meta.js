@@ -9,6 +9,7 @@
 // @updateURL    https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.meta.js
 // @downloadURL  https://raw.githubusercontent.com/MasonV/js-scripts/main/ytm-desktop-handoff/ytm-desktop-handoff.user.js
 // @grant        GM_xmlhttpRequest
+// @grant        GM_addStyle
 // @connect      raw.githubusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
