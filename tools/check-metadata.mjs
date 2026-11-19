@@ -6,6 +6,7 @@ const ROOT = process.cwd()
 const SKIP_DIRS = new Set([
   '.git',
   '.claude',
+  '.autodev',
   'archive',
   'node_modules',
   'diagnostics',

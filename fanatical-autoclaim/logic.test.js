@@ -12,7 +12,7 @@ const path = require('node:path')
 const REDEEM_WINDOW_MS = 60 * 60 * 1000
 const STEAM_REDEEMS_PER_HOUR = 30
 
-function loadPureLogic() {
+function loadLogic() {
     const src = fs.readFileSync(path.join(__dirname, 'fanatical-autoclaim.user.js'), 'utf8')
     const start = src.indexOf('//  PURE LOGIC')
     assert.ok(start > 0, 'PURE LOGIC section not found')
@@ -25,6 +25,15 @@ function loadPureLogic() {
         'formatWaitTime',
         'formatPaceLabel',
         'pickNextRedeem',
+        'MIN_REVEAL_DELAY_MS',
+        'MAX_REVEAL_DELAY_MS',
+        'MAX_BACKOFF_MS',
+        'MAX_CONSECUTIVE_FAILURES',
+        'REVEAL_VERIFY_TIMEOUT_MS',
+        'REVEAL_POLL_INTERVAL_MS',
+        'clampRevealDelay',
+        'computeRevealBackoffMs',
+        'recordRevealOutcome',
     ]
     // eslint-disable-next-line no-new-func
     return new Function(
@@ -34,7 +43,8 @@ function loadPureLogic() {
     )(REDEEM_WINDOW_MS, STEAM_REDEEMS_PER_HOUR)
 }
 
-const L = loadPureLogic()
+const loadPureLogic = loadLogic
+const L = loadLogic()
 
 test('pruneRedeemLog keeps only valid timestamps within the rolling hour', () => {
     const now = 10_000_000
@@ -99,4 +109,79 @@ test('pickNextRedeem selects the next unopened redeem URL and tracks progress', 
     step = L.pickNextRedeem(urls, opened)
     assert.equal(step.next, null)
     assert.equal(step.openedCount, 2)
+})
+
+test('exports expected constants with correct defaults', () => {
+    assert.equal(L.MIN_REVEAL_DELAY_MS, 500)
+    assert.equal(L.MAX_REVEAL_DELAY_MS, 60000)
+    assert.equal(L.MAX_BACKOFF_MS, 30000)
+    assert.equal(L.MAX_CONSECUTIVE_FAILURES, 3)
+    assert.equal(L.REVEAL_VERIFY_TIMEOUT_MS, 5000)
+    assert.equal(L.REVEAL_POLL_INTERVAL_MS, 100)
+})
+
+test('clampRevealDelay clamps within [500, 60000] and falls back safely', () => {
+    // Valid values
+    assert.equal(L.clampRevealDelay(500), 500)
+    assert.equal(L.clampRevealDelay(1000), 1000)
+    assert.equal(L.clampRevealDelay(60000), 60000)
+    assert.equal(L.clampRevealDelay(1500.9), 1500)
+
+    // Below minimum
+    assert.equal(L.clampRevealDelay(100), 500)
+    assert.equal(L.clampRevealDelay(0), 500)
+    assert.equal(L.clampRevealDelay(-100), 500)
+
+    // Above maximum
+    assert.equal(L.clampRevealDelay(70000), 60000)
+    assert.equal(L.clampRevealDelay(1000000), 60000)
+
+    // Non-finite or invalid numbers fall back to defaultMs clamped to [500, 60000]
+    assert.equal(L.clampRevealDelay(NaN), 500)
+    assert.equal(L.clampRevealDelay('invalid'), 500)
+    assert.equal(L.clampRevealDelay(null), 500)
+    assert.equal(L.clampRevealDelay(undefined), 500)
+    assert.equal(L.clampRevealDelay(NaN, 2000), 2000)
+    assert.equal(L.clampRevealDelay(0, 200), 500)
+    assert.equal(L.clampRevealDelay(null, 80000), 60000)
+})
+
+test('computeRevealBackoffMs computes exponential backoff capped at maxBackoffMs', () => {
+    // 0 or negative failures returns clamped base delay
+    assert.equal(L.computeRevealBackoffMs(500, 0), 500)
+    assert.equal(L.computeRevealBackoffMs(500, -1), 500)
+    assert.equal(L.computeRevealBackoffMs(100, 0), 500) // clamps base delay
+
+    // Consecutive failures: base * 2^failures
+    assert.equal(L.computeRevealBackoffMs(500, 1), 1000)
+    assert.equal(L.computeRevealBackoffMs(500, 2), 2000)
+    assert.equal(L.computeRevealBackoffMs(500, 3), 4000)
+    assert.equal(L.computeRevealBackoffMs(1000, 2), 4000)
+
+    // Cap at MAX_BACKOFF_MS (30000)
+    assert.equal(L.computeRevealBackoffMs(500, 6), 30000)
+    assert.equal(L.computeRevealBackoffMs(500, 10), 30000)
+
+    // Custom maxBackoffMs
+    assert.equal(L.computeRevealBackoffMs(500, 2, 1500), 1500)
+})
+
+test('recordRevealOutcome tracks consecutive failures and halts at threshold', () => {
+    // Success resets consecutiveFailures and does not halt
+    assert.deepEqual(L.recordRevealOutcome(0, true), { consecutiveFailures: 0, halted: false })
+    assert.deepEqual(L.recordRevealOutcome(2, true), { consecutiveFailures: 0, halted: false })
+
+    // Failures increment consecutiveFailures
+    assert.deepEqual(L.recordRevealOutcome(0, false), { consecutiveFailures: 1, halted: false })
+    assert.deepEqual(L.recordRevealOutcome(1, false), { consecutiveFailures: 2, halted: false })
+    assert.deepEqual(L.recordRevealOutcome(2, false), { consecutiveFailures: 3, halted: true })
+    assert.deepEqual(L.recordRevealOutcome(3, false), { consecutiveFailures: 4, halted: true })
+
+    // Handles invalid / missing consecutiveFailures
+    assert.deepEqual(L.recordRevealOutcome(undefined, false), { consecutiveFailures: 1, halted: false })
+    assert.deepEqual(L.recordRevealOutcome('bad', false), { consecutiveFailures: 1, halted: false })
+
+    // Custom maxFailures threshold
+    assert.deepEqual(L.recordRevealOutcome(0, false, 2), { consecutiveFailures: 1, halted: false })
+    assert.deepEqual(L.recordRevealOutcome(1, false, 2), { consecutiveFailures: 2, halted: true })
 })
