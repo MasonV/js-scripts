@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Fanatical Autoclaim
 // @namespace    fanatical-autoclaim
-// @version      1.5.0
+// @version      1.5.1
 // @description  Bulk-reveal Steam keys on Fanatical order pages and open Steam redeem pages one at a time
 // @match        https://www.fanatical.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -560,6 +560,41 @@
     //  PURE LOGIC
     // ═══════════════════════════════════════════════════════════════════
 
+    const MIN_REVEAL_DELAY_MS = 500
+    const MAX_REVEAL_DELAY_MS = 60000
+    const MAX_BACKOFF_MS = 30000
+    const MAX_CONSECUTIVE_FAILURES = 3
+    const REVEAL_VERIFY_TIMEOUT_MS = 5000
+    const REVEAL_POLL_INTERVAL_MS = 100
+
+    function clampRevealDelay(ms, defaultMs = MIN_REVEAL_DELAY_MS) {
+        const fallback = Number.isFinite(defaultMs)
+            ? Math.max(MIN_REVEAL_DELAY_MS, Math.floor(defaultMs))
+            : MIN_REVEAL_DELAY_MS
+        const n = typeof ms === 'number' ? ms : Number(ms)
+        if (!Number.isFinite(n) || n <= 0) {
+            return Math.min(MAX_REVEAL_DELAY_MS, fallback)
+        }
+        return Math.min(MAX_REVEAL_DELAY_MS, Math.max(MIN_REVEAL_DELAY_MS, Math.floor(n)))
+    }
+
+    function computeRevealBackoffMs(baseDelayMs, consecutiveFailures, maxBackoffMs = MAX_BACKOFF_MS) {
+        const clampedBase = clampRevealDelay(baseDelayMs)
+        const failures = typeof consecutiveFailures === 'number' ? consecutiveFailures : Number(consecutiveFailures)
+        if (!Number.isFinite(failures) || failures <= 0) {
+            return clampedBase
+        }
+        return Math.min(maxBackoffMs, clampedBase * Math.pow(2, Math.floor(failures)))
+    }
+
+    function recordRevealOutcome(consecutiveFailures, ok, maxFailures = MAX_CONSECUTIVE_FAILURES) {
+        const nextFailures = ok ? 0 : Math.max(0, Math.floor(Number(consecutiveFailures) || 0)) + 1
+        return {
+            consecutiveFailures: nextFailures,
+            halted: nextFailures >= maxFailures,
+        }
+    }
+
     function pruneRedeemLog(timestamps, now, windowMs = REDEEM_WINDOW_MS) {
         if (!Array.isArray(timestamps)) return []
         return timestamps
@@ -676,6 +711,25 @@
         return 'Unknown game'
     }
 
+    /**
+     * Find the row/card container for a Reveal Key button without ever
+     * returning the button itself or an ancestor spanning multiple reveal buttons.
+     */
+    function getRevealRowContainer(btn, allButtons) {
+        let el = btn ? btn.parentElement : null
+        let candidate = el
+        for (let depth = 0; el && el !== document.body && el !== document.documentElement && depth < 6; depth++) {
+            if (el.tagName === 'MAIN' || el.id === 'root' || el.id === 'app') break
+            if (allButtons.some(other => other !== btn && el.contains(other))) break
+            candidate = el
+            if (el.matches && el.matches('.key-container, .order-item, .product-row')) {
+                return el
+            }
+            el = el.parentElement
+        }
+        return candidate
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //  CORE ACTIONS
     // ═══════════════════════════════════════════════════════════════════
@@ -683,6 +737,21 @@
     // Tracks redeem URLs already opened on the current order page.
     const openedRedeemUrls = new Set()
     let isRevealing = false
+    let revealAborted = false
+
+    const _baseRemovePanel = removePanel
+    removePanel = function () {
+        revealAborted = true
+        _baseRemovePanel()
+    }
+
+    function isRevealAborted(startUrl) {
+        return Boolean(revealAborted || !document.getElementById('fac-panel') || (startUrl && window.location.href !== startUrl))
+    }
+
+    function updateRedeemButtonLabel() {
+        refreshPaceUI()
+    }
 
     async function revealAllKeys() {
         const revealButtons = findButtonsByText('Reveal Key')
@@ -692,32 +761,142 @@
             return
         }
 
+        revealAborted = false
+        const startUrl = window.location.href
+        revealDelayMs = clampRevealDelay(revealDelayMs)
+
         log(`Found ${revealButtons.length} key(s) to reveal`)
         updateStatus(`Revealing 0/${revealButtons.length}...`)
         isRevealing = true
         setButtonsEnabled(false)
 
-        for (let i = 0; i < revealButtons.length; i++) {
-            const btn = revealButtons[i]
-            const gameName = getGameName(btn)
-            logItem(`Revealing key ${i + 1}/${revealButtons.length}: ${gameName}`)
-            updateStatus(`Revealing ${i + 1}/${revealButtons.length}: ${gameName}`)
+        let revealed = 0
+        let failed = 0
+        let consecutiveFailures = 0
+        let halted = false
 
-            btn.click()
+        try {
+            for (let i = 0; i < revealButtons.length; i++) {
+                if (isRevealAborted(startUrl)) return
 
-            // Wait for the reveal to process before clicking the next one
-            if (i < revealButtons.length - 1) {
-                await sleep(revealDelayMs)
+                const btn = revealButtons[i]
+                if (!btn.isConnected) continue
+
+                const gameName = getGameName(btn)
+                logItem(`Revealing key ${i + 1}/${revealButtons.length}: ${gameName}`)
+                updateStatus(`Revealing ${i + 1}/${revealButtons.length}: ${gameName}`)
+
+                const container = getRevealRowContainer(btn, revealButtons)
+                const keysBefore = findSteamKeys().length
+                const redeemBefore = findButtonsByText('Redeem on Steam').length
+                const containerHadKeyBefore = container
+                    ? STEAM_KEY_RE.test(container.textContent || '') ||
+                      Array.from(container.querySelectorAll('input')).some(inp => STEAM_KEY_RE.test(inp.value || ''))
+                    : false
+
+                try {
+                    btn.scrollIntoView({ block: 'nearest' })
+                } catch {
+                    /* scrollIntoView might not exist in headless environments */
+                }
+                btn.click()
+
+                let ok = false
+                const pollStart = Date.now()
+                while (Date.now() - pollStart < REVEAL_VERIFY_TIMEOUT_MS) {
+                    await sleep(REVEAL_POLL_INTERVAL_MS)
+                    if (isRevealAborted(startUrl)) return
+
+                    const hasError =
+                        container &&
+                        container.querySelector('.error, .alert-danger, .text-danger, [role="alert"]')
+                    if (hasError) {
+                        ok = false
+                        break
+                    }
+
+                    const hasKeyText = Boolean(container && STEAM_KEY_RE.test(container.textContent || ''))
+                    const hasKeyInput = Boolean(
+                        container &&
+                            Array.from(container.querySelectorAll('input')).some(inp =>
+                                STEAM_KEY_RE.test(inp.value || ''),
+                            ),
+                    )
+                    const hasNewKeyInContainer = !containerHadKeyBefore && (hasKeyText || hasKeyInput)
+                    const hasNewKeys = findSteamKeys().length > keysBefore
+                    const hasNewRedeem = findButtonsByText('Redeem on Steam').length > redeemBefore
+                    const btnRemoved =
+                        !btn.isConnected &&
+                        !(
+                            container &&
+                            container.querySelector(
+                                '.reveal-btn, [class*="loading"], [class*="spinner"], [aria-busy="true"]',
+                            )
+                        )
+
+                    if (hasNewKeyInContainer || hasNewKeys || hasNewRedeem || btnRemoved) {
+                        ok = true
+                        break
+                    }
+                }
+
+                if (isRevealAborted(startUrl)) return
+
+                const outcome = recordRevealOutcome(consecutiveFailures, ok)
+                consecutiveFailures = outcome.consecutiveFailures
+
+                if (ok) {
+                    revealed++
+                    if (i < revealButtons.length - 1) {
+                        await sleep(clampRevealDelay(revealDelayMs))
+                        if (isRevealAborted(startUrl)) return
+                    }
+                } else {
+                    failed++
+                    console.warn(
+                        LOG_PREFIX,
+                        `Reveal failed or timed out for button ${i + 1}/${revealButtons.length} (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})`,
+                    )
+                    if (outcome.halted) {
+                        halted = true
+                        updateStatus(
+                            `Halted after ${consecutiveFailures} consecutive failed reveals (${revealed}/${revealButtons.length} revealed).`,
+                            'error',
+                        )
+                        break
+                    } else {
+                        const backoffMs = computeRevealBackoffMs(revealDelayMs, consecutiveFailures)
+                        updateStatus(
+                            `Reveal failed (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}) — backing off ${Math.round(backoffMs / 100) / 10}s...`,
+                            'warn',
+                        )
+                        await sleep(backoffMs)
+                        if (isRevealAborted(startUrl)) return
+                    }
+                }
             }
-        }
 
-        // Wait a moment for the last reveal to render
-        await sleep(revealDelayMs)
-        isRevealing = false
-        log('All keys revealed')
-        updateStatus(`Revealed ${revealButtons.length} key(s)`)
-        setButtonsEnabled(true)
-        refreshPaceUI()
+            if (isRevealAborted(startUrl)) return
+
+            const collectedKeys = findSteamKeys()
+            updateRedeemButtonLabel()
+
+            if (!halted) {
+                if (failed > 0) {
+                    updateStatus(
+                        `Revealed ${revealed} key(s) (${failed} failed) — ${collectedKeys.length} Steam key(s) found`,
+                        'warn',
+                    )
+                } else {
+                    updateStatus(`Revealed ${revealed} key(s)`)
+                }
+            }
+
+            setButtonsEnabled(true)
+            updateRedeemButtonLabel()
+        } finally {
+            isRevealing = false
+        }
     }
 
     /**
@@ -838,6 +1017,13 @@
     function createPanel() {
         const panel = buildPanelShell('Autoclaim')
 
+        const closeBtn = panel.querySelector('#fac-close-btn')
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                revealAborted = true
+            })
+        }
+
         revealBtn = document.createElement('button')
         revealBtn.id = 'fac-reveal-btn'
         revealBtn.className = 'fac-btn'
@@ -858,7 +1044,20 @@
 
         const delaySection = document.createElement('div')
         delaySection.id = 'fac-delays'
-        delaySection.appendChild(createDelayInput('Reveal delay', DEFAULT_REVEAL_DELAY_MS, v => { revealDelayMs = v }))
+        delaySection.appendChild(
+            createDelayInput('Reveal delay', DEFAULT_REVEAL_DELAY_MS, v => {
+                revealDelayMs = clampRevealDelay(v)
+            }),
+        )
+        const delayInput = delaySection.querySelector('input')
+        if (delayInput) {
+            delayInput.min = String(MIN_REVEAL_DELAY_MS)
+            delayInput.max = String(MAX_REVEAL_DELAY_MS)
+            delayInput.addEventListener('change', () => {
+                revealDelayMs = clampRevealDelay(delayInput.value, revealDelayMs)
+                delayInput.value = String(revealDelayMs)
+            })
+        }
         panel.appendChild(delaySection)
 
         createStatusLine(panel, 'Ready')
@@ -910,6 +1109,7 @@
     }
 
     function teardownPanel() {
+        revealAborted = true
         clearInterval(paceInterval)
         paceInterval = null
         removePanel()
@@ -936,9 +1136,13 @@
         if (path === activeOrderPath) return
         activeOrderPath = path
 
+        revealAborted = true
         clearInterval(waitInterval)
         teardownPanel()
-        if (!path) return
+        if (!path) {
+            revealAborted = true
+            return
+        }
 
         log(`Order page: ${path}`)
         waitForOrderContent(() => {
