@@ -21,13 +21,14 @@ const pureLogic = between('// PURE FUNCTIONS — START', '// PURE FUNCTIONS — 
 const classifyLogic = between('  const DLC_KEYWORDS =', '\n  function extractGame');
 const scoringLogic = between('  function scoreGame(g)', '\n  // ═══════════════════════════════════════\n  // BUNDLE COST DETECTION');
 const bundleLogic = between('  function computeBundleScores(scored, ownedSet)', '\n  // ═══════════════════════════════════════\n  // HISTOGRAM');
-const currencyLogic = between('  const CURRENCY_DEFS =', '\n  function collectAvailableCurrencies');
+const currencyDefs = between('  const CURRENCY_DEFS =', '\n\n  function detectTiers');
+const currencyLogic = between('  function formatTierPrice(tier, currencyPref)', '\n  function collectAvailableCurrencies');
 
 const sandbox = { SETTINGS: {}, CURRENT_BUNDLE_COST: null };
 vm.createContext(sandbox);
-vm.runInContext(`${pureLogic}\n${classifyLogic}\n${scoringLogic}\n${bundleLogic}\n${currencyLogic}\nglobalThis.__scoring = { clamp01, confidenceFromReviews, wilsonLowerBound, classifyItem, scoreGame, scoreColor, scoreBg, scoreTierLabel, ratingColor, formatBreakdown, formatTierPrice, computeBundleScores };`, sandbox);
+vm.runInContext(`${pureLogic}\n${classifyLogic}\n${scoringLogic}\n${bundleLogic}\n${currencyDefs}\n${currencyLogic}\nglobalThis.__scoring = { clamp01, confidenceFromReviews, wilsonLowerBound, classifyItem, scoreGame, scoreColor, scoreBg, scoreTierLabel, ratingColor, formatBreakdown, formatTierPrice, computeBundleScores };`, sandbox);
 const {
-  clamp01, confidenceFromReviews, wilsonLowerBound, classifyItem: classifyProductionItem,
+  clamp01, confidenceFromReviews: confidenceFromProductionReviews, wilsonLowerBound, classifyItem: classifyProductionItem,
   scoreGame: scoreProductionGame, scoreColor, scoreBg, scoreTierLabel, ratingColor,
   formatBreakdown, formatTierPrice, computeBundleScores: computeProductionBundleScores,
 } = sandbox.__scoring;
@@ -41,6 +42,10 @@ const DEFAULT_SETTINGS = {
 
 function fakeRow(isInPackage) {
   return { previousElementSibling: isInPackage ? { textContent: '3 item package', previousElementSibling: null, querySelector: () => null } : null };
+}
+function confidenceFromReviews(n, anchor = DEFAULT_SETTINGS.confidenceAnchor) {
+  sandbox.SETTINGS = { ...DEFAULT_SETTINGS, confidenceAnchor: anchor };
+  return confidenceFromProductionReviews(n);
 }
 function classifyItem(title, reviews, ratingPct, { isInPackage = false } = {}) {
   return classifyProductionItem(title, fakeRow(isInPackage), ratingPct, reviews);
