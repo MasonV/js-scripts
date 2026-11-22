@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Focus Search
 // @namespace    auto-focus-search
-// @version      1.1.3
+// @version      1.1.4
 // @description  Automatically detects and focuses search input fields on any webpage
 // @match        *://*/*
 // @noframes
@@ -457,7 +457,10 @@
         if (!indicator) {
             indicator = document.createElement('div')
             indicator.id = INDICATOR_ID
-            indicator.innerHTML = '<span class="afs-icon">&#128269;</span>'
+            const icon = document.createElement('span')
+            icon.className = 'afs-icon'
+            icon.textContent = '🔍'
+            indicator.append(icon)
             indicator.addEventListener('click', (e) => {
                 e.stopPropagation()
                 togglePopover(indicator.dataset.label)

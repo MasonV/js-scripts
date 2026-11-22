@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Music Redirect
 // @namespace    yt-music-redirect
-// @version      1.4.2
+// @version      1.4.3
 // @description  Automatically redirects YouTube music videos to YouTube Music
 // @match        *://www.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -539,6 +539,42 @@
 		dropdown.style.left = `${Math.max(8, rect.right - width)}px`
 	}
 
+	let globalListenersAttached = false
+
+	function ensureGlobalListeners() {
+		if (globalListenersAttached) return
+		globalListenersAttached = true
+
+		document.addEventListener('keydown', (e) => {
+			if (e.key !== 'Escape') return
+			const dropdown = document.getElementById(DROPDOWN_ID)
+			const btn = document.getElementById(MENU_BTN_ID)
+			if (!dropdown || !dropdown.classList.contains('ytmr-visible')) return
+			dropdown.classList.remove('ytmr-visible')
+			if (btn) btn.classList.remove('ytmr-open')
+		})
+
+		const onOutside = (e) => {
+			const dropdown = document.getElementById(DROPDOWN_ID)
+			const btn = document.getElementById(MENU_BTN_ID)
+			if (!dropdown) return
+			if ((btn && (e.target === btn || btn.contains(e.target))) || dropdown.contains(e.target)) return
+			dropdown.classList.remove('ytmr-visible')
+			if (btn) btn.classList.remove('ytmr-open')
+		}
+		document.addEventListener('click', onOutside, true)
+
+		const reposition = () => {
+			const dropdown = document.getElementById(DROPDOWN_ID)
+			const btn = document.getElementById(MENU_BTN_ID)
+			if (dropdown && btn && dropdown.classList.contains('ytmr-visible')) {
+				positionDropdown(btn, dropdown)
+			}
+		}
+		window.addEventListener('scroll', reposition, true)
+		window.addEventListener('resize', reposition)
+	}
+
 	function getOrCreateMenuBtn() {
 		let btn = document.getElementById(MENU_BTN_ID)
 		if (btn) return btn
@@ -556,7 +592,6 @@
 		const onTrigger = (e) => {
 			e.preventDefault()
 			e.stopPropagation()
-			e.stopImmediatePropagation()
 			log('Menu button triggered')
 			const dropdown = document.getElementById(DROPDOWN_ID)
 			if (!dropdown) {
@@ -568,39 +603,24 @@
 			btn.classList.toggle('ytmr-open', willOpen)
 			if (willOpen) positionDropdown(btn, dropdown)
 		}
-		btn.addEventListener('pointerdown', onTrigger, true)
-		btn.addEventListener('click', onTrigger, true)
+		btn.addEventListener('click', onTrigger)
 		btn.addEventListener('keydown', (e) => {
 			if (e.key === 'Enter' || e.key === ' ') onTrigger(e)
 		})
 
-		document.addEventListener('keydown', (e) => {
-			if (e.key !== 'Escape') return
-			const dropdown = document.getElementById(DROPDOWN_ID)
-			if (!dropdown || !dropdown.classList.contains('ytmr-visible')) return
-			dropdown.classList.remove('ytmr-visible')
-			btn.classList.remove('ytmr-open')
-		})
+		ensureGlobalListeners()
 
-		const onOutside = (e) => {
-			const dropdown = document.getElementById(DROPDOWN_ID)
-			if (!dropdown) return
-			if (e.target === btn || btn.contains(e.target) || dropdown.contains(e.target)) return
-			dropdown.classList.remove('ytmr-visible')
-			btn.classList.remove('ytmr-open')
-		}
-		document.addEventListener('pointerdown', onOutside, true)
-		document.addEventListener('click', onOutside, true)
+		return btn
+	}
 
-		const reposition = () => {
-			const dropdown = document.getElementById(DROPDOWN_ID)
-			if (dropdown && dropdown.classList.contains('ytmr-visible')) {
-				positionDropdown(btn, dropdown)
-			}
-		}
-		window.addEventListener('scroll', reposition, true)
-		window.addEventListener('resize', reposition)
-
+	function createMenuItem(iconChar, labelText, extraClass) {
+		const btn = document.createElement('button')
+		btn.className = `ytmr-menu-item${extraClass ? ` ${extraClass}` : ''}`
+		const icon = document.createElement('span')
+		icon.className = 'ytmr-icon'
+		icon.textContent = iconChar
+		btn.appendChild(icon)
+		btn.appendChild(document.createTextNode(` ${labelText}`))
 		return btn
 	}
 
@@ -613,22 +633,17 @@
 		const dropdown = document.createElement('div')
 		dropdown.id = DROPDOWN_ID
 
-		dropdown.addEventListener('pointerdown', (e) => e.stopPropagation())
 		dropdown.addEventListener('click', (e) => e.stopPropagation())
 
 		const bindItem = (el, handler) => {
-			const wrapped = (e) => {
+			el.addEventListener('click', (e) => {
 				e.preventDefault()
 				e.stopPropagation()
 				handler()
-			}
-			el.addEventListener('pointerdown', wrapped)
-			el.addEventListener('click', wrapped)
+			})
 		}
 
-		const redirectItem = document.createElement('button')
-		redirectItem.className = 'ytmr-menu-item ytmr-redirect-item'
-		redirectItem.innerHTML = '<span class="ytmr-icon">\u266B</span> Open in YT Music'
+		const redirectItem = createMenuItem('\u266B', 'Open in YT Music', 'ytmr-redirect-item')
 		bindItem(redirectItem, () => redirectToMusic(videoId))
 		dropdown.appendChild(redirectItem)
 
@@ -641,9 +656,16 @@
 
 			function updateChannelItem(active) {
 				channelItem.className = `ytmr-menu-item${active ? ' ytmr-active' : ''}`
-				channelItem.innerHTML = active
-					? `<span class="ytmr-icon">\u2713</span> Auto-redirecting ${esc(displayName)}`
-					: `<span class="ytmr-icon">\u21BB</span> Auto-redirect ${esc(displayName)}`
+				while (channelItem.firstChild) {
+					channelItem.removeChild(channelItem.firstChild)
+				}
+				const icon = document.createElement('span')
+				icon.className = 'ytmr-icon'
+				icon.textContent = active ? '\u2713' : '\u21BB'
+				channelItem.appendChild(icon)
+				channelItem.appendChild(
+					document.createTextNode(active ? ` Auto-redirecting ${displayName}` : ` Auto-redirect ${displayName}`)
+				)
 			}
 
 			updateChannelItem(inList)
@@ -658,9 +680,7 @@
 			})
 			dropdown.appendChild(channelItem)
 
-			const blockItem = document.createElement('button')
-			blockItem.className = 'ytmr-menu-item'
-			blockItem.innerHTML = `<span class="ytmr-icon">\u2715</span> Not a music channel`
+			const blockItem = createMenuItem('\u2715', 'Not a music channel')
 			blockItem.title = `Never show redirect for ${displayName}`
 			bindItem(blockItem, () => {
 				blockChannel(channelId, channelName)
@@ -672,13 +692,11 @@
 
 		dropdown.appendChild(createDivider())
 
-		const dismissItem = document.createElement('button')
-		dismissItem.className = 'ytmr-menu-item'
-		dismissItem.innerHTML = '<span class="ytmr-icon">\u00D7</span> Dismiss'
+		const dismissItem = createMenuItem('\u00D7', 'Dismiss')
 		bindItem(dismissItem, () => removeRedirectButton())
 		dropdown.appendChild(dismissItem)
 
-		menuBtn.appendChild(dropdown)
+		document.body.appendChild(dropdown)
 
 		log('Redirect menu injected')
 	}
@@ -687,12 +705,6 @@
 		const d = document.createElement('div')
 		d.className = 'ytmr-divider'
 		return d
-	}
-
-	function esc(str) {
-		const el = document.createElement('span')
-		el.textContent = str
-		return el.innerHTML
 	}
 
 	function removeDropdown() {

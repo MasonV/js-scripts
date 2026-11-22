@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI Chat Widescreen
 // @namespace    ai-chat-widescreen
-// @version      1.1.0
+// @version      1.1.1
 // @description  Widescreen mode for ChatGPT, Claude, and Gemini — widens the narrow chat column to fit your monitor, with a per-site width control
 // @match        https://chatgpt.com/*
 // @match        https://claude.ai/*
@@ -537,6 +537,7 @@
 	let launcherEl = null
 	let panelEl = null
 	let resetArmed = false
+	let resetTimer = null
 
 	function buildLauncher() {
 		if (document.getElementById(LAUNCHER_ID)) return
@@ -545,10 +546,23 @@
 		launcherEl.id = LAUNCHER_ID
 		launcherEl.type = 'button'
 		launcherEl.title = 'Widescreen settings (Alt+Shift+W toggles widescreen)'
-		launcherEl.innerHTML =
-			'<span class="aiws-led"></span><span class="aiws-launcher-icon">⬌</span>' +
-			'<span class="aiws-launcher-text">Widescreen</span>' +
-			'<span class="aiws-launcher-state">On</span>'
+
+		const led = document.createElement('span')
+		led.className = 'aiws-led'
+
+		const icon = document.createElement('span')
+		icon.className = 'aiws-launcher-icon'
+		icon.textContent = '⬌'
+
+		const text = document.createElement('span')
+		text.className = 'aiws-launcher-text'
+		text.textContent = 'Widescreen'
+
+		const state = document.createElement('span')
+		state.className = 'aiws-launcher-state'
+		state.textContent = 'On'
+
+		launcherEl.append(led, icon, text, state)
 		launcherEl.addEventListener('click', togglePanel)
 
 		document.body.appendChild(launcherEl)
@@ -560,57 +574,68 @@
 		panelEl = document.createElement('div')
 		panelEl.id = PANEL_ID
 		panelEl.hidden = true
-		panelEl.innerHTML = `
-			<div class="aiws-header">
-				<span class="aiws-title">⬌ Widescreen — <span id="aiws-site-label"></span></span>
-				<button type="button" class="aiws-close" id="aiws-close" title="Close">✕</button>
-			</div>
-			<div class="aiws-body">
-				<div class="aiws-row">
-					<span class="aiws-label">Widen the chat</span>
-					<button type="button" class="aiws-switch" id="aiws-enabled"></button>
-				</div>
 
-				<div class="aiws-field">
-					<label class="aiws-label" for="aiws-width">Chat width</label>
-					<input type="range" id="aiws-width"
-						min="${WIDTH_MIN_PCT}" max="${WIDTH_MAX_PCT}" step="${WIDTH_STEP_PCT}">
-					<p class="aiws-echo">
-						<strong id="aiws-echo-main"></strong>
-						<span id="aiws-echo-sub"></span>
-					</p>
-					<div class="aiws-presets" id="aiws-presets"></div>
-				</div>
+		// Header
+		const header = document.createElement('div')
+		header.className = 'aiws-header'
 
-				<div class="aiws-row">
-					<span class="aiws-label">Match the input box</span>
-					<button type="button" class="aiws-switch" id="aiws-composer"></button>
-				</div>
-			</div>
-			<div class="aiws-footer">
-				<span class="aiws-hint">Alt+Shift+W toggles widescreen</span>
-				<button type="button" class="aiws-reset" id="aiws-reset">↺ Reset this site</button>
-			</div>
-		`
+		const title = document.createElement('span')
+		title.className = 'aiws-title'
+		title.append('⬌ Widescreen — ')
+		const siteLabel = document.createElement('span')
+		siteLabel.id = 'aiws-site-label'
+		siteLabel.textContent = site.label
+		title.append(siteLabel)
 
-		document.body.appendChild(panelEl)
+		const closeBtn = document.createElement('button')
+		closeBtn.type = 'button'
+		closeBtn.className = 'aiws-close'
+		closeBtn.id = 'aiws-close'
+		closeBtn.title = 'Close'
+		closeBtn.textContent = '✕'
+		closeBtn.addEventListener('click', closePanel)
 
-		panelEl.querySelector('#aiws-site-label').textContent = site.label
-		panelEl.querySelector('#aiws-close').addEventListener('click', closePanel)
+		header.append(title, closeBtn)
 
-		panelEl.querySelector('#aiws-enabled').addEventListener('click', () => {
+		// Body
+		const body = document.createElement('div')
+		body.className = 'aiws-body'
+
+		// Row 1: Widen the chat
+		const row1 = document.createElement('div')
+		row1.className = 'aiws-row'
+
+		const row1Label = document.createElement('span')
+		row1Label.className = 'aiws-label'
+		row1Label.textContent = 'Widen the chat'
+
+		const enabledBtn = document.createElement('button')
+		enabledBtn.type = 'button'
+		enabledBtn.className = 'aiws-switch'
+		enabledBtn.id = 'aiws-enabled'
+		enabledBtn.addEventListener('click', () => {
 			settings.enabled = !settings.enabled
 			saveAndApply()
 		})
 
-		panelEl.querySelector('#aiws-composer').addEventListener('click', () => {
-			settings.matchComposer = !settings.matchComposer
-			saveAndApply()
-		})
+		row1.append(row1Label, enabledBtn)
 
-		const slider = panelEl.querySelector('#aiws-width')
-		// Live preview while dragging — the page resizes under the slider, so
-		// the width you are choosing is the width you can see.
+		// Field: Chat width
+		const field = document.createElement('div')
+		field.className = 'aiws-field'
+
+		const widthLabel = document.createElement('label')
+		widthLabel.className = 'aiws-label'
+		widthLabel.htmlFor = 'aiws-width'
+		widthLabel.textContent = 'Chat width'
+
+		const slider = document.createElement('input')
+		slider.type = 'range'
+		slider.id = 'aiws-width'
+		slider.min = String(WIDTH_MIN_PCT)
+		slider.max = String(WIDTH_MAX_PCT)
+		slider.step = String(WIDTH_STEP_PCT)
+
 		slider.addEventListener('input', () => {
 			settings.widthPct = clampPct(slider.value)
 			renderDynamicCss()
@@ -621,7 +646,21 @@
 			saveAndApply()
 		})
 
-		const presets = panelEl.querySelector('#aiws-presets')
+		const echo = document.createElement('p')
+		echo.className = 'aiws-echo'
+
+		const echoMain = document.createElement('strong')
+		echoMain.id = 'aiws-echo-main'
+
+		const echoSub = document.createElement('span')
+		echoSub.id = 'aiws-echo-sub'
+
+		echo.append(echoMain, echoSub)
+
+		const presets = document.createElement('div')
+		presets.className = 'aiws-presets'
+		presets.id = 'aiws-presets'
+
 		for (const preset of PRESETS) {
 			const button = document.createElement('button')
 			button.type = 'button'
@@ -635,14 +674,49 @@
 			presets.appendChild(button)
 		}
 
-		// Two-step confirm: resetting throws away a width the user tuned.
-		const reset = panelEl.querySelector('#aiws-reset')
+		field.append(widthLabel, slider, echo, presets)
+
+		// Row 2: Match the input box
+		const row2 = document.createElement('div')
+		row2.className = 'aiws-row'
+
+		const row2Label = document.createElement('span')
+		row2Label.className = 'aiws-label'
+		row2Label.textContent = 'Match the input box'
+
+		const composerBtn = document.createElement('button')
+		composerBtn.type = 'button'
+		composerBtn.className = 'aiws-switch'
+		composerBtn.id = 'aiws-composer'
+		composerBtn.addEventListener('click', () => {
+			settings.matchComposer = !settings.matchComposer
+			saveAndApply()
+		})
+
+		row2.append(row2Label, composerBtn)
+
+		body.append(row1, field, row2)
+
+		// Footer
+		const footer = document.createElement('div')
+		footer.className = 'aiws-footer'
+
+		const hint = document.createElement('span')
+		hint.className = 'aiws-hint'
+		hint.textContent = 'Alt+Shift+W toggles widescreen'
+
+		const reset = document.createElement('button')
+		reset.type = 'button'
+		reset.className = 'aiws-reset'
+		reset.id = 'aiws-reset'
+		reset.textContent = '↺ Reset this site'
 		reset.addEventListener('click', () => {
 			if (!resetArmed) {
 				resetArmed = true
 				reset.textContent = '↺ Click again to reset'
 				reset.classList.add('aiws-armed')
-				setTimeout(disarmReset, 4000)
+				clearTimeout(resetTimer)
+				resetTimer = setTimeout(disarmReset, 4000)
 				return
 			}
 			disarmReset()
@@ -650,9 +724,16 @@
 			log(`Settings reset to defaults for ${site.label}.`)
 			saveAndApply()
 		})
+
+		footer.append(hint, reset)
+
+		panelEl.append(header, body, footer)
+		document.body.appendChild(panelEl)
 	}
 
 	function disarmReset() {
+		clearTimeout(resetTimer)
+		resetTimer = null
 		resetArmed = false
 		const reset = panelEl?.querySelector('#aiws-reset')
 		if (!reset) return
