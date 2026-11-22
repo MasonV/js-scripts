@@ -27,3 +27,6 @@ adev
 !.env.example
 .devpod-restore-uncommitted.patch
 .worktrees/
+
+# devpod: supplementary ignores
+.playwright-mcp/
