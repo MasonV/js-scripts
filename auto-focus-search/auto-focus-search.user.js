@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Focus Search
 // @namespace    auto-focus-search
-// @version      1.1.4
+// @version      1.1.5
 // @description  Automatically detects and focuses search input fields on any webpage
 // @match        *://*/*
 // @noframes
@@ -60,14 +60,14 @@
         'textarea[placeholder*="search" i]',
         'textarea[aria-label*="search" i]',
 
-        // Tier 5: Common IDs and classes
-        '#search-input',
-        '#searchbox',
-        '#search',
-        '#q',
-        '.search-input',
-        '.search-box',
-        '.search-field',
+        // Tier 5: Common IDs and classes (constrained to input/textarea)
+        'input#search-input, textarea#search-input',
+        'input#searchbox, textarea#searchbox',
+        'input#search, textarea#search',
+        'input#q, textarea#q',
+        'input.search-input, textarea.search-input',
+        'input.search-box, textarea.search-box',
+        'input.search-field, textarea.search-field',
         'input.search',
     ]
 
@@ -121,22 +121,8 @@
         return rect.width > 0 && rect.height > 0
     }
 
-    function isFocusable(el) {
-        return !el.disabled && !el.readOnly && el.tabIndex !== -1
-    }
-
     function findSearchInput() {
-        for (const selector of SEARCH_SELECTORS) {
-            try {
-                const els = document.querySelectorAll(selector)
-                for (const el of els) {
-                    if (isVisible(el) && isFocusable(el)) return el
-                }
-            } catch {
-                // invalid selector on some pages, skip
-            }
-        }
-        return null
+        return findAllSearchInputs()[0] || null
     }
 
     function findAllSearchInputs() {
@@ -155,7 +141,7 @@
                 // skip
             }
         }
-        return results
+        return results.sort((a, b) => scoreCandidate(b) - scoreCandidate(a))
     }
 
     function isSearchInput(el) {
@@ -273,6 +259,41 @@
     //  PURE LOGIC
     // ═══════════════════════════════════════════════════════════════════
 
+    const NON_TEXT_INPUT_TYPES = new Set([
+        'hidden',
+        'submit',
+        'button',
+        'checkbox',
+        'radio',
+        'image',
+        'reset',
+        'file',
+        'range',
+        'color',
+    ])
+
+    function readElementAttr(el, attr, prop) {
+        if (typeof el.getAttribute === 'function') {
+            const v = el.getAttribute(attr)
+            if (v != null) return String(v)
+        }
+        return el[prop] != null ? String(el[prop]) : ''
+    }
+
+    function isTextInputElement(el) {
+        if (!el) return false
+        const tag = String(el.tagName || '').toLowerCase()
+        if (tag === 'textarea') return true
+        if (tag !== 'input') return false
+        const type = readElementAttr(el, 'type', 'type').toLowerCase()
+        return !NON_TEXT_INPUT_TYPES.has(type || 'text')
+    }
+
+    function isFocusable(el) {
+        if (!isTextInputElement(el)) return false
+        return !el.disabled && !el.readOnly && el.tabIndex !== -1
+    }
+
     function describeElement(el) {
         const tag = (el.tagName || 'input').toLowerCase()
         const id = el.id ? `#${el.id}` : ''
@@ -282,32 +303,18 @@
     }
 
     function scoreCandidate(el) {
-        if (!el) return 0
-        const tag = String(el.tagName || '').toLowerCase()
-        if (tag && tag !== 'input' && tag !== 'textarea') return 0
+        if (!isTextInputElement(el)) return 0
 
-        const readAttr = (attr, prop) => {
-            if (typeof el.getAttribute === 'function') {
-                const v = el.getAttribute(attr)
-                if (v != null) return String(v)
-            }
-            return el[prop] != null ? String(el[prop]) : ''
-        }
-
-        const type = readAttr('type', 'type').toLowerCase()
-        if (type === 'hidden' || type === 'submit' || type === 'button' || type === 'checkbox' || type === 'radio') {
-            return 0
-        }
-
+        const type = readElementAttr(el, 'type', 'type').toLowerCase()
         const inSearchRole = Boolean(
             el.inSearchRole ||
                 (typeof el.closest === 'function' && el.closest('[role="search"]')),
         )
-        const name = readAttr('name', 'name').toLowerCase()
-        const id = readAttr('id', 'id').toLowerCase()
-        const className = readAttr('class', 'className').toLowerCase()
-        const placeholder = readAttr('placeholder', 'placeholder').toLowerCase()
-        const ariaLabel = readAttr('aria-label', 'ariaLabel').toLowerCase()
+        const name = readElementAttr(el, 'name', 'name').toLowerCase()
+        const id = readElementAttr(el, 'id', 'id').toLowerCase()
+        const className = readElementAttr(el, 'class', 'className').toLowerCase()
+        const placeholder = readElementAttr(el, 'placeholder', 'placeholder').toLowerCase()
+        const ariaLabel = readElementAttr(el, 'aria-label', 'ariaLabel').toLowerCase()
 
         let score = 0
         if (inSearchRole) score += 100
@@ -321,17 +328,6 @@
             score += 20
         }
         return score
-    }
-
-    function isSearchPath(pathname = window.location.pathname, search = window.location.search) {
-        const path = String(pathname || '').toLowerCase()
-        if (/\/(?:search|results|find)(?:\/|$)/.test(path)) return true
-        const params = new URLSearchParams(String(search || ''))
-        for (const key of ['q', 'query', 'search', 'search_query', 's', 'k']) {
-            const val = params.get(key)
-            if (val != null && val.trim() !== '') return true
-        }
-        return false
     }
 
     // ═══════════════════════════════════════════════════════════════════
