@@ -26,9 +26,9 @@ const currencyLogic = between('  function formatTierPrice(tier, currencyPref)', 
 
 const sandbox = { SETTINGS: {}, CURRENT_BUNDLE_COST: null };
 vm.createContext(sandbox);
-vm.runInContext(`${pureLogic}\n${classifyLogic}\n${scoringLogic}\n${bundleLogic}\n${currencyDefs}\n${currencyLogic}\nglobalThis.__scoring = { clamp01, confidenceFromReviews, wilsonLowerBound, classifyItem, scoreGame, scoreColor, scoreBg, scoreTierLabel, ratingColor, formatBreakdown, formatTierPrice, computeBundleScores };`, sandbox);
+vm.runInContext(`${pureLogic}\n${classifyLogic}\n${scoringLogic}\n${bundleLogic}\n${currencyDefs}\n${currencyLogic}\nglobalThis.__scoring = { clamp01, confidenceFromReviews, wilsonLowerBound, parseReviewCellText, classifyItem, scoreGame, scoreColor, scoreBg, scoreTierLabel, ratingColor, formatBreakdown, formatTierPrice, computeBundleScores };`, sandbox);
 const {
-  clamp01, confidenceFromReviews: confidenceFromProductionReviews, wilsonLowerBound, classifyItem: classifyProductionItem,
+  clamp01, confidenceFromReviews: confidenceFromProductionReviews, wilsonLowerBound, parseReviewCellText: parseProductionReviewCellText, classifyItem: classifyProductionItem,
   scoreGame: scoreProductionGame, scoreColor, scoreBg, scoreTierLabel, ratingColor,
   formatBreakdown, formatTierPrice, computeBundleScores: computeProductionBundleScores,
 } = sandbox.__scoring;
@@ -42,6 +42,10 @@ const DEFAULT_SETTINGS = {
 
 function fakeRow(isInPackage) {
   return { previousElementSibling: isInPackage ? { textContent: '3 item package', previousElementSibling: null, querySelector: () => null } : null };
+}
+function parseReviewCellText(text) {
+  const { ratingPct, reviews } = parseProductionReviewCellText(text);
+  return { ratingPct, reviews };
 }
 function confidenceFromReviews(n, anchor = DEFAULT_SETTINGS.confidenceAnchor) {
   sandbox.SETTINGS = { ...DEFAULT_SETTINGS, confidenceAnchor: anchor };
@@ -440,5 +444,281 @@ describe('computeBundleScores', () => {
     assert.equal(res.depthRating, 0);
     assert.equal(res.personalRating, 0);
     assert.equal(res.dealQuality, null);
+  });
+});
+
+describe('parseReviewCellText', () => {
+  it('parses explicit percentage when review count is below rating percentage', () => {
+    assert.deepEqual(parseReviewCellText('88% 15'), { ratingPct: 88, reviews: 15 });
+    assert.deepEqual(parseReviewCellText('88% (15)'), { ratingPct: 88, reviews: 15 });
+    assert.deepEqual(parseReviewCellText('15 reviews, 88%'), { ratingPct: 88, reviews: 15 });
+    assert.deepEqual(parseReviewCellText('80% 10'), { ratingPct: 80, reviews: 10 });
+  });
+
+  it('prevents low-review high-rated DLCs from being misclassified as games', () => {
+    const parsed = parseReviewCellText('80% 10');
+    assert.equal(classifyItem('Cool Soundtrack', parsed.reviews, parsed.ratingPct), 'dlc');
+    assert.equal(classifyItem('Bonus Chapter', parsed.reviews, parsed.ratingPct, { isInPackage: true }), 'dlc');
+  });
+
+  it('handles comma-formatted counts, whitespace before %, decimals, and boundary percentages', () => {
+    assert.deepEqual(parseReviewCellText('92.5% (1,234)'), { ratingPct: 92.5, reviews: 1234 });
+    assert.deepEqual(parseReviewCellText('88 % 15'), { ratingPct: 88, reviews: 15 });
+    assert.deepEqual(parseReviewCellText('0% (5)'), { ratingPct: 0, reviews: 5 });
+    assert.deepEqual(parseReviewCellText('100% 100'), { ratingPct: 100, reviews: 100 });
+  });
+
+  it('ignores out-of-range percentage values', () => {
+    assert.deepEqual(parseReviewCellText('150% (20)'), { ratingPct: null, reviews: 20 });
+  });
+
+  it('handles single-number cells with and without %', () => {
+    assert.deepEqual(parseReviewCellText('88%'), { ratingPct: 88, reviews: null });
+    assert.deepEqual(parseReviewCellText('88'), { ratingPct: 88, reviews: null });
+    assert.deepEqual(parseReviewCellText('250'), { ratingPct: null, reviews: 250 });
+  });
+
+  it('falls back to descending heuristic when two numbers appear without %', () => {
+    assert.deepEqual(parseReviewCellText('88 1234'), { ratingPct: 88, reviews: 1234 });
+    assert.deepEqual(parseReviewCellText('1,234 88'), { ratingPct: 88, reviews: 1234 });
+    assert.deepEqual(parseReviewCellText('200 150'), { ratingPct: null, reviews: 200 });
+  });
+
+  it('returns nulls for empty, null, or non-numeric inputs', () => {
+    assert.deepEqual(parseReviewCellText(''), { ratingPct: null, reviews: null });
+    assert.deepEqual(parseReviewCellText('N/A'), { ratingPct: null, reviews: null });
+    assert.deepEqual(parseReviewCellText(null), { ratingPct: null, reviews: null });
+    assert.deepEqual(parseReviewCellText(undefined), { ratingPct: null, reviews: null });
+  });
+});
+
+// ═══════════════════════════════════════
+// METADATA & UPDATE CHECK
+// ═══════════════════════════════════════
+
+const metaSource = fs.readFileSync(path.join(__dirname, 'barter-bundle-scorer.meta.js'), 'utf8');
+
+function parseMetadataBlock(text) {
+  const match = text.match(/\/\/ ==UserScript==([\s\S]*?)\/\/ ==\/UserScript==/);
+  assert.ok(match, 'Missing // ==UserScript== metadata block');
+  const entries = {};
+  for (const line of match[1].split(/\r?\n/)) {
+    const lineMatch = line.match(/^\s*\/\/\s+@(\S+)\s+(.*)$/);
+    if (!lineMatch) continue;
+    const [, key, value] = lineMatch;
+    if (!entries[key]) entries[key] = [];
+    entries[key].push(value.trim());
+  }
+  return { entries, afterBlock: text.slice(match.index + match[0].length) };
+}
+
+function makeStubElement(tagName) {
+  const listeners = new Map();
+  const el = {
+    tagName: tagName.toUpperCase(),
+    id: '',
+    type: '',
+    textContent: '',
+    style: {},
+    children: [],
+    parent: null,
+    append(...nodes) {
+      for (const node of nodes) {
+        node.parent = this;
+        this.children.push(node);
+      }
+    },
+    prepend(node) {
+      node.parent = this;
+      this.children.unshift(node);
+    },
+    remove() {
+      if (!this.parent) return;
+      this.parent.children = this.parent.children.filter(c => c !== this);
+      this.parent = null;
+    },
+    addEventListener(type, fn) {
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(fn);
+    },
+    click() {
+      for (const fn of listeners.get('click') || []) fn();
+    },
+  };
+  return el;
+}
+
+function createUpdateCheckHarness({ gmInfo, responseText, status = 200 } = {}) {
+  const versionHeader = between('  const LOG_PREFIX =', '\n  // ═══════════════════════════════════════\n  // LOGGING');
+  const updateBlock = between('// <update-check>', '// </update-check>');
+
+  const body = makeStubElement('body');
+  const storage = new Map();
+  const logs = [];
+  const requests = [];
+  const openedUrls = [];
+
+  function findById(node, id) {
+    if (node.id === id) return node;
+    for (const child of node.children) {
+      const found = findById(child, id);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  const updateSandbox = {
+    GM_info: gmInfo,
+    GM_xmlhttpRequest(opts) {
+      requests.push(opts);
+      if (typeof responseText === 'string') {
+        opts.onload?.({ status, responseText });
+      }
+    },
+    sessionStorage: {
+      getItem: key => (storage.has(key) ? storage.get(key) : null),
+      setItem: (key, val) => storage.set(key, String(val)),
+    },
+    document: {
+      body,
+      createElement: tag => makeStubElement(tag),
+      getElementById: id => findById(body, id),
+      addEventListener() {},
+    },
+    window: {
+      open: (url, target) => openedUrls.push({ url, target }),
+    },
+    console: {
+      log: (...args) => logs.push(args.join(' ')),
+      warn: (...args) => logs.push(args.join(' ')),
+    },
+  };
+  vm.createContext(updateSandbox);
+  vm.runInContext(
+    `${versionHeader}\n${updateBlock}\nglobalThis.__update = { META_URL, DOWNLOAD_URL, SCRIPT_VERSION, UPDATE_BANNER_ID, isNewerVersion, checkForUpdate };`,
+    updateSandbox,
+  );
+  return {
+    ...updateSandbox.__update,
+    body,
+    storage,
+    logs,
+    requests,
+    openedUrls,
+  };
+}
+
+describe('barter-bundle-scorer.meta.js metadata & update check', () => {
+  it('stays in sync with barter-bundle-scorer.user.js metadata and has no script body', () => {
+    const meta = parseMetadataBlock(metaSource);
+    const user = parseMetadataBlock(source);
+
+    assert.equal(meta.afterBlock.trim(), '', '.meta.js should contain metadata only');
+    assert.match(meta.entries.version?.[0] || '', /^\d+\.\d+\.\d+$/);
+
+    const comparedKeys = [
+      'name', 'namespace', 'version', 'description', 'match',
+      'homepageURL', 'supportURL', 'updateURL', 'downloadURL',
+      'grant', 'connect', 'run-at',
+    ];
+    for (const key of comparedKeys) {
+      assert.deepEqual(meta.entries[key], user.entries[key], `@${key} mismatch between .meta.js and .user.js`);
+    }
+  });
+
+  it('triggers an update banner when installed version is older than barter-bundle-scorer.meta.js', () => {
+    const meta = parseMetadataBlock(metaSource);
+    const currentVersion = meta.entries.version[0];
+    const [major, minor, patch] = currentVersion.split('.').map(Number);
+    const previousVersion = patch > 0 ? `${major}.${minor}.${patch - 1}` : '0.0.0';
+
+    const harness = createUpdateCheckHarness({
+      gmInfo: {
+        script: {
+          version: previousVersion,
+          updateURL: meta.entries.updateURL[0],
+          downloadURL: meta.entries.downloadURL[0],
+        },
+      },
+      responseText: metaSource,
+    });
+
+    harness.checkForUpdate();
+
+    assert.equal(harness.requests.length, 1);
+    assert.ok(harness.requests[0].url.startsWith(`${meta.entries.updateURL[0]}?_=`));
+
+    const banner = harness.body.children.find(el => el.id === harness.UPDATE_BANNER_ID);
+    assert.ok(banner, 'Expected update banner to be injected');
+    assert.match(banner.children[0].textContent, new RegExp(`v${currentVersion.replace(/\./g, '\\.')} available \\(you have v${previousVersion.replace(/\./g, '\\.')}\\)`));
+
+    banner.children[0].click();
+    assert.deepEqual(harness.openedUrls, [{ url: meta.entries.downloadURL[0], target: '_blank' }]);
+  });
+
+  it('reports up-to-date without a banner when installed version matches barter-bundle-scorer.meta.js', () => {
+    const user = parseMetadataBlock(source);
+    const installedVersion = user.entries.version[0];
+
+    const harness = createUpdateCheckHarness({
+      gmInfo: {
+        script: {
+          version: installedVersion,
+          updateURL: user.entries.updateURL[0],
+          downloadURL: user.entries.downloadURL[0],
+        },
+      },
+      responseText: metaSource,
+    });
+
+    harness.checkForUpdate();
+
+    assert.equal(harness.requests.length, 1);
+    assert.equal(harness.body.children.length, 0);
+    assert.ok(harness.logs.some(line => line.includes(`Up to date (v${installedVersion}).`)));
+  });
+
+  it('persists dismissal per offered version and surfaces banner again for a newer version', () => {
+    const meta = parseMetadataBlock(metaSource);
+    const currentVersion = meta.entries.version[0];
+    const [major, minor, patch] = currentVersion.split('.').map(Number);
+    const previousVersion = patch > 0 ? `${major}.${minor}.${patch - 1}` : '0.0.0';
+
+    const harness = createUpdateCheckHarness({
+      gmInfo: {
+        script: {
+          version: previousVersion,
+          updateURL: meta.entries.updateURL[0],
+          downloadURL: meta.entries.downloadURL[0],
+        },
+      },
+      responseText: metaSource,
+    });
+
+    harness.checkForUpdate();
+    const banner = harness.body.children.find(el => el.id === harness.UPDATE_BANNER_ID);
+    assert.ok(banner);
+
+    // Click dismiss button
+    banner.children[1].click();
+    assert.equal(harness.body.children.length, 0);
+    assert.equal(harness.storage.get(`barter_bundle_scorer_update_dismissed_v${currentVersion}`), '1');
+
+    // Re-checking the same .meta.js stays dismissed
+    harness.checkForUpdate();
+    assert.equal(harness.body.children.length, 0);
+  });
+
+  it('falls back to .meta.js update/download URLs and skips check in dev builds when GM_info is missing', () => {
+    const meta = parseMetadataBlock(metaSource);
+    const harness = createUpdateCheckHarness({ gmInfo: undefined, responseText: metaSource });
+
+    assert.equal(harness.SCRIPT_VERSION, '__DEV__');
+    assert.equal(harness.META_URL, meta.entries.updateURL[0]);
+    assert.equal(harness.DOWNLOAD_URL, meta.entries.downloadURL[0]);
+
+    harness.checkForUpdate();
+    assert.equal(harness.requests.length, 0);
+    assert.ok(harness.logs.some(line => line.includes('Dev build — skipping update check.')));
   });
 });

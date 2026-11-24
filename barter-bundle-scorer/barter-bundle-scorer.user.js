@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    barter-bundle-scorer
-// @version      6.7.1
+// @version      6.7.2
 // @description  Full-page bundle evaluation dashboard with per-game scoring, card grid, stats dashboard, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -945,6 +945,38 @@
     const adj = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n);
     return clamp01((centre - adj) / denom);
   }
+  // Parse a Barter.vg review/rating cell string into { ratingPct, reviews }.
+  // Checks for an explicit "%" first so low-review games (e.g. "88% (15)")
+  // are never swapped with high-review low-rating games.
+  function parseReviewCellText(text) {
+    if (typeof text !== 'string' || !text.trim()) {
+      return { ratingPct: null, reviews: null };
+    }
+    const clean = text.replace(/,/g, '');
+    const pctMatch = clean.match(/(\d+(?:\.\d+)?)\s*%/);
+    if (pctMatch) {
+      const pctVal = Number(pctMatch[1]);
+      const ratingPct = pctVal >= 0 && pctVal <= 100 ? pctVal : null;
+      const rest = `${clean.slice(0, pctMatch.index)} ${clean.slice(pctMatch.index + pctMatch[0].length)}`;
+      const restNums = (rest.match(/\d+(?:\.\d+)?/g) || []).map(Number);
+      const reviews = restNums.length >= 1 ? restNums[0] : null;
+      return { ratingPct, reviews };
+    }
+    const nums = (clean.match(/\d+(?:\.\d+)?/g) || []).map(Number);
+    if (nums.length >= 2) {
+      const sorted = [...nums].sort((a, b) => b - a);
+      return {
+        reviews: sorted[0],
+        ratingPct: sorted[1] <= 100 ? sorted[1] : null,
+      };
+    }
+    if (nums.length === 1) {
+      return nums[0] <= 100
+        ? { ratingPct: nums[0], reviews: null }
+        : { ratingPct: null, reviews: nums[0] };
+    }
+    return { ratingPct: null, reviews: null };
+  }
   // ═══════════════════════════════════════
   // PURE FUNCTIONS — END
   // ═══════════════════════════════════════
@@ -1149,6 +1181,42 @@
       if (!cell) return [];
       return (cell.textContent.replace(/,/g, '').match(/\d+(?:\.\d+)?/g) || []).map(Number);
     };
+    const parseReviewCell = (cell) => {
+      if (!cell) return { ratingPct: null, reviews: null };
+      const text = cell.textContent || '';
+      if (/\d+(?:\.\d+)?\s*%/.test(text)) {
+        return parseReviewCellText(text);
+      }
+      // Check title attributes on the cell or child elements when visible text lacks "%".
+      const titleTexts = [];
+      if (typeof cell.getAttribute === 'function') {
+        const ownTitle = cell.getAttribute('title');
+        if (ownTitle) titleTexts.push(ownTitle);
+      }
+      if (typeof cell.querySelectorAll === 'function') {
+        for (const el of cell.querySelectorAll('[title]')) {
+          const t = el.getAttribute('title');
+          if (t) titleTexts.push(t);
+        }
+      }
+      for (const titleText of titleTexts) {
+        if (!/\d+(?:\.\d+)?\s*%/.test(titleText)) continue;
+        const fromTitle = parseReviewCellText(titleText);
+        if (fromTitle.ratingPct != null && fromTitle.reviews != null) {
+          return fromTitle;
+        }
+        if (fromTitle.ratingPct != null) {
+          const cellNums = numsIn(cell);
+          const idx = cellNums.indexOf(fromTitle.ratingPct);
+          if (idx !== -1) cellNums.splice(idx, 1);
+          return {
+            ratingPct: fromTitle.ratingPct,
+            reviews: cellNums.length >= 1 ? cellNums[0] : null,
+          };
+        }
+      }
+      return parseReviewCellText(text);
+    };
     // Walk cells right-to-left
     let phase = 0; // 0=looking for price, 1=looking for bundled, 2=looking for reviews/rating
     for (let i = cells.length - 1; i >= 0 && phase < 3; i--) {
@@ -1171,31 +1239,32 @@
       }
       if (phase === 2) {
         reviewCell = cells[i];
-        if (nums.length >= 2) {
-          const sorted = [...nums].sort((a, b) => b - a);
-          reviews = sorted[0];
-          ratingPct = sorted[1] <= 100 ? sorted[1] : null;
-        } else if (nums.length === 1) {
-          if (nums[0] <= 100) ratingPct = nums[0];
-          else reviews = nums[0];
-        }
+        ({ ratingPct, reviews } = parseReviewCell(cells[i]));
         phase = 3;
       }
     }
     // Fallback: if the phased scan didn't reach review/rating data (e.g. no MSRP
-    // column for this row), do a dedicated scan for a cell with two numbers where
-    // one is ≤100 (rating%) and the other is the review count.
+    // column for this row), do a dedicated scan for a cell with both a rating%
+    // and review count.
     if (ratingPct == null && reviews == null) {
       for (let i = cells.length - 1; i >= 0; i--) {
-        const nums = numsIn(cells[i]);
-        if (nums.length >= 2) {
-          const sorted = [...nums].sort((a, b) => b - a);
-          if (sorted[1] >= 1 && sorted[1] <= 100 && sorted[0] <= 10_000_000) {
-            reviews = sorted[0];
-            ratingPct = sorted[1];
-            reviewCell = cells[i];
-            break;
-          }
+        const cell = cells[i];
+        const parsed = parseReviewCell(cell);
+        const hasPct = /\d+(?:\.\d+)?\s*%/.test(cell.textContent || '') ||
+          /\d+(?:\.\d+)?\s*%/.test(cell.getAttribute?.('title') || '') ||
+          Boolean(cell.querySelector?.('[title*="%"]'));
+        const minPct = hasPct ? 0 : 1;
+        if (
+          parsed.ratingPct != null &&
+          parsed.reviews != null &&
+          parsed.ratingPct >= minPct &&
+          parsed.ratingPct <= 100 &&
+          parsed.reviews <= 10_000_000
+        ) {
+          reviews = parsed.reviews;
+          ratingPct = parsed.ratingPct;
+          reviewCell = cell;
+          break;
         }
       }
     }
