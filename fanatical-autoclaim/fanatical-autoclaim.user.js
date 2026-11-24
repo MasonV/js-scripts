@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Fanatical Autoclaim
 // @namespace    fanatical-autoclaim
-// @version      1.5.2
+// @version      1.5.3
 // @description  Bulk-reveal Steam keys on Fanatical order pages and open Steam redeem pages one at a time
 // @match        https://www.fanatical.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -1047,7 +1047,7 @@
         const delaySection = document.createElement('div')
         delaySection.id = 'fac-delays'
         delaySection.appendChild(
-            createDelayInput('Reveal delay', DEFAULT_REVEAL_DELAY_MS, v => {
+            createDelayInput('Reveal delay', revealDelayMs, v => {
                 revealDelayMs = clampRevealDelay(v)
             }),
         )
@@ -1086,7 +1086,7 @@
 
     /**
      * Wait for the React app to render order content before injecting the panel.
-     * Polls for the presence of key-related buttons (REVEAL KEY or REDEEM ON STEAM).
+     * Polls for key-related buttons (REVEAL KEY or REDEEM ON STEAM) or revealed Steam keys.
      * Only one wait runs at a time; a new route cancels the previous one.
      */
     function waitForOrderContent(callback, maxWaitMs = 15000) {
@@ -1095,7 +1095,8 @@
         waitInterval = setInterval(() => {
             const hasReveal = findButtonsByText('Reveal Key').length > 0
             const hasRedeem = findButtonsByText('Redeem on Steam').length > 0
-            if (hasReveal || hasRedeem) {
+            const hasKeys = findSteamKeys().length > 0
+            if (hasReveal || hasRedeem || hasKeys) {
                 clearInterval(waitInterval)
                 log(`Order content detected (${Date.now() - startTime}ms)`)
                 callback()
@@ -1129,8 +1130,9 @@
         const revealCount = findButtonsByText('Reveal Key').length
         const redeemCount = findButtonsByText('Redeem on Steam').length
         const keyCount = findSteamKeys().length
+        const readyCount = collectRedeemUrls().length
         log(`Found ${revealCount} to reveal, ${redeemCount} redeem buttons, ${keyCount} visible keys`)
-        updateStatus(`${revealCount} to reveal, ${redeemCount} ready`)
+        updateStatus(`${revealCount} to reveal, ${readyCount} ready`)
     }
 
     function handleRoute() {
