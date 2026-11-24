@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.12.0
+// @version      0.12.1
 // @description  Open available Prime Gaming claim pages on Luna one at a time with per-store filtering
 // @include      /^https:\/\/luna\.amazon\.[a-z.]{2,6}\//
 // @homepageURL  https://github.com/MasonV/js-scripts

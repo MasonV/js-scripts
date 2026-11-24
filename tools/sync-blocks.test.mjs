@@ -139,7 +139,37 @@ test('isNewerVersion falls back to inequality for pre-release or non-numeric str
   assert.equal(isNewerVersion('1.2.0-beta.1', '1.2.0-beta.1'), false)
 })
 
-const kit = evalBlocks(['autoclaim-kit'], ['maskKey', 'normalizeKey', 'waitFor'], { UI_PREFIX: 'test' })
+let injectedCss = ''
+const fakeDocument = {
+  createElement() {
+    const classes = new Set()
+    return {
+      id: '',
+      textContent: '',
+      classList: {
+        toggle(cls, force) {
+          if (force) classes.add(cls)
+          else classes.delete(cls)
+        },
+        contains(cls) {
+          return classes.has(cls)
+        },
+      },
+    }
+  },
+}
+
+const kit = evalBlocks(
+  ['autoclaim-kit'],
+  ['maskKey', 'normalizeKey', 'waitFor', 'createStatusLine', 'updateStatus', 'injectPanelStyles'],
+  {
+    UI_PREFIX: 'test',
+    document: fakeDocument,
+    GM_addStyle: css => {
+      injectedCss += css
+    },
+  },
+)
 
 test('maskKey shows only the first five characters', () => {
   assert.equal(kit.maskKey('ABCDE-FGHIJ'), 'ABCDE…')
@@ -154,6 +184,43 @@ test('waitFor resolves with the probe value, or null on timeout', async () => {
   let n = 0
   assert.equal(await kit.waitFor(() => ++n >= 3 && 'done', 1000, 1), 'done')
   assert.equal(await kit.waitFor(() => false, 5, 1), null)
+})
+
+test('updateStatus toggles ok, warn, and error tone classes and injectPanelStyles defines all three', () => {
+  const panel = {
+    children: [],
+    appendChild(el) {
+      this.children.push(el)
+    },
+  }
+  const statusEl = kit.createStatusLine(panel, 'Ready')
+  assert.equal(statusEl.textContent, 'Ready')
+
+  kit.updateStatus('Backing off...', 'warn')
+  assert.equal(statusEl.textContent, 'Backing off...')
+  assert.equal(statusEl.classList.contains('test-status--warn'), true)
+  assert.equal(statusEl.classList.contains('test-status--ok'), false)
+  assert.equal(statusEl.classList.contains('test-status--error'), false)
+
+  kit.updateStatus('Done', 'ok')
+  assert.equal(statusEl.classList.contains('test-status--ok'), true)
+  assert.equal(statusEl.classList.contains('test-status--warn'), false)
+  assert.equal(statusEl.classList.contains('test-status--error'), false)
+
+  kit.updateStatus('Failed', 'error')
+  assert.equal(statusEl.classList.contains('test-status--error'), true)
+  assert.equal(statusEl.classList.contains('test-status--warn'), false)
+  assert.equal(statusEl.classList.contains('test-status--ok'), false)
+
+  kit.updateStatus('Neutral')
+  assert.equal(statusEl.classList.contains('test-status--ok'), false)
+  assert.equal(statusEl.classList.contains('test-status--warn'), false)
+  assert.equal(statusEl.classList.contains('test-status--error'), false)
+
+  kit.injectPanelStyles()
+  assert.match(injectedCss, /#test-status\.test-status--ok\b/)
+  assert.match(injectedCss, /#test-status\.test-status--warn\b/)
+  assert.match(injectedCss, /#test-status\.test-status--error\b/)
 })
 
 const steam = evalBlocks(['steam-redeem'], ['STEAM_KEY_RE', 'steamRedeemUrl'])

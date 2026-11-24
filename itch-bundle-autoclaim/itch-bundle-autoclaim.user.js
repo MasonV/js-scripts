@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Itch Bundle Autoclaim
 // @namespace    itch-bundle-autoclaim
-// @version      1.3.0
+// @version      1.3.1
 // @description  Claims all unclaimed games on an itch.io bundle download page, with automatic pagination
 // @match        https://itch.io/bundle/download/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -446,11 +446,12 @@
         return statusEl
     }
 
-    // tone: undefined (neutral) | 'ok' | 'error'
+    // tone: undefined (neutral) | 'ok' | 'warn' | 'error'
     function updateStatus(text, tone) {
         if (!statusEl) return
         statusEl.textContent = text
         statusEl.classList.toggle(`${UI_PREFIX}-status--ok`, tone === 'ok')
+        statusEl.classList.toggle(`${UI_PREFIX}-status--warn`, tone === 'warn')
         statusEl.classList.toggle(`${UI_PREFIX}-status--error`, tone === 'error')
     }
 
@@ -647,6 +648,7 @@
             }
 
             #${p}-status.${p}-status--ok { color: #81c784; }
+            #${p}-status.${p}-status--warn { color: #ffb74d; }
             #${p}-status.${p}-status--error { color: #ef5350; font-weight: 700; }
         `)
     }
