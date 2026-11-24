@@ -123,17 +123,20 @@ A userscript for [ChatGPT](https://chatgpt.com), [Claude](https://claude.ai), an
 
 ### `livebench-custom-weights/`
 
-A userscript for the [LiveBench](https://livebench.ai) leaderboard that lets you decide how much each suite counts, save those weights as named profiles, and see the models re-ranked live.
+A userscript for the [LiveBench](https://livebench.ai) leaderboard that lets you decide how much each suite — and each part inside a suite — counts, save those weights as named profiles, and see the models re-ranked live.
 
 **Features:**
 
 - **A "⚖ Custom weights" button** in the bottom-right corner opens a side panel. Nothing on the page changes until you open it, and the site's own table is never touched
 - **One slider per suite**, with a number box and the share of the total each suite gets (e.g. `Coding 3 → 24%`). Set a weight to 0 to leave a suite out
+- **Weight the parts beneath each suite too** — open "Adjust 7 parts" under Coding to count Hard Fixes triple, or leave it out. A part's weight is a multiplier: **×1 counts it the way the site does** (by its task count), 0 leaves it out. A suite's score starts from the site's own number and shifts with your part weights, so untouched weights give exactly the site's scores, quirks included
+- **Part weights work from the category view too** — pick Coding on the site and the panel lists its parts, using the same weights as under Coding on the all-suites view
 - **The formula is spelled out** under the sliders (e.g. `Score = (3 × Agentic + 1.5 × Design + … ) ÷ 12.5`)
 - **Profiles** — four built-in starting points (LiveBench default, Equal weight, Builder, Thinker), plus your own: save as new, save changes, undo edits, delete (with a confirmation). Edits you haven't saved are flagged, and switching profiles asks before discarding them
 - **"LiveBench default" matches the site's Overall score** — it uses the same weights, so you start from the numbers you already see
 - **Live ranking** with your score, a bar, and how many places each model moved compared with the site's Overall (▲ 3 / ▼ 2 / ＝)
 - **Follows the site** — it reads the table that's on screen, so the release you pick, the category (including Coding's sub-suites), and the search / organization / open-weights filters all carry through. Weights are remembered by suite name, so a profile still applies when the columns change
+- Part scores come from the site's own data for the release you're viewing (already loaded by the page); table rows are matched to models by their scores, not their names. A release without part scores (older v1 releases) gets suite weights only, and the panel says so
 - A model with no score for a suite is averaged over the suites it does have, the same way the site's Overall works
 - Profiles and your current weights are saved in your browser (`localStorage`)
 

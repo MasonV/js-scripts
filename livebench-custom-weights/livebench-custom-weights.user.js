@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LiveBench Custom Weights
 // @namespace    livebench-custom-weights
-// @version      0.1.0
-// @description  Build your own score weights and save them as profiles, then see the LiveBench leaderboard re-ranked live
+// @version      0.2.0
+// @description  Build your own score weights for the LiveBench suites and the parts beneath them, save them as profiles, and see the leaderboard re-ranked live
 // @match        https://livebench.ai/*
 // @match        https://www.livebench.ai/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -134,16 +134,53 @@
 		return true
 	}
 
+	// One suite's score under your part weights.
+	//
+	// entry: { key, value, parts } — `value` is the site's own score for the
+	// suite and `parts` is [{ key, tasks, value }] (or null when the parts
+	// aren't known). A part weight is a multiplier on how much that part
+	// counts: 1 = as the site counts it (in proportion to its task count),
+	// 0 = leave it out, 2 = twice as much.
+	//
+	// The result starts from the site's own number and shifts by how your
+	// weights change the average of the parts. So untouched weights give the
+	// site's score exactly, and the site's own rules (e.g. a regression
+	// scoring a hard 0) are kept. Null means every part was set to 0.
+	function suiteScore(entry, weights) {
+		const { value, parts } = entry
+		if (value == null) return null
+		if (!parts || parts.length === 0) return value
+		if (parts.every(p => weightOf(weights, p.key) === 1)) return value
+
+		let siteSum = 0
+		let siteTasks = 0
+		let mySum = 0
+		let myTasks = 0
+		for (const p of parts) {
+			if (p.value == null) continue
+			const mult = weightOf(weights, p.key)
+			siteSum += p.tasks * p.value
+			siteTasks += p.tasks
+			mySum += p.tasks * mult * p.value
+			myTasks += p.tasks * mult
+		}
+		if (siteTasks === 0) return value
+		if (myTasks === 0) return null
+		const adjusted = value + (mySum / myTasks - siteSum / siteTasks)
+		return Math.min(100, Math.max(0, adjusted))
+	}
+
 	// Weighted mean over the suites a model has a score for, skipping
 	// zero-weight suites. Same rule the site uses for its Overall column.
-	// scores: [{ key, value }] — value is a number or null.
+	// scores: [{ key, value, parts? }] — value is a number or null.
 	function computeCustomScore(scores, weights) {
 		let sum = 0
 		let total = 0
-		for (const { key, value } of scores) {
-			if (value == null) continue
-			const w = weightOf(weights, key)
+		for (const entry of scores) {
+			const w = weightOf(weights, entry.key)
 			if (w <= 0) continue
+			const value = suiteScore(entry, weights)
+			if (value == null) continue
 			sum += w * value
 			total += w
 		}
@@ -247,6 +284,224 @@
 			return { ok: false, error: 'You already have a profile with that name.' }
 		}
 		return { ok: true, name }
+	}
+
+	// ── Parts (the scores underneath each suite) ────────────────────────
+
+	function own(obj, key) {
+		return !!obj && Object.prototype.hasOwnProperty.call(obj, key)
+	}
+
+	// "LLM API INTEGRATION (3)" → 3. Null when the header has no count.
+	function parseTaskCount(text) {
+		const m = String(text ?? '').match(/\((\d+)\)\s*$/)
+		return m ? Number(m[1]) : null
+	}
+
+	// A part's weight is stored under "<suite>/<part>", e.g. "coding/hard fixes".
+	// The same key is used whether the part shows up in the suite's expanded
+	// list or as a column when a category is selected on the site.
+	function partKey(suiteKey, partName) {
+		return `${suiteKey}/${normalizeLabel(partName)}`
+	}
+
+	// breakdown.json names two suites differently from the table headers.
+	const GROUP_COLUMN_ALIASES = { 'long agentic': 'agentic', browser: 'browser use' }
+
+	function groupColumnKey(groupName) {
+		const key = normalizeLabel(groupName)
+		return own(GROUP_COLUMN_ALIASES, key) ? GROUP_COLUMN_ALIASES[key] : key
+	}
+
+	// table.csv → [{ id, values }] with every numeric score after the id.
+	function parseCsvRows(text) {
+		const lines = String(text ?? '')
+			.split(/\r?\n/)
+			.filter(l => l.trim())
+		return lines.slice(1).map(line => {
+			const fields = line.split(',')
+			return {
+				id: fields[0].trim(),
+				values: fields
+					.slice(1)
+					.map(f => parseFloat(f))
+					.filter(Number.isFinite),
+			}
+		})
+	}
+
+	const tenths = v => Math.round(v * 10)
+
+	// Which model (by id) is each row of the table? The page only shows
+	// display names, which don't follow one rule ("Step 5 (Preview)" is
+	// "step-5-preview", "Mistral Large 4 1029" is "mistral-large-4-0"), so
+	// match on the scores instead: a row belongs to the one model whose
+	// table.csv scores include every score the row shows.
+	// rows: number[][] (the scores each row shows); candidates: [{ id, values }].
+	// Returns one id (or null when unclear or shared by two rows) per row.
+	function matchRowsToIds(rows, candidates) {
+		const counts = candidates.map(c => {
+			const map = new Map()
+			for (const v of c.values) map.set(tenths(v), (map.get(tenths(v)) || 0) + 1)
+			return map
+		})
+		const found = rows.map(row => {
+			const need = new Map()
+			for (const v of row) need.set(tenths(v), (need.get(tenths(v)) || 0) + 1)
+			const hits = []
+			counts.forEach((have, i) => {
+				for (const [k, n] of need) if ((have.get(k) || 0) < n) return
+				hits.push(i)
+			})
+			return row.length > 0 && hits.length === 1 ? candidates[hits[0]].id : null
+		})
+		const used = new Map()
+		for (const id of found) if (id != null) used.set(id, (used.get(id) || 0) + 1)
+		return found.map(id => (id != null && used.get(id) === 1 ? id : null))
+	}
+
+	// What the leaderboard shows, as scoring input.
+	// raw: { columns: [{ key, label, tasks }], hasOverall, overallLabel,
+	//        models: [{ name, siteOverall, values }] }
+	//
+	// kind "suites": each column is a suite (the default view).
+	// kind "parts":  each column is a part of one suite — what the site shows
+	//   when a category is selected. The "Overall" column is then that suite.
+	function buildBoard(raw) {
+		const base = { hasOverall: raw.hasOverall, partsStatus: 'n/a', unmatched: 0 }
+		const suiteKey = normalizeLabel(raw.overallLabel)
+		const isPartsView =
+			raw.hasOverall && !!suiteKey && raw.columns.length > 0 && raw.columns.every(c => c.tasks != null)
+
+		if (isPartsView) {
+			const columns = raw.columns.map(c => ({
+				key: partKey(suiteKey, c.label),
+				label: c.label,
+				tasks: c.tasks,
+			}))
+			return {
+				...base,
+				kind: 'parts',
+				suiteKey,
+				suiteLabel: stripTaskCount(raw.overallLabel),
+				columns,
+				models: raw.models.map(m => ({
+					name: m.name,
+					siteOverall: m.siteOverall,
+					scores: [
+						{
+							key: '(suite)',
+							value: m.siteOverall,
+							parts: columns.map((c, i) => ({ key: c.key, tasks: c.tasks, value: m.values[i] })),
+						},
+					],
+				})),
+			}
+		}
+
+		const columns = raw.columns.map(c => ({ key: c.key, label: c.label }))
+		return {
+			...base,
+			kind: 'suites',
+			columns,
+			models: raw.models.map(m => ({
+				name: m.name,
+				siteOverall: m.siteOverall,
+				scores: columns.map((c, i) => ({ key: c.key, value: m.values[i] })),
+			})),
+		}
+	}
+
+	// Adds each suite's parts to a "suites" board, from the release's
+	// breakdown.json (suite → { parts: [{ name, tasks }], models: { id:
+	// { scores: { part: score } } } }) and table.csv rows. A suite or model
+	// that can't be matched keeps just its suite score.
+	function attachParts(board, breakdown, csvRows) {
+		if (board.kind !== 'suites' || !breakdown || typeof breakdown !== 'object') return board
+
+		const groupByColumn = {}
+		for (const name of Object.keys(breakdown)) {
+			const key = groupColumnKey(name)
+			if (!own(groupByColumn, key)) groupByColumn[key] = name
+		}
+
+		const columns = board.columns.map(col => {
+			const group = own(groupByColumn, col.key) ? groupByColumn[col.key] : null
+			const list = group && Array.isArray(breakdown[group]?.parts) ? breakdown[group].parts : []
+			const parts = list
+				.filter(p => p && typeof p.name === 'string' && Number.isFinite(p.tasks) && p.tasks > 0)
+				.map(p => ({ key: partKey(col.key, p.name), label: p.name, tasks: p.tasks }))
+			return { ...col, group, parts: parts.length > 0 ? parts : null }
+		})
+
+		const ids = matchRowsToIds(
+			board.models.map(m => m.scores.map(s => s.value).filter(v => v != null)),
+			csvRows || []
+		)
+		const models = board.models.map((m, i) => {
+			const id = ids[i]
+			if (id == null) return m
+			return {
+				...m,
+				scores: m.scores.map((s, j) => {
+					const col = columns[j]
+					if (!col.parts) return s
+					const model = breakdown[col.group]?.models
+					const scores = own(model, id) ? model[id]?.scores : null
+					if (!scores) return s
+					return {
+						...s,
+						parts: col.parts.map(p => ({
+							key: p.key,
+							tasks: p.tasks,
+							value: own(scores, p.label) && Number.isFinite(scores[p.label]) ? scores[p.label] : null,
+						})),
+					}
+				}),
+			}
+		})
+		return {
+			...board,
+			columns,
+			models,
+			partsStatus: 'ready',
+			unmatched: ids.filter(id => id == null).length,
+		}
+	}
+
+	// Each part's share of its suite, in percent: its task count times your
+	// weight, out of the total. With every weight at 1 this is the share the
+	// site gives it. parts: [{ key, tasks }].
+	function partShares(parts, weights) {
+		const total = parts.reduce((sum, p) => sum + p.tasks * weightOf(weights, p.key), 0)
+		const shares = new Map()
+		for (const p of parts) {
+			shares.set(p.key, total > 0 ? ((p.tasks * weightOf(weights, p.key)) / total) * 100 : 0)
+		}
+		return shares
+	}
+
+	// Parts whose weight differs from the site's (1).
+	function changedParts(parts, weights) {
+		return parts.filter(p => weightOf(weights, p.key) !== DEFAULT_WEIGHT)
+	}
+
+	// Plain-language note on which part weights are in play, so a changed
+	// score is never a mystery. Empty when every part is at the site's weight.
+	function describePartChanges(board, weights) {
+		if (board.kind === 'parts') {
+			const changed = changedParts(board.columns, weights)
+			if (changed.length === 0) return `${board.suiteLabel} score matches the site (every part ×1).`
+			const terms = changed.map(p => {
+				const w = weightOf(weights, p.key)
+				return w === 0 ? `${p.label} left out` : `${p.label} ×${formatWeight(w)}`
+			})
+			return `${board.suiteLabel} score = the site’s, adjusted for: ${terms.join(', ')}.`
+		}
+		const names = board.columns
+			.filter(c => c.parts && changedParts(c.parts, weights).length > 0)
+			.map(c => c.label)
+		return names.length > 0 ? `Part weights changed in: ${names.join(', ')}.` : ''
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -447,9 +702,11 @@
 		profiles: {}, // your saved profiles: name → weights
 		active: DEFAULT_PROFILE_NAME, // the profile the sliders started from
 		weights: {}, // the sliders' current values (may have unsaved edits)
-		board: null, // last leaderboard read from the page
+		raw: null, // last table read from the page, before part scores are added
+		board: null, // raw, built into scoring input (with parts when known)
 		boardSig: '',
 		columnsSig: '',
+		openSuites: new Set(), // suites whose part sliders are expanded
 	}
 
 	function clone(weights) {
@@ -511,9 +768,17 @@
 	//  LEADERBOARD READER
 	// ═══════════════════════════════════════════════════════════════════
 
+	// "Release 2026-11-06 · LiveBench 2.0" → "20261106", the folder the site
+	// keeps that release's data in.
+	function activeReleaseId() {
+		const label = document.querySelector('.lb-dot.active')?.getAttribute('aria-label') ?? ''
+		const m = label.match(/(\d{4})-(\d{2})-(\d{2})/)
+		return m ? m[1] + m[2] + m[3] : null
+	}
+
 	// Reads whatever table the site is showing right now: its release,
-	// category and filter choices all carry through, and the suite columns
-	// follow the site when they change (v1 releases, Coding sub-suites).
+	// category and filter choices all carry through, and the columns follow
+	// the site when they change (v1 releases, a selected category's parts).
 	// Returns null when there's no leaderboard on screen.
 	function readLeaderboard() {
 		const table = document.querySelector('table.lb-tbl')
@@ -525,15 +790,17 @@
 		const sample = rows[0]
 		const columns = []
 		let overallIndex = -1
+		let overallLabel = ''
 		headers.forEach((th, index) => {
 			const cell = sample.children[index]
 			if (!cell) return
+			const text = th.querySelector('.th-t')?.textContent ?? th.textContent
 			if (cell.classList.contains('lb-ovr')) {
 				overallIndex = index
+				overallLabel = stripTaskCount(text)
 			} else if (cell.classList.contains('lb-cat')) {
-				const text = th.querySelector('.th-t')?.textContent ?? th.textContent
 				const key = normalizeLabel(text)
-				if (key) columns.push({ index, key, label: stripTaskCount(text) })
+				if (key) columns.push({ index, key, label: stripTaskCount(text), tasks: parseTaskCount(text) })
 			}
 		})
 		if (columns.length === 0) return null
@@ -543,21 +810,92 @@
 			return {
 				name: (nameEl?.textContent ?? '').replace(/\s+/g, ' ').trim() || '(unnamed model)',
 				siteOverall: overallIndex >= 0 ? parseScore(tr.children[overallIndex]?.textContent) : null,
-				scores: columns.map(c => ({
-					key: c.key,
-					value: parseScore(tr.children[c.index]?.textContent),
-				})),
+				values: columns.map(c => parseScore(tr.children[c.index]?.textContent)),
 			}
 		})
-		return { columns, models, hasOverall: overallIndex >= 0 }
+		return {
+			columns,
+			models,
+			hasOverall: overallIndex >= 0,
+			overallLabel,
+			release: activeReleaseId(),
+		}
+	}
+
+	function rawSignature(raw) {
+		if (!raw) return ''
+		return [
+			`${raw.release}|${raw.overallLabel}|${raw.columns.map(c => `${c.key}:${c.tasks}`).join('|')}`,
+			...raw.models.map(m => `${m.name}:${m.siteOverall}:${m.values.join(',')}`),
+		].join('\n')
+	}
+
+	// ═══════════════════════════════════════════════════════════════════
+	//  RELEASE DATA (part scores)
+	// ═══════════════════════════════════════════════════════════════════
+
+	// The scores underneath each suite aren't in the table, but the site
+	// loads them from data/<release>/breakdown.json, and table.csv holds the
+	// model ids that tie them to table rows. Both are fetched once per
+	// release (the page has already pulled them, so the browser has them
+	// cached). A release with neither just gets suite-level weights.
+	const releaseData = new Map() // release id → { status, breakdown, csv }
+
+	// Use the exact URL the page loaded (it carries a cache-busting version),
+	// otherwise fall back to the plain path.
+	function dataUrl(releaseId, file) {
+		const path = `/data/${releaseId}/${file}`
+		try {
+			const hit = performance
+				.getEntriesByType('resource')
+				.map(r => r.name)
+				.find(name => name.includes(path))
+			if (hit) return hit
+		} catch {
+			/* fall through to the plain path */
+		}
+		return `${location.origin}${path}`
+	}
+
+	async function fetchData(releaseId, file, asJson) {
+		try {
+			const resp = await fetch(dataUrl(releaseId, file))
+			if (!resp.ok) return null
+			return asJson ? await resp.json() : await resp.text()
+		} catch (e) {
+			warn(`Couldn't load ${file} for release ${releaseId}:`, e)
+			return null
+		}
+	}
+
+	function ensureReleaseData(releaseId) {
+		if (!releaseId || releaseData.has(releaseId)) return
+		releaseData.set(releaseId, { status: 'loading' })
+		Promise.all([fetchData(releaseId, 'breakdown.json', true), fetchData(releaseId, 'table.csv', false)]).then(
+			([breakdown, csvText]) => {
+				const csv = csvText ? parseCsvRows(csvText) : null
+				const ok = breakdown && typeof breakdown === 'object' && csv && csv.length > 0
+				releaseData.set(releaseId, ok ? { status: 'ready', breakdown, csv } : { status: 'none' })
+				log(`Part scores for ${releaseId}: ${ok ? 'loaded' : 'not available'}.`)
+				refreshBoard(true)
+			}
+		)
+	}
+
+	// The raw table, built into scoring input and — when the release's part
+	// scores are in — with each suite's parts attached.
+	function composeBoard(raw) {
+		let board = buildBoard(raw)
+		if (board.kind !== 'suites') return board
+		const data = raw.release ? releaseData.get(raw.release) : null
+		if (data?.status === 'ready') return attachParts(board, data.breakdown, data.csv)
+		board = { ...board, partsStatus: data?.status === 'loading' ? 'loading' : 'none' }
+		return board
 	}
 
 	function boardSignature(board) {
 		if (!board) return ''
-		return [
-			board.columns.map(c => c.key).join('|'),
-			...board.models.map(m => `${m.name}:${m.siteOverall}:${m.scores.map(s => s.value).join(',')}`),
-		].join('\n')
+		return `${board.kind}:${board.partsStatus}:${board.columns.map(c => c.key + (c.parts ? '+' + c.parts.length : '')).join('|')}`
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -677,8 +1015,22 @@
 			#${ROOT_ID} .lbcw-formula {
 				margin: 10px 0 0; padding: 9px 11px; border-radius: 8px; background: var(--lbcw-bg-soft);
 				border: 1px solid var(--lbcw-border); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-				overflow-wrap: anywhere;
+				overflow-wrap: anywhere; white-space: pre-wrap;
 			}
+			#${ROOT_ID} .lbcw-note { padding: 8px 10px; border-radius: 8px; background: var(--lbcw-accent-soft); color: var(--lbcw-text); }
+
+			#${ROOT_ID} .lbcw-suite { border-bottom: 1px solid var(--lbcw-border); padding-bottom: 4px; margin-bottom: 4px; }
+			#${ROOT_ID} .lbcw-suite:last-child { border-bottom: 0; }
+			#${ROOT_ID} .lbcw-parts { margin: 0 0 6px 14px; padding-left: 12px; border-left: 2px solid var(--lbcw-accent-soft); }
+			#${ROOT_ID} .lbcw-parts-summary {
+				cursor: pointer; padding: 4px 0; font-size: 12px; font-weight: 600; color: var(--lbcw-accent);
+			}
+			#${ROOT_ID} .lbcw-parts-summary:focus-visible { outline: 2px solid var(--lbcw-accent); outline-offset: 2px; }
+			#${ROOT_ID} .lbcw-part .lbcw-weight-name { font-size: 12px; font-weight: 500; }
+			#${ROOT_ID} .lbcw-weight.lbcw-part { grid-template-columns: minmax(130px, 1.5fr) 1.4fr 62px 46px; }
+			#${ROOT_ID} .lbcw-tasks { color: var(--lbcw-muted); font-weight: 400; }
+			#${ROOT_ID} .lbcw-parts-foot { padding: 4px 0 2px; }
+			#${ROOT_ID} .lbcw-btn-small { padding: 4px 9px; font-size: 11px; }
 
 			#${ROOT_ID} .lbcw-rank { width: 100%; border-collapse: collapse; font-size: 13px; }
 			#${ROOT_ID} .lbcw-rank th {
@@ -854,62 +1206,117 @@
 
 	// ── Weight sliders ──────────────────────────────────────────────────
 
-	const weightRows = new Map() // key → { range, num, share }
+	const weightRows = new Map() // key → { range, num, share } for suites and parts
+	const suiteRows = new Map() // suite key → { summary, reset, parts } for the part lists
 
-	// Rebuilds one slider row per suite column the site is showing now.
+	// One slider + number box for a weight, kept in step with each other.
+	// Returns the row's grid cells: name, slider, number, share.
+	function weightRow(key, label, extra) {
+		const value = weightOf(state.weights, key)
+		const range = el('input', {
+			type: 'range',
+			min: 0,
+			max: 5,
+			step: WEIGHT_STEP,
+			value: Math.min(value, 5),
+			'aria-label': `${label} weight`,
+		})
+		const num = el('input', {
+			type: 'number',
+			class: 'lbcw-num',
+			min: 0,
+			max: MAX_WEIGHT,
+			step: WEIGHT_STEP,
+			value,
+			'aria-label': `${label} weight (number)`,
+		})
+		const share = el('span', { class: 'lbcw-share' })
+		weightRows.set(key, { range, num, share })
+
+		range.addEventListener('input', () => {
+			setWeight(key, range.value)
+			num.value = formatWeight(weightOf(state.weights, key))
+		})
+		num.addEventListener('input', () => {
+			if (num.value.trim() === '' || !Number.isFinite(parseFloat(num.value))) return
+			setWeight(key, num.value)
+			range.value = Math.min(weightOf(state.weights, key), 5)
+		})
+		// Snap a typed value back into range once the field loses focus.
+		num.addEventListener('change', () => {
+			num.value = formatWeight(weightOf(state.weights, key))
+		})
+
+		return el(
+			'div',
+			{ class: extra ? 'lbcw-weight lbcw-part' : 'lbcw-weight' },
+			el('span', { class: 'lbcw-weight-name' }, label, extra ? el('span', { class: 'lbcw-tasks', text: ` (${extra})` }) : null),
+			range,
+			num,
+			share
+		)
+	}
+
+	// Writes the sliders back from the stored weights (after a bulk change).
+	function syncWeightControls() {
+		for (const [key, row] of weightRows) {
+			const w = weightOf(state.weights, key)
+			row.num.value = formatWeight(w)
+			row.range.value = Math.min(w, 5)
+		}
+	}
+
+	function resetSuiteParts(col) {
+		for (const p of col.parts) delete state.weights[p.key]
+		saveState()
+		syncWeightControls()
+		updateDerived()
+	}
+
+	// The part sliders under one suite, collapsed until you want them.
+	function partsSection(col) {
+		const summary = el('summary', { class: 'lbcw-parts-summary' })
+		const reset = el('button', {
+			class: 'lbcw-btn lbcw-btn-small',
+			type: 'button',
+			onclick: () => resetSuiteParts(col),
+			text: '↺ Reset parts to ×1',
+		})
+		const details = el(
+			'details',
+			{ class: 'lbcw-parts', open: state.openSuites.has(col.key) },
+			summary,
+			col.parts.map(p => weightRow(p.key, p.label, p.tasks)),
+			el('div', { class: 'lbcw-parts-foot' }, reset)
+		)
+		details.addEventListener('toggle', () => {
+			if (details.open) state.openSuites.add(col.key)
+			else state.openSuites.delete(col.key)
+		})
+		suiteRows.set(col.key, { summary, reset })
+		return details
+	}
+
+	// Rebuilds the sliders for the table the site is showing now: a slider
+	// per suite (each with its parts underneath when known), or a slider per
+	// part when a category is selected.
 	function renderWeights() {
 		weightRows.clear()
+		suiteRows.clear()
 		const board = state.board
 		if (!board) {
 			ui.weightsHost.replaceChildren()
 			return
 		}
-		const rows = board.columns.map(col => {
-			const value = weightOf(state.weights, col.key)
-			const range = el('input', {
-				type: 'range',
-				min: 0,
-				max: 5,
-				step: WEIGHT_STEP,
-				value: Math.min(value, 5),
-				'aria-label': `${col.label} weight`,
-			})
-			const num = el('input', {
-				type: 'number',
-				class: 'lbcw-num',
-				min: 0,
-				max: MAX_WEIGHT,
-				step: WEIGHT_STEP,
-				value,
-				'aria-label': `${col.label} weight (number)`,
-			})
-			const share = el('span', { class: 'lbcw-share' })
-			weightRows.set(col.key, { range, num, share })
-
-			range.addEventListener('input', () => {
-				setWeight(col.key, range.value)
-				num.value = formatWeight(weightOf(state.weights, col.key))
-			})
-			num.addEventListener('input', () => {
-				if (num.value.trim() === '' || !Number.isFinite(parseFloat(num.value))) return
-				setWeight(col.key, num.value)
-				range.value = Math.min(weightOf(state.weights, col.key), 5)
-			})
-			// Snap a typed value back into range once the field loses focus.
-			num.addEventListener('change', () => {
-				num.value = formatWeight(weightOf(state.weights, col.key))
-			})
-
-			return el(
-				'div',
-				{ class: 'lbcw-weight' },
-				el('span', { class: 'lbcw-weight-name', text: col.label }),
-				range,
-				num,
-				share
+		if (board.kind === 'parts') {
+			ui.weightsHost.replaceChildren(...board.columns.map(c => weightRow(c.key, c.label, c.tasks)))
+			return
+		}
+		ui.weightsHost.replaceChildren(
+			...board.columns.map(col =>
+				el('div', { class: 'lbcw-suite' }, weightRow(col.key, col.label), col.parts ? partsSection(col) : null)
 			)
-		})
-		ui.weightsHost.replaceChildren(...rows)
+		)
 	}
 
 	function setWeight(key, raw) {
@@ -973,22 +1380,80 @@
 
 	// Refreshes everything that depends on the weights, without rebuilding
 	// the sliders (so dragging one doesn't lose focus).
+	function formatShare(pct) {
+		return `${pct < 10 && pct > 0 ? pct.toFixed(1) : Math.round(pct)}%`
+	}
+
+	function setShare(key, pct) {
+		const row = weightRows.get(key)
+		if (row) row.share.textContent = formatShare(pct)
+	}
+
+	// Words that depend on what the site is showing: suites, or the parts of
+	// one suite.
+	function describeView(board) {
+		if (board.kind === 'parts') {
+			return {
+				heading: `How much should each part of ${board.suiteLabel} count?`,
+				hint: '×1 counts a part the way the site does (by how many tasks it has). 0 leaves it out. The score starts from the site’s own number and shifts with your part weights.',
+				note: `These are the same part weights you’ll find under ${board.suiteLabel} on the all-suites view.`,
+			}
+		}
+		const notes = {
+			loading: 'Loading the scores underneath each suite…',
+			none: 'This release has no part scores, so only suite weights apply.',
+			ready:
+				board.unmatched > 0
+					? `${board.unmatched} model${board.unmatched === 1 ? '' : 's'} couldn’t be matched to part scores, so part weights don’t change ${board.unmatched === 1 ? 'its' : 'their'} score.`
+					: '',
+		}
+		return {
+			heading: 'How much should each suite count?',
+			hint: '0 leaves a suite out, and a model missing a suite is scored on the ones it has. Open a suite to weight its parts: ×1 counts a part the way the site does, and the suite’s score starts from the site’s own number and shifts with your part weights.',
+			note: notes[board.partsStatus] ?? '',
+		}
+	}
+
 	function updateDerived() {
 		renderProfileControls()
 		const board = state.board
 		if (board) {
-			const shares = weightShares(
-				board.columns.map(c => c.key),
-				state.weights
-			)
-			for (const [key, row] of weightRows) {
-				const pct = shares.get(key) ?? 0
-				row.share.textContent = `${pct < 10 && pct > 0 ? pct.toFixed(1) : Math.round(pct)}%`
+			const words = describeView(board)
+			ui.weightsHeading.textContent = words.heading
+			ui.weightsHint.textContent = words.hint
+			ui.partsNote.textContent = words.note
+			ui.partsNote.hidden = !words.note
+
+			if (board.kind === 'parts') {
+				const shares = partShares(board.columns, state.weights)
+				for (const c of board.columns) setShare(c.key, shares.get(c.key) ?? 0)
+				ui.formula.textContent = describePartChanges(board, state.weights)
+			} else {
+				const shares = weightShares(
+					board.columns.map(c => c.key),
+					state.weights
+				)
+				for (const col of board.columns) {
+					setShare(col.key, shares.get(col.key) ?? 0)
+					if (!col.parts) continue
+					const partPct = partShares(col.parts, state.weights)
+					for (const p of col.parts) setShare(p.key, partPct.get(p.key) ?? 0)
+					const changed = changedParts(col.parts, state.weights).length
+					const row = suiteRows.get(col.key)
+					if (row) {
+						row.summary.textContent =
+							`Adjust ${col.parts.length} parts` + (changed > 0 ? ` · ${changed} changed` : '')
+						row.reset.disabled = changed === 0
+					}
+				}
+				const changes = describePartChanges(board, state.weights)
+				ui.formula.textContent =
+					describeFormula(board.columns, state.weights) + (changes ? `\n${changes}` : '')
 			}
-			ui.formula.textContent = describeFormula(board.columns, state.weights)
 			ui.formula.hidden = false
 		} else {
 			ui.formula.hidden = true
+			ui.partsNote.hidden = true
 		}
 		renderRanking()
 	}
@@ -1040,8 +1505,11 @@
 			},
 		})
 		ui.notice = el('p', { class: 'lbcw-hint', hidden: true })
+		ui.weightsHeading = el('h3', { class: 'lbcw-label', text: 'How much should each suite count?' })
 		ui.weightsHost = el('div')
 		ui.formula = el('p', { class: 'lbcw-formula', hidden: true })
+		ui.weightsHint = el('p', { class: 'lbcw-hint' })
+		ui.partsNote = el('p', { class: 'lbcw-hint lbcw-note', hidden: true })
 		ui.rankHost = el('div')
 
 		ui.drawer = el(
@@ -1074,13 +1542,11 @@
 				el(
 					'section',
 					{ class: 'lbcw-section' },
-					el('h3', { class: 'lbcw-label', text: 'How much should each suite count?' }),
+					ui.weightsHeading,
 					ui.weightsHost,
 					ui.formula,
-					el('p', {
-						class: 'lbcw-hint',
-						text: '0 leaves a suite out. A model missing a suite is scored on the ones it has, like the site’s Overall.',
-					})
+					ui.weightsHint,
+					ui.partsNote
 				),
 				el(
 					'section',
@@ -1112,13 +1578,16 @@
 	// changed. `force` skips the "nothing changed" shortcut (used on open).
 	function refreshBoard(force) {
 		if (!state.open) return
-		const board = readLeaderboard()
-		const sig = boardSignature(board)
+		const raw = readLeaderboard()
+		const sig = `${rawSignature(raw)}#${raw?.release ? releaseData.get(raw.release)?.status : ''}`
 		if (!force && sig === state.boardSig) return
-		state.board = board
+		state.raw = raw
 		state.boardSig = sig
+		if (raw) ensureReleaseData(raw.release)
+		const board = raw ? composeBoard(raw) : null
+		state.board = board
 
-		const columnsSig = board ? board.columns.map(c => c.key).join('|') : ''
+		const columnsSig = boardSignature(board)
 		if (force || columnsSig !== state.columnsSig) {
 			state.columnsSig = columnsSig
 			renderWeights()
