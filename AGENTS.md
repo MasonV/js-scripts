@@ -138,9 +138,10 @@ Tests use the built-in Node runner, no dependencies:
 node --test barter-bundle-scorer/scoring.test.js
 node --test tools/sync-blocks.test.mjs
 node --test prime-video-filter/logic.test.js
+node --test livebench-custom-weights/logic.test.js
 ```
 
-`prime-video-filter/logic.test.js` evaluates the userscript's own `PURE LOGIC` section, so it can't drift. `scoring.test.js` instead mirrors the pure scoring functions out of the userscript, because there's no module system to import them through. **When you change the MATH or SCORING sections of `barter-bundle-scorer.user.js`, update the copies in the test file too** — nothing enforces this automatically yet.
+`prime-video-filter/logic.test.js` and `livebench-custom-weights/logic.test.js` evaluate the userscript's own `PURE LOGIC` section, so they can't drift. `scoring.test.js` instead mirrors the pure scoring functions out of the userscript, because there's no module system to import them through. **When you change the MATH or SCORING sections of `barter-bundle-scorer.user.js`, update the copies in the test file too** — nothing enforces this automatically yet.
 
 Before publishing a userscript change, run:
 

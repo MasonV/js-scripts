@@ -15,6 +15,7 @@ Monorepo of independent Tampermonkey/Greasemonkey userscripts. Vanilla JavaScrip
   - [`yourtube/`](#yourtube)
 - [AI chat](#ai-chat)
   - [`ai-chat-widescreen/`](#ai-chat-widescreen)
+  - [`livebench-custom-weights/`](#livebench-custom-weights)
 - [Gaming](#gaming)
   - [`barter-bundle-scorer/`](#barter-bundle-scorer)
   - [`fanatical-autoclaim/`](#fanatical-autoclaim)
@@ -119,6 +120,30 @@ A userscript for [ChatGPT](https://chatgpt.com), [Claude](https://claude.ai), an
 **Metadata update checks:**
 
 `https://raw.githubusercontent.com/MasonV/js-scripts/main/ai-chat-widescreen/ai-chat-widescreen.meta.js`
+
+### `livebench-custom-weights/`
+
+A userscript for the [LiveBench](https://livebench.ai) leaderboard that lets you decide how much each suite counts, save those weights as named profiles, and see the models re-ranked live.
+
+**Features:**
+
+- **A "⚖ Custom weights" button** in the bottom-right corner opens a side panel. Nothing on the page changes until you open it, and the site's own table is never touched
+- **One slider per suite**, with a number box and the share of the total each suite gets (e.g. `Coding 3 → 24%`). Set a weight to 0 to leave a suite out
+- **The formula is spelled out** under the sliders (e.g. `Score = (3 × Agentic + 1.5 × Design + … ) ÷ 12.5`)
+- **Profiles** — four built-in starting points (LiveBench default, Equal weight, Builder, Thinker), plus your own: save as new, save changes, undo edits, delete (with a confirmation). Edits you haven't saved are flagged, and switching profiles asks before discarding them
+- **"LiveBench default" matches the site's Overall score** — it uses the same weights, so you start from the numbers you already see
+- **Live ranking** with your score, a bar, and how many places each model moved compared with the site's Overall (▲ 3 / ▼ 2 / ＝)
+- **Follows the site** — it reads the table that's on screen, so the release you pick, the category (including Coding's sub-suites), and the search / organization / open-weights filters all carry through. Weights are remembered by suite name, so a profile still applies when the columns change
+- A model with no score for a suite is averaged over the suites it does have, the same way the site's Overall works
+- Profiles and your current weights are saved in your browser (`localStorage`)
+
+**Install / download:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/livebench-custom-weights/livebench-custom-weights.user.js`
+
+**Metadata update checks:**
+
+`https://raw.githubusercontent.com/MasonV/js-scripts/main/livebench-custom-weights/livebench-custom-weights.meta.js`
 
 <a id="gaming"></a>
 
