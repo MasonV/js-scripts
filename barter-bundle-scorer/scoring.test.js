@@ -26,9 +26,9 @@ const currencyLogic = between('  function formatTierPrice(tier, currencyPref)', 
 
 const sandbox = { SETTINGS: {}, CURRENT_BUNDLE_COST: null };
 vm.createContext(sandbox);
-vm.runInContext(`${pureLogic}\n${classifyLogic}\n${scoringLogic}\n${bundleLogic}\n${currencyDefs}\n${currencyLogic}\nglobalThis.__scoring = { clamp01, confidenceFromReviews, wilsonLowerBound, classifyItem, scoreGame, scoreColor, scoreBg, scoreTierLabel, ratingColor, formatBreakdown, formatTierPrice, computeBundleScores };`, sandbox);
+vm.runInContext(`${pureLogic}\n${classifyLogic}\n${scoringLogic}\n${bundleLogic}\n${currencyDefs}\n${currencyLogic}\nglobalThis.__scoring = { clamp01, confidenceFromReviews, wilsonLowerBound, parseReviewCellText, classifyItem, scoreGame, scoreColor, scoreBg, scoreTierLabel, ratingColor, formatBreakdown, formatTierPrice, computeBundleScores };`, sandbox);
 const {
-  clamp01, confidenceFromReviews: confidenceFromProductionReviews, wilsonLowerBound, classifyItem: classifyProductionItem,
+  clamp01, confidenceFromReviews: confidenceFromProductionReviews, wilsonLowerBound, parseReviewCellText: parseProductionReviewCellText, classifyItem: classifyProductionItem,
   scoreGame: scoreProductionGame, scoreColor, scoreBg, scoreTierLabel, ratingColor,
   formatBreakdown, formatTierPrice, computeBundleScores: computeProductionBundleScores,
 } = sandbox.__scoring;
@@ -42,6 +42,10 @@ const DEFAULT_SETTINGS = {
 
 function fakeRow(isInPackage) {
   return { previousElementSibling: isInPackage ? { textContent: '3 item package', previousElementSibling: null, querySelector: () => null } : null };
+}
+function parseReviewCellText(text) {
+  const { ratingPct, reviews } = parseProductionReviewCellText(text);
+  return { ratingPct, reviews };
 }
 function confidenceFromReviews(n, anchor = DEFAULT_SETTINGS.confidenceAnchor) {
   sandbox.SETTINGS = { ...DEFAULT_SETTINGS, confidenceAnchor: anchor };
@@ -440,5 +444,50 @@ describe('computeBundleScores', () => {
     assert.equal(res.depthRating, 0);
     assert.equal(res.personalRating, 0);
     assert.equal(res.dealQuality, null);
+  });
+});
+
+describe('parseReviewCellText', () => {
+  it('parses explicit percentage when review count is below rating percentage', () => {
+    assert.deepEqual(parseReviewCellText('88% 15'), { ratingPct: 88, reviews: 15 });
+    assert.deepEqual(parseReviewCellText('88% (15)'), { ratingPct: 88, reviews: 15 });
+    assert.deepEqual(parseReviewCellText('15 reviews, 88%'), { ratingPct: 88, reviews: 15 });
+    assert.deepEqual(parseReviewCellText('80% 10'), { ratingPct: 80, reviews: 10 });
+  });
+
+  it('prevents low-review high-rated DLCs from being misclassified as games', () => {
+    const parsed = parseReviewCellText('80% 10');
+    assert.equal(classifyItem('Cool Soundtrack', parsed.reviews, parsed.ratingPct), 'dlc');
+    assert.equal(classifyItem('Bonus Chapter', parsed.reviews, parsed.ratingPct, { isInPackage: true }), 'dlc');
+  });
+
+  it('handles comma-formatted counts, whitespace before %, decimals, and boundary percentages', () => {
+    assert.deepEqual(parseReviewCellText('92.5% (1,234)'), { ratingPct: 92.5, reviews: 1234 });
+    assert.deepEqual(parseReviewCellText('88 % 15'), { ratingPct: 88, reviews: 15 });
+    assert.deepEqual(parseReviewCellText('0% (5)'), { ratingPct: 0, reviews: 5 });
+    assert.deepEqual(parseReviewCellText('100% 100'), { ratingPct: 100, reviews: 100 });
+  });
+
+  it('ignores out-of-range percentage values', () => {
+    assert.deepEqual(parseReviewCellText('150% (20)'), { ratingPct: null, reviews: 20 });
+  });
+
+  it('handles single-number cells with and without %', () => {
+    assert.deepEqual(parseReviewCellText('88%'), { ratingPct: 88, reviews: null });
+    assert.deepEqual(parseReviewCellText('88'), { ratingPct: 88, reviews: null });
+    assert.deepEqual(parseReviewCellText('250'), { ratingPct: null, reviews: 250 });
+  });
+
+  it('falls back to descending heuristic when two numbers appear without %', () => {
+    assert.deepEqual(parseReviewCellText('88 1234'), { ratingPct: 88, reviews: 1234 });
+    assert.deepEqual(parseReviewCellText('1,234 88'), { ratingPct: 88, reviews: 1234 });
+    assert.deepEqual(parseReviewCellText('200 150'), { ratingPct: null, reviews: 200 });
+  });
+
+  it('returns nulls for empty, null, or non-numeric inputs', () => {
+    assert.deepEqual(parseReviewCellText(''), { ratingPct: null, reviews: null });
+    assert.deepEqual(parseReviewCellText('N/A'), { ratingPct: null, reviews: null });
+    assert.deepEqual(parseReviewCellText(null), { ratingPct: null, reviews: null });
+    assert.deepEqual(parseReviewCellText(undefined), { ratingPct: null, reviews: null });
   });
 });
