@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Focus Search
 // @namespace    auto-focus-search
-// @version      1.1.4
+// @version      1.1.6
 // @description  Automatically detects and focuses search input fields on any webpage
 // @match        *://*/*
 // @noframes
@@ -60,14 +60,14 @@
         'textarea[placeholder*="search" i]',
         'textarea[aria-label*="search" i]',
 
-        // Tier 5: Common IDs and classes
-        '#search-input',
-        '#searchbox',
-        '#search',
-        '#q',
-        '.search-input',
-        '.search-box',
-        '.search-field',
+        // Tier 5: Common IDs and classes (constrained to input/textarea)
+        'input#search-input, textarea#search-input',
+        'input#searchbox, textarea#searchbox',
+        'input#search, textarea#search',
+        'input#q, textarea#q',
+        'input.search-input, textarea.search-input',
+        'input.search-box, textarea.search-box',
+        'input.search-field, textarea.search-field',
         'input.search',
     ]
 
@@ -121,22 +121,8 @@
         return rect.width > 0 && rect.height > 0
     }
 
-    function isFocusable(el) {
-        return !el.disabled && !el.readOnly && el.tabIndex !== -1
-    }
-
     function findSearchInput() {
-        for (const selector of SEARCH_SELECTORS) {
-            try {
-                const els = document.querySelectorAll(selector)
-                for (const el of els) {
-                    if (isVisible(el) && isFocusable(el)) return el
-                }
-            } catch {
-                // invalid selector on some pages, skip
-            }
-        }
-        return null
+        return findAllSearchInputs()[0] || null
     }
 
     function findAllSearchInputs() {
@@ -155,7 +141,7 @@
                 // skip
             }
         }
-        return results
+        return results.sort((a, b) => scoreCandidate(b) - scoreCandidate(a))
     }
 
     function isSearchInput(el) {
@@ -273,6 +259,41 @@
     //  PURE LOGIC
     // ═══════════════════════════════════════════════════════════════════
 
+    const NON_TEXT_INPUT_TYPES = new Set([
+        'hidden',
+        'submit',
+        'button',
+        'checkbox',
+        'radio',
+        'image',
+        'reset',
+        'file',
+        'range',
+        'color',
+    ])
+
+    function readElementAttr(el, attr, prop) {
+        if (typeof el.getAttribute === 'function') {
+            const v = el.getAttribute(attr)
+            if (v != null) return String(v)
+        }
+        return el[prop] != null ? String(el[prop]) : ''
+    }
+
+    function isTextInputElement(el) {
+        if (!el) return false
+        const tag = String(el.tagName || '').toLowerCase()
+        if (tag === 'textarea') return true
+        if (tag !== 'input') return false
+        const type = readElementAttr(el, 'type', 'type').toLowerCase()
+        return !NON_TEXT_INPUT_TYPES.has(type || 'text')
+    }
+
+    function isFocusable(el) {
+        if (!isTextInputElement(el)) return false
+        return !el.disabled && !el.readOnly && el.tabIndex !== -1
+    }
+
     function describeElement(el) {
         const tag = (el.tagName || 'input').toLowerCase()
         const id = el.id ? `#${el.id}` : ''
@@ -282,32 +303,18 @@
     }
 
     function scoreCandidate(el) {
-        if (!el) return 0
-        const tag = String(el.tagName || '').toLowerCase()
-        if (tag && tag !== 'input' && tag !== 'textarea') return 0
+        if (!isTextInputElement(el)) return 0
 
-        const readAttr = (attr, prop) => {
-            if (typeof el.getAttribute === 'function') {
-                const v = el.getAttribute(attr)
-                if (v != null) return String(v)
-            }
-            return el[prop] != null ? String(el[prop]) : ''
-        }
-
-        const type = readAttr('type', 'type').toLowerCase()
-        if (type === 'hidden' || type === 'submit' || type === 'button' || type === 'checkbox' || type === 'radio') {
-            return 0
-        }
-
+        const type = readElementAttr(el, 'type', 'type').toLowerCase()
         const inSearchRole = Boolean(
             el.inSearchRole ||
                 (typeof el.closest === 'function' && el.closest('[role="search"]')),
         )
-        const name = readAttr('name', 'name').toLowerCase()
-        const id = readAttr('id', 'id').toLowerCase()
-        const className = readAttr('class', 'className').toLowerCase()
-        const placeholder = readAttr('placeholder', 'placeholder').toLowerCase()
-        const ariaLabel = readAttr('aria-label', 'ariaLabel').toLowerCase()
+        const name = readElementAttr(el, 'name', 'name').toLowerCase()
+        const id = readElementAttr(el, 'id', 'id').toLowerCase()
+        const className = readElementAttr(el, 'class', 'className').toLowerCase()
+        const placeholder = readElementAttr(el, 'placeholder', 'placeholder').toLowerCase()
+        const ariaLabel = readElementAttr(el, 'aria-label', 'ariaLabel').toLowerCase()
 
         let score = 0
         if (inSearchRole) score += 100
@@ -321,17 +328,6 @@
             score += 20
         }
         return score
-    }
-
-    function isSearchPath(pathname = window.location.pathname, search = window.location.search) {
-        const path = String(pathname || '').toLowerCase()
-        if (/\/(?:search|results|find)(?:\/|$)/.test(path)) return true
-        const params = new URLSearchParams(String(search || ''))
-        for (const key of ['q', 'query', 'search', 'search_query', 's', 'k']) {
-            const val = params.get(key)
-            if (val != null && val.trim() !== '') return true
-        }
-        return false
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -653,11 +649,14 @@
     // ═══════════════════════════════════════════════════════════════════
     //  UPDATE CHECK
     //  Generated from tools/update-check.template.js — do not edit here.
-    //  Change the template, then run: node tools/sync-update-check.mjs
+    //  Change the template, then run: node tools/sync-blocks.mjs
     // ═══════════════════════════════════════════════════════════════════
 
     const UPDATE_BANNER_ID = 'auto-focus-search-update-banner'
     const UPDATE_DISMISS_KEY = 'auto_focus_search_update_dismissed_v'
+    const UPDATE_CHECKED_AT_KEY = 'auto_focus_search_update_checked_at'
+    const UPDATE_REMOTE_VERSION_KEY = 'auto_focus_search_update_remote_version'
+    const UPDATE_COOLDOWN_MS = 6 * 60 * 60 * 1000
 
     // Tampermonkey exposes the script's own metadata block, so these URLs
     // don't have to be hand-maintained in two places. Greasemonkey 4 does
@@ -703,6 +702,26 @@
         }
     }
 
+    function getCachedUpdateState() {
+        try {
+            const checkedAt = Number(localStorage.getItem(UPDATE_CHECKED_AT_KEY) || 0)
+            const remote = localStorage.getItem(UPDATE_REMOTE_VERSION_KEY) || ''
+            return { checkedAt, remote }
+        } catch {
+            return { checkedAt: 0, remote: '' }
+        }
+    }
+
+    function setCachedUpdateState(checkedAt, remote) {
+        try {
+            localStorage.setItem(UPDATE_CHECKED_AT_KEY, String(checkedAt))
+            if (remote) localStorage.setItem(UPDATE_REMOTE_VERSION_KEY, String(remote))
+            else localStorage.removeItem(UPDATE_REMOTE_VERSION_KEY)
+        } catch {
+            /* storage unavailable — fall back to uncached checks */
+        }
+    }
+
     function checkForUpdate() {
         // A dev install has no GM_info version to compare against, so every
         // remote version would look like an update.
@@ -710,15 +729,24 @@
             console.log(`${LOG_PREFIX} Dev build — skipping update check.`)
             return
         }
+        const now = Date.now()
+        const cached = getCachedUpdateState()
+        if (cached.checkedAt > 0 && now - cached.checkedAt < UPDATE_COOLDOWN_MS) {
+            if (cached.remote && isNewerVersion(cached.remote, SCRIPT_VERSION)) {
+                showUpdateBanner(cached.remote)
+            }
+            return
+        }
         try {
             GM_xmlhttpRequest({
                 method: 'GET',
-                url: META_URL + '?_=' + Date.now(),
+                url: META_URL + '?_=' + now,
                 onload(resp) {
                     if (resp.status !== 200) return
                     const match = resp.responseText.match(/@version\s+(\S+)/)
                     if (!match) return
                     const remote = match[1]
+                    setCachedUpdateState(Date.now(), remote)
                     if (isNewerVersion(remote, SCRIPT_VERSION)) {
                         console.log(`${LOG_PREFIX} Update available: v${SCRIPT_VERSION} → v${remote}`)
                         showUpdateBanner(remote)
@@ -771,7 +799,7 @@
             message.textContent = `⬆ ${name} v${remote} available (you have v${SCRIPT_VERSION}) — click to update`
             Object.assign(message.style, { cursor: 'pointer', textDecoration: 'underline' })
             message.addEventListener('click', () => {
-                window.open(DOWNLOAD_URL, '_blank')
+                window.open(DOWNLOAD_URL, '_blank', 'noopener,noreferrer')
             })
 
             const dismiss = document.createElement('button')

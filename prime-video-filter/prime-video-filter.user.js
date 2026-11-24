@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prime Video Filter
 // @namespace    prime-video-filter
-// @version      0.2.2
+// @version      0.2.4
 // @description  Hide Prime Video titles you can't watch with Prime, titles you've already watched, and titles below an IMDb rating you choose
 // @match        https://www.primevideo.com/*
 // @match        https://www.amazon.com/gp/video/*
@@ -298,6 +298,40 @@
 		return Math.max(0, oldestInWindow + windowMs - now)
 	}
 
+	function recordRatingFailure(
+		consecutiveFailures,
+		haltedReason,
+		error,
+		maxFailures = 3,
+		baseGapMs = 100,
+		maxBackoffMs = 10000
+	) {
+		if (haltedReason != null) {
+			return {
+				ignored: true,
+				consecutiveFailures,
+				haltedReason,
+				justHalted: false,
+				delayMs: 0,
+			}
+		}
+		const nextFailures = Math.max(0, Math.floor(Number(consecutiveFailures) || 0)) + 1
+		const retryAfterMs =
+			error && typeof error.retryAfterMs === 'number' ? error.retryAfterMs : 0
+		const delayMs = computeRatingBackoffMs(baseGapMs, nextFailures, retryAfterMs, maxBackoffMs)
+		const justHalted = nextFailures >= maxFailures
+		const nextHaltedReason = justHalted
+			? (error && error.message) || 'request failed'
+			: null
+		return {
+			ignored: false,
+			consecutiveFailures: nextFailures,
+			haltedReason: nextHaltedReason,
+			justHalted,
+			delayMs,
+		}
+	}
+
 	// ═══════════════════════════════════════════════════════════════════
 	//  SETTINGS
 	// ═══════════════════════════════════════════════════════════════════
@@ -528,21 +562,26 @@
 				})
 				.catch((e) => {
 					failedRatingKeys.add(job.key)
-					consecutiveRatingFailures++
-					const retryAfterMs = e && typeof e.retryAfterMs === 'number' ? e.retryAfterMs : 0
-					const delayMs = computeRatingBackoffMs(
-						RATING_FETCH_GAP_MS,
+					const outcome = recordRatingFailure(
 						consecutiveRatingFailures,
-						retryAfterMs,
+						ratingHaltedReason,
+						e,
+						RATING_MAX_CONSECUTIVE_FAILURES,
+						RATING_FETCH_GAP_MS,
 						RATING_MAX_BACKOFF_MS
 					)
-					ratingBackoffUntil = Math.max(ratingBackoffUntil, Date.now() + delayMs)
+					if (outcome.ignored) {
+						scheduleApply()
+						return
+					}
+					consecutiveRatingFailures = outcome.consecutiveFailures
+					ratingBackoffUntil = Math.max(ratingBackoffUntil, Date.now() + outcome.delayMs)
 					warn(
 						`Rating lookup failed for ${job.key} (${consecutiveRatingFailures}/${RATING_MAX_CONSECUTIVE_FAILURES}):`,
 						e
 					)
-					if (consecutiveRatingFailures >= RATING_MAX_CONSECUTIVE_FAILURES) {
-						ratingHaltedReason = (e && e.message) || 'request failed'
+					if (outcome.justHalted) {
+						ratingHaltedReason = outcome.haltedReason
 						ratingQueue.length = 0
 						if (ratingPumpTimer) {
 							clearTimeout(ratingPumpTimer)
@@ -751,7 +790,21 @@
 	}
 
 	function startWatching() {
+		let lastHref = location.href
+		const checkUrlChange = () => {
+			if (location.href !== lastHref) {
+				lastHref = location.href
+				scheduleApply()
+				return true
+			}
+			return false
+		}
+		window.addEventListener('popstate', checkUrlChange)
+		if (typeof navigation !== 'undefined' && typeof navigation.addEventListener === 'function') {
+			navigation.addEventListener('navigatesuccess', checkUrlChange)
+		}
 		new MutationObserver((mutations) => {
+			if (checkUrlChange()) return
 			for (const m of mutations) {
 				if (isOwnUi(m.target)) continue
 				for (const node of m.addedNodes) {
@@ -800,6 +853,7 @@
 	let launcherEl = null
 	let panelEl = null
 	let resetArmed = false
+	let resetTimer = null
 
 	function buildLauncher() {
 		if (document.getElementById(LAUNCHER_ID)) return
@@ -916,7 +970,8 @@
 				resetArmed = true
 				reset.textContent = '↺ Click again to reset'
 				reset.classList.add('pvf-armed')
-				setTimeout(disarmReset, 4000)
+				if (resetTimer) clearTimeout(resetTimer)
+				resetTimer = setTimeout(disarmReset, 4000)
 				return
 			}
 			disarmReset()
@@ -941,6 +996,10 @@
 	}
 
 	function disarmReset() {
+		if (resetTimer) {
+			clearTimeout(resetTimer)
+			resetTimer = null
+		}
 		resetArmed = false
 		const reset = panelEl?.querySelector('#pvf-reset')
 		if (!reset) return
@@ -1073,11 +1132,14 @@
 	// ═══════════════════════════════════════════════════════════════════
 	//  UPDATE CHECK
 	//  Generated from tools/update-check.template.js — do not edit here.
-	//  Change the template, then run: node tools/sync-update-check.mjs
+	//  Change the template, then run: node tools/sync-blocks.mjs
 	// ═══════════════════════════════════════════════════════════════════
 
 	const UPDATE_BANNER_ID = 'prime-video-filter-update-banner'
 	const UPDATE_DISMISS_KEY = 'prime_video_filter_update_dismissed_v'
+	const UPDATE_CHECKED_AT_KEY = 'prime_video_filter_update_checked_at'
+	const UPDATE_REMOTE_VERSION_KEY = 'prime_video_filter_update_remote_version'
+	const UPDATE_COOLDOWN_MS = 6 * 60 * 60 * 1000
 
 	// Tampermonkey exposes the script's own metadata block, so these URLs
 	// don't have to be hand-maintained in two places. Greasemonkey 4 does
@@ -1123,6 +1185,26 @@
 		}
 	}
 
+	function getCachedUpdateState() {
+		try {
+			const checkedAt = Number(localStorage.getItem(UPDATE_CHECKED_AT_KEY) || 0)
+			const remote = localStorage.getItem(UPDATE_REMOTE_VERSION_KEY) || ''
+			return { checkedAt, remote }
+		} catch {
+			return { checkedAt: 0, remote: '' }
+		}
+	}
+
+	function setCachedUpdateState(checkedAt, remote) {
+		try {
+			localStorage.setItem(UPDATE_CHECKED_AT_KEY, String(checkedAt))
+			if (remote) localStorage.setItem(UPDATE_REMOTE_VERSION_KEY, String(remote))
+			else localStorage.removeItem(UPDATE_REMOTE_VERSION_KEY)
+		} catch {
+			/* storage unavailable — fall back to uncached checks */
+		}
+	}
+
 	function checkForUpdate() {
 		// A dev install has no GM_info version to compare against, so every
 		// remote version would look like an update.
@@ -1130,15 +1212,24 @@
 			console.log(`${LOG_PREFIX} Dev build — skipping update check.`)
 			return
 		}
+		const now = Date.now()
+		const cached = getCachedUpdateState()
+		if (cached.checkedAt > 0 && now - cached.checkedAt < UPDATE_COOLDOWN_MS) {
+			if (cached.remote && isNewerVersion(cached.remote, SCRIPT_VERSION)) {
+				showUpdateBanner(cached.remote)
+			}
+			return
+		}
 		try {
 			GM_xmlhttpRequest({
 				method: 'GET',
-				url: META_URL + '?_=' + Date.now(),
+				url: META_URL + '?_=' + now,
 				onload(resp) {
 					if (resp.status !== 200) return
 					const match = resp.responseText.match(/@version\s+(\S+)/)
 					if (!match) return
 					const remote = match[1]
+					setCachedUpdateState(Date.now(), remote)
 					if (isNewerVersion(remote, SCRIPT_VERSION)) {
 						console.log(`${LOG_PREFIX} Update available: v${SCRIPT_VERSION} → v${remote}`)
 						showUpdateBanner(remote)
@@ -1191,7 +1282,7 @@
 			message.textContent = `⬆ ${name} v${remote} available (you have v${SCRIPT_VERSION}) — click to update`
 			Object.assign(message.style, { cursor: 'pointer', textDecoration: 'underline' })
 			message.addEventListener('click', () => {
-				window.open(DOWNLOAD_URL, '_blank')
+				window.open(DOWNLOAD_URL, '_blank', 'noopener,noreferrer')
 			})
 
 			const dismiss = document.createElement('button')

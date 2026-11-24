@@ -224,3 +224,178 @@ test('teardownPanel clears paceInterval, aborts reveal, and is wired to panel cl
     assert.equal(runTeardown.redeemBtn, null)
     assert.equal(runTeardown.paceEl, null)
 })
+
+test('waitForOrderContent detects revealed Steam keys without Reveal/Redeem buttons', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'fanatical-autoclaim.user.js'), 'utf8')
+    const waitMatch = src.match(/function waitForOrderContent\([\s\S]*?\n    \}/)
+    assert.ok(waitMatch, 'waitForOrderContent not found')
+
+    let scheduledFn = null
+    const cleared = []
+    let callbackCalls = 0
+    const logs = []
+    const warns = []
+
+    // eslint-disable-next-line no-new-func
+    const runWait = new Function(
+        'setInterval',
+        'clearInterval',
+        'findButtonsByText',
+        'findSteamKeys',
+        'log',
+        'warn',
+        `
+        let waitInterval = null
+        ${waitMatch[0]}
+        return waitForOrderContent
+        `,
+    )(
+        fn => {
+            scheduledFn = fn
+            return 99
+        },
+        id => {
+            if (id != null) cleared.push(id)
+        },
+        () => [],
+        () => [{ key: 'AAAAA-BBBBB-CCCCC', element: {} }],
+        msg => logs.push(msg),
+        msg => warns.push(msg),
+    )
+
+    runWait(() => {
+        callbackCalls++
+    }, 15000)
+
+    assert.equal(typeof scheduledFn, 'function')
+    scheduledFn()
+
+    assert.equal(callbackCalls, 1)
+    assert.deepEqual(cleared, [99])
+    assert.equal(warns.length, 0)
+    assert.equal(logs.length, 1)
+    assert.match(logs[0], /Order content detected/)
+})
+
+test('showPanel reports collectRedeemUrls().length as ready count when keys are revealed without Redeem buttons', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'fanatical-autoclaim.user.js'), 'utf8')
+    const showMatch = src.match(/function showPanel\(\)\s*\{[\s\S]*?\n    \}/)
+    assert.ok(showMatch, 'showPanel not found')
+
+    const statuses = []
+    const logs = []
+
+    // eslint-disable-next-line no-new-func
+    const runShow = new Function(
+        'injectStyles',
+        'teardownPanel',
+        'openedRedeemUrls',
+        'createPanel',
+        'refreshPaceUI',
+        'setInterval',
+        'findButtonsByText',
+        'findSteamKeys',
+        'collectRedeemUrls',
+        'log',
+        'updateStatus',
+        `
+        let paceInterval = null
+        ${showMatch[0]}
+        showPanel()
+        `,
+    )
+
+    runShow(
+        () => {},
+        () => {},
+        new Set(['steam://registerkey/OLD']),
+        () => {},
+        () => {},
+        () => 123,
+        () => [],
+        () => [
+            { key: 'AAAAA-BBBBB-CCCCC', element: {} },
+            { key: 'DDDDD-EEEEE-FFFFF', element: {} },
+        ],
+        () => [
+            { url: 'steam://registerkey/AAAAA-BBBBB-CCCCC', name: 'Game A' },
+            { url: 'steam://registerkey/DDDDD-EEEEE-FFFFF', name: 'Game B' },
+        ],
+        msg => logs.push(msg),
+        msg => statuses.push(msg),
+    )
+
+    assert.deepEqual(statuses, ['0 to reveal, 2 ready'])
+    assert.equal(logs.length, 1)
+    assert.match(logs[0], /0 to reveal, 0 redeem buttons, 2 visible keys/)
+})
+
+test('createPanel initializes delay input with current revealDelayMs instead of DEFAULT_REVEAL_DELAY_MS', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'fanatical-autoclaim.user.js'), 'utf8')
+    const createMatch = src.match(/function createPanel\(\)\s*\{[\s\S]*?\n    \}/)
+    assert.ok(createMatch, 'createPanel not found')
+
+    const makeEl = () => ({
+        id: '',
+        className: '',
+        textContent: '',
+        min: '',
+        max: '',
+        value: '',
+        children: [],
+        addEventListener() {},
+        appendChild(child) {
+            this.children.push(child)
+        },
+        querySelector() {
+            return null
+        },
+    })
+
+    let capturedDelayInitialValue = null
+
+    // eslint-disable-next-line no-new-func
+    const runCreate = new Function(
+        'buildPanelShell',
+        'teardownPanel',
+        'revealAllKeys',
+        'redeemNextOnSteam',
+        'createDelayInput',
+        'clampRevealDelay',
+        'createStatusLine',
+        'document',
+        'DEFAULT_REVEAL_DELAY_MS',
+        'MIN_REVEAL_DELAY_MS',
+        'MAX_REVEAL_DELAY_MS',
+        `
+        let revealBtn = null
+        let redeemBtn = null
+        let paceEl = null
+        let revealDelayMs = 2500
+        ${createMatch[0]}
+        createPanel()
+        `,
+    )
+
+    runCreate(
+        () => makeEl(),
+        () => {},
+        () => {},
+        () => {},
+        (_label, initialValue) => {
+            capturedDelayInitialValue = initialValue
+            return makeEl()
+        },
+        v => v,
+        () => {},
+        {
+            createElement: () => makeEl(),
+            body: { appendChild() {} },
+        },
+        500,
+        500,
+        60000,
+    )
+
+    assert.equal(capturedDelayInitialValue, 2500)
+})

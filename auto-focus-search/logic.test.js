@@ -20,12 +20,12 @@ function loadAutoFocusSearchLogic() {
 	const factory = new Function(`
 		"use strict";
 		${slice}
-		return { describeElement, scoreCandidate, isSearchPath };
+		return { describeElement, isTextInputElement, isFocusable, scoreCandidate };
 	`)
 	return factory()
 }
 
-const { describeElement, scoreCandidate, isSearchPath } = loadAutoFocusSearchLogic()
+const { describeElement, isTextInputElement, isFocusable, scoreCandidate } = loadAutoFocusSearchLogic()
 
 describe('describeElement', () => {
 	test('formats tag, id, name, and placeholder consistently', () => {
@@ -69,26 +69,46 @@ describe('scoreCandidate', () => {
 
 	test('rejects non-inputs and non-text input types', () => {
 		assert.equal(scoreCandidate(null), 0)
+		assert.equal(scoreCandidate({}), 0)
 		assert.equal(scoreCandidate({ tagName: 'DIV', id: 'search' }), 0)
+		assert.equal(scoreCandidate({ tagName: 'BUTTON', id: 'search' }), 0)
+		assert.equal(scoreCandidate({ tagName: 'A', className: 'search-box' }), 0)
 		assert.equal(scoreCandidate({ tagName: 'INPUT', type: 'hidden', name: 'q' }), 0)
 		assert.equal(scoreCandidate({ tagName: 'INPUT', type: 'submit', id: 'search' }), 0)
+		assert.equal(scoreCandidate({ tagName: 'INPUT', type: 'button', id: 'search' }), 0)
+		assert.equal(scoreCandidate({ tagName: 'INPUT', type: 'checkbox', id: 'search' }), 0)
+		assert.equal(scoreCandidate({ tagName: 'INPUT', type: 'radio', id: 'search' }), 0)
+		assert.equal(scoreCandidate({ tagName: 'INPUT', type: 'image', id: 'search' }), 0)
+		assert.equal(scoreCandidate({ tagName: 'INPUT', type: 'reset', id: 'search' }), 0)
+		assert.equal(scoreCandidate({ tagName: 'INPUT', type: 'file', id: 'search' }), 0)
+		assert.equal(scoreCandidate({ tagName: 'INPUT', type: 'range', id: 'search' }), 0)
+		assert.equal(scoreCandidate({ tagName: 'INPUT', type: 'color', id: 'search' }), 0)
 		assert.equal(scoreCandidate({ tagName: 'INPUT', type: 'text', name: 'email' }), 0)
 	})
 })
 
-describe('isSearchPath', () => {
-	test('detects search routes and non-empty search query parameters', () => {
-		assert.equal(isSearchPath('/search', ''), true)
-		assert.equal(isSearchPath('/en/results', ''), true)
-		assert.equal(isSearchPath('/find/', ''), true)
-		assert.equal(isSearchPath('/', '?q=userscript'), true)
-		assert.equal(isSearchPath('/results', '?search_query=music'), true)
+describe('isTextInputElement & isFocusable', () => {
+	test('accepts text-like inputs and textareas when enabled and tabbable', () => {
+		assert.equal(isTextInputElement({ tagName: 'INPUT', type: 'text' }), true)
+		assert.equal(isTextInputElement({ tagName: 'INPUT', type: 'search' }), true)
+		assert.equal(isTextInputElement({ tagName: 'INPUT' }), true)
+		assert.equal(isTextInputElement({ tagName: 'TEXTAREA' }), true)
+		assert.equal(isFocusable({ tagName: 'INPUT', type: 'search', disabled: false, readOnly: false, tabIndex: 0 }), true)
+		assert.equal(isFocusable({ tagName: 'TEXTAREA', disabled: false, readOnly: false }), true)
 	})
 
-	test('ignores non-search routes and empty query params', () => {
-		assert.equal(isSearchPath('/watch', '?v=abc123'), false)
-		assert.equal(isSearchPath('/search-tips', ''), false)
-		assert.equal(isSearchPath('/', '?q=   '), false)
-		assert.equal(isSearchPath('/', ''), false)
+	test('rejects non-input elements such as button, a, and div with tabindex', () => {
+		assert.equal(isFocusable({ tagName: 'BUTTON', id: 'search' }), false)
+		assert.equal(isFocusable({ tagName: 'A', className: 'search-box' }), false)
+		assert.equal(isFocusable({ tagName: 'DIV', id: 'search', tabIndex: 0 }), false)
+	})
+
+	test('rejects non-text input types and disabled, readOnly, or tabIndex=-1 inputs', () => {
+		for (const type of ['hidden', 'submit', 'button', 'checkbox', 'radio', 'image', 'reset', 'file', 'range', 'color']) {
+			assert.equal(isFocusable({ tagName: 'INPUT', type }), false, `Expected type=${type} to be rejected`)
+		}
+		assert.equal(isFocusable({ tagName: 'INPUT', type: 'text', disabled: true }), false)
+		assert.equal(isFocusable({ tagName: 'INPUT', type: 'text', readOnly: true }), false)
+		assert.equal(isFocusable({ tagName: 'INPUT', type: 'text', tabIndex: -1 }), false)
 	})
 })

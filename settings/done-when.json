@@ -1,0 +1,16 @@
+{
+	"test_roots": [
+		".",
+		"auto-focus-search",
+		"barter-bundle-scorer",
+		"fanatical-autoclaim",
+		"itch-bundle-autoclaim",
+		"luna-autoclaim",
+		"odoo-heic-to-jpeg",
+		"prime-video-filter",
+		"tools",
+		"yourtube",
+		"yt-music-redirect",
+		"ytm-data-panel"
+	]
+}
