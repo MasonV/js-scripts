@@ -185,3 +185,42 @@ test('recordRevealOutcome tracks consecutive failures and halts at threshold', (
     assert.deepEqual(L.recordRevealOutcome(0, false, 2), { consecutiveFailures: 1, halted: false })
     assert.deepEqual(L.recordRevealOutcome(1, false, 2), { consecutiveFailures: 2, halted: true })
 })
+
+test('teardownPanel clears paceInterval, aborts reveal, and is wired to panel close', () => {
+    const src = fs.readFileSync(path.join(__dirname, 'fanatical-autoclaim.user.js'), 'utf8')
+    const teardownMatch = src.match(/function teardownPanel\(\)\s*\{[\s\S]*?\n    \}/)
+    assert.ok(teardownMatch, 'teardownPanel not found')
+
+    const closeMatch = src.match(/const closeBtn = panel\.querySelector\('#fac-close-btn'\)[\s\S]*?\n        \}/)
+    assert.ok(closeMatch, 'closeBtn handler not found')
+    assert.match(closeMatch[0], /teardownPanel\(\)/)
+
+    const cleared = []
+    let removed = false
+    // eslint-disable-next-line no-new-func
+    const runTeardown = new Function(
+        'clearInterval',
+        'removePanel',
+        `
+        let revealAborted = false
+        let paceInterval = 42
+        let revealBtn = {}, redeemBtn = {}, paceEl = {}
+        ${teardownMatch[0]}
+        teardownPanel()
+        return { revealAborted, paceInterval, revealBtn, redeemBtn, paceEl }
+        `,
+    )(
+        id => cleared.push(id),
+        () => {
+            removed = true
+        },
+    )
+
+    assert.equal(runTeardown.revealAborted, true)
+    assert.equal(runTeardown.paceInterval, null)
+    assert.deepEqual(cleared, [42])
+    assert.equal(removed, true)
+    assert.equal(runTeardown.revealBtn, null)
+    assert.equal(runTeardown.redeemBtn, null)
+    assert.equal(runTeardown.paceEl, null)
+})

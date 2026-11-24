@@ -17,20 +17,47 @@ function between(startMarker, endMarker) {
   return source.slice(start, end);
 }
 
+const statsViewLogic = between('  const STAT_CARD_DEFS =', '\n  // ═══════════════════════════════════════════════════════════════════\n  //  STATS VIEW PERSISTENCE');
 const pureLogic = between('// PURE FUNCTIONS — START', '// PURE FUNCTIONS — END');
 const classifyLogic = between('  const DLC_KEYWORDS =', '\n  function extractGame');
 const scoringLogic = between('  function scoreGame(g)', '\n  // ═══════════════════════════════════════\n  // BUNDLE COST DETECTION');
+const bundleCostLogic = between('  function parseBundleCostFromText(', '\n  // ═══════════════════════════════════════\n  // BUNDLE-LEVEL SCORES');
 const bundleLogic = between('  function computeBundleScores(scored, ownedSet)', '\n  // ═══════════════════════════════════════\n  // HISTOGRAM');
+const histogramLogic = between('  function buildHistogramHTML(scored)', '\n  // ═══════════════════════════════════════\n  // SETTINGS HTML');
 const currencyDefs = between('  const CURRENCY_DEFS =', '\n\n  function detectTiers');
 const currencyLogic = between('  function formatTierPrice(tier, currencyPref)', '\n  function collectAvailableCurrencies');
+const statsDashboardLogic = between('  function buildStatsDashboardHTML(', '\n  function renderStatsDashboard(');
+const pageVisibilityLogic = between('  function hideOriginalPage()', '\n  function setPage(mode)');
+const ownedKeysLogic = between('  const STORAGE_KEY_OWNED', '\n  const STORAGE_KEY_SETTINGS');
+const ownedPersistenceLogic = between('  function loadOwnedOverrides()', '\n  // ═══════════════════════════════════════\n  // DOM: TABLE DETECTION');
 
-const sandbox = { SETTINGS: {}, CURRENT_BUNDLE_COST: null };
+const localStore = new Map();
+const sandbox = {
+  SETTINGS: {},
+  CURRENT_BUNDLE_COST: null,
+  UPDATE_BANNER_ID: 'barter-bundle-scorer-update-banner',
+  _statsViewState: { collapsed: false, hiddenCards: [] },
+  _appRefs: { ownedSet: new Set() },
+  _gridState: { currency: 'USD' },
+  document: { body: { children: [] } },
+  localStorage: {
+    getItem: k => (localStore.has(k) ? localStore.get(k) : null),
+    setItem: (k, v) => localStore.set(k, String(v)),
+    removeItem: k => localStore.delete(k),
+  },
+  safeStorageSet: (k, v) => localStore.set(k, String(v)),
+};
 vm.createContext(sandbox);
-vm.runInContext(`${pureLogic}\n${classifyLogic}\n${scoringLogic}\n${bundleLogic}\n${currencyDefs}\n${currencyLogic}\nglobalThis.__scoring = { clamp01, confidenceFromReviews, wilsonLowerBound, parseReviewCellText, classifyItem, scoreGame, scoreColor, scoreBg, scoreTierLabel, ratingColor, formatBreakdown, formatTierPrice, computeBundleScores };`, sandbox);
+vm.runInContext(`${ownedKeysLogic}\n${statsViewLogic}\n${pureLogic}\n${ownedPersistenceLogic}\n${classifyLogic}\n${scoringLogic}\n${bundleCostLogic}\n${bundleLogic}\n${histogramLogic}\n${currencyDefs}\n${currencyLogic}\n${statsDashboardLogic}\n${pageVisibilityLogic}\nglobalThis.__scoring = { clamp01, confidenceFromReviews, wilsonLowerBound, parseReviewCellText, classifyItem, scoreGame, scoreColor, scoreBg, scoreTierLabel, ratingColor, formatBreakdown, formatTierPrice, parseBundleCostFromText, detectBundleCost, computeBundleScores, buildStatsDashboardHTML, reRenderStats, hideOriginalPage, showOriginalPage, normalizeOwnedOverrides, resolveOwnedSet, toggleOwnedOverride, loadOwnedOverrides, saveOwnedOverrides, STORAGE_KEY_OWNED, STORAGE_KEY_OWNED_LEGACY };`, sandbox);
 const {
   clamp01, confidenceFromReviews: confidenceFromProductionReviews, wilsonLowerBound, parseReviewCellText: parseProductionReviewCellText, classifyItem: classifyProductionItem,
   scoreGame: scoreProductionGame, scoreColor, scoreBg, scoreTierLabel, ratingColor,
-  formatBreakdown, formatTierPrice, computeBundleScores: computeProductionBundleScores,
+  formatBreakdown, formatTierPrice, parseBundleCostFromText, detectBundleCost,
+  computeBundleScores: computeProductionBundleScores,
+  buildStatsDashboardHTML: buildProductionStatsDashboardHTML,
+  reRenderStats, hideOriginalPage, showOriginalPage,
+  normalizeOwnedOverrides, resolveOwnedSet, toggleOwnedOverride,
+  loadOwnedOverrides, saveOwnedOverrides, STORAGE_KEY_OWNED, STORAGE_KEY_OWNED_LEGACY,
 } = sandbox.__scoring;
 
 const DEFAULT_SETTINGS = {
@@ -63,6 +90,12 @@ function computeBundleScores(scored, ownedSet, settings = DEFAULT_SETTINGS, bund
   sandbox.SETTINGS = settings;
   sandbox.CURRENT_BUNDLE_COST = bundleCost;
   return computeProductionBundleScores(scored, ownedSet);
+}
+function buildStatsDashboardHTML(bundleScores, scored, tiers = [], { ownedSet = new Set(), settings = DEFAULT_SETTINGS, bundleCost = null, viewState = { collapsed: false, hiddenCards: [] } } = {}) {
+  sandbox.SETTINGS = settings;
+  sandbox.CURRENT_BUNDLE_COST = bundleCost;
+  sandbox._appRefs = { ownedSet };
+  return buildProductionStatsDashboardHTML(bundleScores, scored, tiers, viewState);
 }
 
 // ═══════════════════════════════════════
@@ -492,6 +525,98 @@ describe('parseReviewCellText', () => {
   });
 });
 
+describe('parseBundleCostFromText and detectBundleCost', () => {
+  it('extracts bundle cost from numbered tier labels and picks the minimum tier price', () => {
+    assert.equal(parseBundleCostFromText('Tier 1: $4.99\nTier 2: $9.99'), 4.99);
+    assert.equal(parseBundleCostFromText('Tier 2 - $9.99 | Tier 1 - $4.99'), 4.99);
+    assert.equal(parseBundleCostFromText('Tier #1: $3.49'), 3.49);
+  });
+
+  it('extracts bundle cost when item counts or short descriptors precede the dollar amount', () => {
+    assert.equal(parseBundleCostFromText('From 3 items: $4.99\nFrom 5 items: $7.99'), 4.99);
+    assert.equal(parseBundleCostFromText('Pay at least $1.00 for 3 games'), 1);
+    assert.equal(parseBundleCostFromText('Bundle cost: $12.99'), 12.99);
+    assert.equal(parseBundleCostFromText('Price: $5'), 5);
+    assert.equal(parseBundleCostFromText('$6.99 for bundle'), 6.99);
+  });
+
+  it('falls back to the minimum positive tier price when no text match is found', () => {
+    const tiers = [
+      { name: 'Starter Pack', price: 9.99 },
+      { name: 'Base Pack', price: 4.99 },
+      { name: 'Bonus', price: null },
+    ];
+    assert.equal(parseBundleCostFromText('Starter Pack / Base Pack', tiers), 4.99);
+    assert.equal(parseBundleCostFromText('', [14.99, 6.49]), 6.49);
+  });
+
+  it('ignores non-positive, non-finite, or out-of-range (>= 500) prices in text and tier fallback', () => {
+    assert.equal(parseBundleCostFromText('Tier 1: $0.00\nTier 2: $500.00'), null);
+    assert.equal(
+      parseBundleCostFromText('No dollar prices here', [
+        { price: 0 },
+        { price: -5 },
+        { price: 500 },
+        { price: NaN },
+        { price: null },
+      ]),
+      null,
+    );
+    assert.equal(
+      parseBundleCostFromText('Tier 1: $0.00', [{ price: 0 }, { price: 500 }, { price: 7.49 }]),
+      7.49,
+    );
+  });
+
+  it('returns null when neither text nor tiers contain a valid cost', () => {
+    assert.equal(parseBundleCostFromText(''), null);
+    assert.equal(parseBundleCostFromText(null, null), null);
+    assert.equal(detectBundleCost({ parentElement: { textContent: 'Just game rows' } }, []), null);
+  });
+
+  it('detectBundleCost reads table.parentElement text and falls back to tiers', () => {
+    const numberedTable = {
+      parentElement: {
+        textContent: 'Tier 1: $4.99\nGame A $19.99\nTier 2: $9.99\nGame B $29.99',
+      },
+    };
+    assert.equal(detectBundleCost(numberedTable, [{ price: 4.99 }, { price: 9.99 }]), 4.99);
+
+    const euroOnlyTable = {
+      parentElement: {
+        textContent: 'Pick & Mix: 4.99 EUR\nGame A 19.99',
+      },
+    };
+    assert.equal(detectBundleCost(euroOnlyTable, [{ price: 4.99 }, { price: 8.99 }]), 4.99);
+  });
+});
+
+describe('buildStatsDashboardHTML pctSaved and dealQuality rendering', () => {
+  const sampleScored = [
+    { title: 'Game A', itemType: 'game', score: 85, msrp: 10, ratingPct: 90, wishlistedDOM: false },
+    { title: 'Game B', itemType: 'game', score: 75, msrp: 10, ratingPct: 80, wishlistedDOM: true },
+  ];
+
+  it('renders Deal quality and % Saved vs MSRP when bundle cost is detected', () => {
+    const bundleCost = 5;
+    const bundleScores = computeBundleScores(sampleScored, new Set(), DEFAULT_SETTINGS, bundleCost);
+    const html = buildStatsDashboardHTML(bundleScores, sampleScored, [], { bundleCost });
+    assert.match(html, /% Saved vs MSRP/);
+    assert.match(html, /75%/);
+    assert.match(html, /width:75%;background:#3fb950/);
+    assert.match(html, /Deal: 4\.0x/);
+  });
+
+  it('clamps pctSaved CSS bar width to [0, 100] when bundle cost exceeds total MSRP', () => {
+    const bundleCost = 30; // totalMsrp is 20 -> pctSaved is -50%
+    const bundleScores = computeBundleScores(sampleScored, new Set(), DEFAULT_SETTINGS, bundleCost);
+    const html = buildStatsDashboardHTML(bundleScores, sampleScored, [], { bundleCost });
+    assert.match(html, /-50%/);
+    assert.match(html, /width:0%;background:#3fb950/);
+    assert.doesNotMatch(html, /width:-/);
+  });
+});
+
 // ═══════════════════════════════════════
 // METADATA & UPDATE CHECK
 // ═══════════════════════════════════════
@@ -720,5 +845,148 @@ describe('barter-bundle-scorer.meta.js metadata & update check', () => {
     harness.checkForUpdate();
     assert.equal(harness.requests.length, 0);
     assert.ok(harness.logs.some(line => line.includes('Dev build — skipping update check.')));
+  });
+});
+
+describe('hideOriginalPage and showOriginalPage', () => {
+  function makeBodyChild(tagName, { id = '', classes = [] } = {}) {
+    const classSet = new Set(classes);
+    return {
+      tagName: tagName.toUpperCase(),
+      id,
+      style: { display: '' },
+      dataset: {},
+      classList: {
+        contains: cls => classSet.has(cls),
+      },
+    };
+  }
+
+  it('exempts #bvg-app, #bvg-view-fab, UPDATE_BANNER_ID, .bvg-modal-backdrop, and SCRIPT/STYLE/LINK while hiding other children', () => {
+    const app = makeBodyChild('div', { id: 'bvg-app' });
+    const fab = makeBodyChild('div', { id: 'bvg-view-fab' });
+    const banner = makeBodyChild('div', { id: 'barter-bundle-scorer-update-banner' });
+    const modal = makeBodyChild('div', { classes: ['bvg-modal-backdrop'] });
+    const script = makeBodyChild('script');
+    const style = makeBodyChild('style');
+    const link = makeBodyChild('link');
+    const originalHeader = makeBodyChild('header', { id: 'barter-header' });
+    const originalTable = makeBodyChild('table');
+
+    sandbox.document.body.children = [
+      banner,
+      originalHeader,
+      originalTable,
+      script,
+      style,
+      link,
+      app,
+      fab,
+      modal,
+    ];
+
+    hideOriginalPage();
+
+    assert.equal(banner.style.display, '');
+    assert.equal(banner.dataset.bvgHidden, undefined);
+    assert.equal(app.style.display, '');
+    assert.equal(fab.style.display, '');
+    assert.equal(modal.style.display, '');
+    assert.equal(modal.dataset.bvgHidden, undefined);
+    assert.equal(script.style.display, '');
+    assert.equal(style.style.display, '');
+    assert.equal(link.style.display, '');
+
+    assert.equal(originalHeader.style.display, 'none');
+    assert.equal(originalHeader.dataset.bvgHidden, '1');
+    assert.equal(originalTable.style.display, 'none');
+    assert.equal(originalTable.dataset.bvgHidden, '1');
+
+    showOriginalPage();
+
+    assert.equal(originalHeader.style.display, '');
+    assert.equal(originalHeader.dataset.bvgHidden, undefined);
+    assert.equal(originalTable.style.display, '');
+    assert.equal(originalTable.dataset.bvgHidden, undefined);
+    assert.equal(banner.style.display, '');
+  });
+});
+
+describe('ownership overrides persistence and currency stats refresh', () => {
+  it('migrates legacy bvg_scorer_owned_v2 array and persists v3 overrides for DOM-owned and non-DOM-owned games', () => {
+    localStore.clear();
+    localStore.set(STORAGE_KEY_OWNED_LEGACY, JSON.stringify(['Legacy Owned']));
+
+    const initial = { ...loadOwnedOverrides() };
+    assert.deepEqual(initial, { 'Legacy Owned': true });
+
+    const games = [
+      { title: 'Legacy Owned', ownedDOM: false },
+      { title: 'Library Game', ownedDOM: true },
+      { title: 'Fresh Game', ownedDOM: false },
+    ];
+
+    // Before toggling Library Game, it is owned via ownedDOM
+    let ownedSet = resolveOwnedSet(games, initial);
+    assert.equal(ownedSet.has('Legacy Owned'), true);
+    assert.equal(ownedSet.has('Library Game'), true);
+    assert.equal(ownedSet.has('Fresh Game'), false);
+
+    // Toggle DOM-owned game off and persist
+    const afterUnown = toggleOwnedOverride(initial, 'Library Game', true);
+    saveOwnedOverrides(afterUnown);
+    assert.equal(localStore.has(STORAGE_KEY_OWNED), true);
+
+    const reloaded = { ...loadOwnedOverrides() };
+    assert.deepEqual(reloaded, { 'Legacy Owned': true, 'Library Game': false });
+    ownedSet = resolveOwnedSet(games, reloaded);
+    assert.equal(ownedSet.has('Library Game'), false);
+
+    // Toggle DOM-owned game back on
+    const afterRestore = toggleOwnedOverride(reloaded, 'Library Game', true);
+    saveOwnedOverrides(afterRestore);
+    ownedSet = resolveOwnedSet(games, loadOwnedOverrides());
+    assert.equal(ownedSet.has('Library Game'), true);
+  });
+
+  it('reRenderStats refreshes the Tier Pricing strip when _gridState.currency changes', () => {
+    const tr = { dataset: { bvgTier: 'Tier 1' } };
+    const scored = [
+      { title: 'Game A', itemType: 'game', score: 85, msrp: 20, ratingPct: 90, wishlistedDOM: false, tr },
+    ];
+    const tiers = [
+      { name: 'Tier 1', label: 'Tier 1', price: 9.99, prices: { USD: 9.99, EUR: 8.49, GBP: 7.29 }, games: [tr] },
+    ];
+    const bundleScores = computeBundleScores(scored, new Set(), DEFAULT_SETTINGS, 9.99);
+    const statsContainer = {
+      innerHTML: '',
+      classList: { toggle() {} },
+    };
+
+    sandbox.SETTINGS = DEFAULT_SETTINGS;
+    sandbox.CURRENT_BUNDLE_COST = 9.99;
+    sandbox._statsViewState = { collapsed: false, hiddenCards: [] };
+    sandbox._appRefs = {
+      statsContainer,
+      bundleScores,
+      scored,
+      tiers,
+      ownedSet: new Set(),
+    };
+
+    sandbox._gridState.currency = 'USD';
+    reRenderStats();
+    assert.match(statsContainer.innerHTML, /\$9\.99/);
+
+    sandbox._gridState.currency = 'EUR';
+    reRenderStats();
+    assert.match(statsContainer.innerHTML, /\u20AC8\.49/);
+
+    sandbox._gridState.currency = 'GBP';
+    reRenderStats();
+    assert.match(statsContainer.innerHTML, /\u00A37\.29/);
+
+    // Reset default currency for any subsequent checks
+    sandbox._gridState.currency = 'USD';
   });
 });

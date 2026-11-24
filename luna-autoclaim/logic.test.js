@@ -115,3 +115,143 @@ test("describePlan and describeProgress format counts with optional skipped and 
     "Opened 2 of 2 · skipped 1 (store set to Skip) · 1 store unknown",
   );
 });
+
+function loadGetGameName() {
+  const src = fs.readFileSync(path.join(__dirname, "luna-autoclaim.user.js"), "utf8");
+  const match = src.match(/function getGameName\(btn\)\s*\{[\s\S]*?\n  \}/);
+  assert.ok(match, "getGameName not found");
+  // eslint-disable-next-line no-new-func
+  return new Function(`${match[0]}\nreturn getGameName;`)();
+}
+
+test("getGameName prefers h3[title] and falls back to h3 textContent or unknown", () => {
+  const getGameName = loadGetGameName();
+  const makeBtn = (h3) => ({
+    closest(sel) {
+      if (sel !== ".item-card-details") return null;
+      return {
+        querySelector(q) {
+          assert.equal(q, "h3");
+          return h3;
+        },
+      };
+    },
+  });
+
+  assert.equal(
+    getGameName(
+      makeBtn({
+        getAttribute: (attr) => (attr === "title" ? "  Dishonored 2  " : null),
+        textContent: "Ignored Text",
+      }),
+    ),
+    "Dishonored 2",
+  );
+
+  assert.equal(
+    getGameName(
+      makeBtn({
+        getAttribute: () => null,
+        textContent: "  BioShock Remastered  ",
+      }),
+    ),
+    "BioShock Remastered",
+  );
+
+  assert.equal(
+    getGameName(
+      makeBtn({
+        getAttribute: () => "   ",
+        textContent: "Fallback From Blank Title",
+      }),
+    ),
+    "Fallback From Blank Title",
+  );
+
+  assert.equal(getGameName(makeBtn(null)), "unknown");
+  assert.equal(getGameName({ closest: () => null }), "unknown");
+});
+
+test("SPA navigation clears active waitInterval when changing or leaving routes", () => {
+  const src = fs.readFileSync(path.join(__dirname, "luna-autoclaim.user.js"), "utf8");
+  const start = src.indexOf("let waitInterval = null;");
+  const end = src.indexOf("function watchForNavigation()");
+  assert.ok(start > 0 && end > start, "SPA navigation section not found");
+  const snippet = src.slice(start, end);
+
+  let nextId = 1;
+  const active = new Map();
+  const cleared = [];
+  const win = { location: { pathname: "/claims/home" } };
+
+  // eslint-disable-next-line no-new-func
+  const harness = new Function(
+    "window",
+    "document",
+    "setInterval",
+    "clearInterval",
+    "findButtonsByText",
+    "removePanel",
+    "injectStyles",
+    "createPanel",
+    "refreshListingStatus",
+    "detectStore",
+    "describeSeenStores",
+    "createClaimPagePanel",
+    "openedUrls",
+    "log",
+    "warn",
+    `
+    let claimBtn = null;
+    ${snippet}
+    return {
+      handleRoute,
+      teardownPanel,
+      getWaitInterval: () => waitInterval,
+    };
+    `,
+  )(
+    win,
+    { querySelector: () => null },
+    (fn) => {
+      const id = nextId++;
+      active.set(id, fn);
+      return id;
+    },
+    (id) => {
+      if (id != null) {
+        cleared.push(id);
+        active.delete(id);
+      }
+    },
+    () => [],
+    () => {},
+    () => {},
+    () => {},
+    () => {},
+    () => "GOG",
+    () => "",
+    () => {},
+    new Set(),
+    () => {},
+    () => {},
+  );
+
+  harness.handleRoute();
+  assert.equal(harness.getWaitInterval(), 1);
+  assert.equal(active.size, 1);
+
+  // Navigate to a claim detail route before home wait finishes
+  win.location.pathname = "/claims/game-a/dp/1";
+  harness.handleRoute();
+  assert.ok(cleared.includes(1), "previous interval 1 should be cleared");
+  assert.equal(harness.getWaitInterval(), 2);
+  assert.equal(active.size, 1);
+
+  // Navigate away to a non-claim page
+  win.location.pathname = "/ detail";
+  harness.handleRoute();
+  assert.ok(cleared.includes(2), "previous interval 2 should be cleared");
+  assert.equal(harness.getWaitInterval(), null);
+  assert.equal(active.size, 0);
+});

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Luna Autoclaim
 // @namespace    luna-autoclaim
-// @version      0.12.0
+// @version      0.12.1
 // @description  Open available Prime Gaming claim pages on Luna one at a time with per-store filtering
 // @include      /^https:\/\/luna\.amazon\.[a-z.]{2,6}\//
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -359,11 +359,12 @@
     return statusEl
   }
 
-  // tone: undefined (neutral) | 'ok' | 'error'
+  // tone: undefined (neutral) | 'ok' | 'warn' | 'error'
   function updateStatus(text, tone) {
     if (!statusEl) return
     statusEl.textContent = text
     statusEl.classList.toggle(`${UI_PREFIX}-status--ok`, tone === 'ok')
+    statusEl.classList.toggle(`${UI_PREFIX}-status--warn`, tone === 'warn')
     statusEl.classList.toggle(`${UI_PREFIX}-status--error`, tone === 'error')
   }
 
@@ -560,6 +561,7 @@
       }
 
       #${p}-status.${p}-status--ok { color: #81c784; }
+      #${p}-status.${p}-status--warn { color: #ffb74d; }
       #${p}-status.${p}-status--error { color: #ef5350; font-weight: 700; }
     `)
   }
@@ -663,8 +665,8 @@
   function getGameName(btn) {
     const card = btn.closest(".item-card-details");
     if (!card) return "unknown";
-    const h3 = card.querySelector("h3[title]");
-    return h3 ? h3.getAttribute("title") : h3?.textContent?.trim() ?? "unknown";
+    const h3 = card.querySelector("h3");
+    return h3?.getAttribute("title")?.trim() || h3?.textContent?.trim() || "unknown";
   }
 
   function titlesIn(root) {
@@ -716,7 +718,7 @@
     const { toOpen, skipped } = plan;
     if (toOpen.length === 0 && skipped.length === 0) {
       log('No "Claim Game" buttons found — all keys may already be redeemed');
-      updateStatus("No keys to reveal");
+      updateStatus("No claimable games found");
       return;
     }
 
@@ -958,18 +960,23 @@
   //  INITIALIZATION
   // ═══════════════════════════════════════════════════════════════════
 
+  let waitInterval = null;
+
   function waitForOrderContent(callback, maxWaitMs = 15000) {
+    clearInterval(waitInterval);
     const startTime = Date.now();
-    const interval = setInterval(() => {
+    waitInterval = setInterval(() => {
       const hasClaim = findButtonsByText("Claim game").length > 0;
       if (hasClaim) {
-        clearInterval(interval);
+        clearInterval(waitInterval);
+        waitInterval = null;
         log(`Order content detected (${Date.now() - startTime}ms)`);
         callback();
         return;
       }
       if (Date.now() - startTime > maxWaitMs) {
-        clearInterval(interval);
+        clearInterval(waitInterval);
+        waitInterval = null;
         warn(`Timed out waiting for order content after ${maxWaitMs}ms`);
         callback();
       }
@@ -977,17 +984,20 @@
   }
 
   function waitForClaimPageContent(callback, maxWaitMs = 15000) {
+    clearInterval(waitInterval);
     const startTime = Date.now();
-    const interval = setInterval(() => {
+    waitInterval = setInterval(() => {
       const hasButton = !!document.querySelector('[data-a-target="buy-box_call-to-action"]');
       if (hasButton) {
-        clearInterval(interval);
+        clearInterval(waitInterval);
+        waitInterval = null;
         log(`Claim page content detected (${Date.now() - startTime}ms)`);
         callback();
         return;
       }
       if (Date.now() - startTime > maxWaitMs) {
-        clearInterval(interval);
+        clearInterval(waitInterval);
+        waitInterval = null;
         warn(`Timed out waiting for claim page content after ${maxWaitMs}ms`);
         callback();
       }
@@ -1008,6 +1018,8 @@
   let routeGeneration = 0;
 
   function teardownPanel() {
+    clearInterval(waitInterval);
+    waitInterval = null;
     removePanel();
     claimBtn = null;
   }
@@ -1018,6 +1030,8 @@
     const isClaim = /\/claims\/.+\/dp\//.test(path);
 
     if (!isHome && !isClaim) {
+      clearInterval(waitInterval);
+      waitInterval = null;
       if (currentPanelRoute !== null) {
         routeGeneration++;
         teardownPanel();
@@ -1032,6 +1046,8 @@
     if (newRoute === currentPanelRoute && newRoute === "home") return;
 
     const generation = ++routeGeneration;
+    clearInterval(waitInterval);
+    waitInterval = null;
     teardownPanel();
     currentPanelRoute = newRoute;
 

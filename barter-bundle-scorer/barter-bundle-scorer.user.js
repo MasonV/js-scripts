@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    barter-bundle-scorer
-// @version      6.7.2
+// @version      6.7.4
 // @description  Full-page bundle evaluation dashboard with per-game scoring, card grid, stats dashboard, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -769,8 +769,9 @@
   // ═══════════════════════════════════════
   // SETTINGS
   // ═══════════════════════════════════════
-  const STORAGE_KEY_OWNED    = 'bvg_scorer_owned_v2';
-  const STORAGE_KEY_SETTINGS = 'bvg_scorer_settings_v2';
+  const STORAGE_KEY_OWNED        = 'bvg_scorer_owned_v3';
+  const STORAGE_KEY_OWNED_LEGACY = 'bvg_scorer_owned_v2';
+  const STORAGE_KEY_SETTINGS     = 'bvg_scorer_settings_v2';
   const DEFAULT_SETTINGS = {
     // Wilson lower-bound adjusts rating downward for low-review games, penalizing
     // uncertainty. Off by default because most bundle games have few reviews, and
@@ -904,6 +905,61 @@
     return { collapsed: !norm.collapsed, hiddenCards: norm.hiddenCards };
   }
 
+  function normalizeOwnedOverrides(raw) {
+    if (Array.isArray(raw) || (raw && typeof raw === 'object' && typeof raw[Symbol.iterator] === 'function')) {
+      const out = {};
+      for (const item of raw) {
+        if (typeof item === 'string' && item.length > 0) {
+          out[item] = true;
+        }
+      }
+      return out;
+    }
+    if (!raw || typeof raw !== 'object') {
+      return {};
+    }
+    const out = {};
+    for (const [key, val] of Object.entries(raw)) {
+      if (key.length > 0 && typeof val === 'boolean') {
+        out[key] = val;
+      }
+    }
+    return out;
+  }
+
+  function resolveOwnedSet(games, overrides) {
+    const norm = normalizeOwnedOverrides(overrides);
+    const ownedSet = new Set();
+    for (const [title, isOwned] of Object.entries(norm)) {
+      if (isOwned === true) ownedSet.add(title);
+    }
+    if (Array.isArray(games)) {
+      for (const g of games) {
+        if (!g || typeof g.title !== 'string' || !g.title) continue;
+        if (norm[g.title] === false) {
+          ownedSet.delete(g.title);
+        } else if (norm[g.title] === true || g.ownedDOM) {
+          ownedSet.add(g.title);
+        }
+      }
+    }
+    return ownedSet;
+  }
+
+  function toggleOwnedOverride(overrides, title, ownedDOM = false) {
+    const next = normalizeOwnedOverrides(overrides);
+    if (typeof title !== 'string' || !title) return next;
+    const hasOverride = Object.prototype.hasOwnProperty.call(next, title);
+    const currentlyOwned = hasOverride ? next[title] : Boolean(ownedDOM);
+    const targetOwned = !currentlyOwned;
+    if (targetOwned === Boolean(ownedDOM)) {
+      delete next[title];
+    } else {
+      next[title] = targetOwned;
+    }
+    return next;
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   //  STATS VIEW PERSISTENCE
   // ═══════════════════════════════════════════════════════════════════
@@ -982,17 +1038,20 @@
   // ═══════════════════════════════════════
 
   // ═══════════════════════════════════════
-  // OWNED SET (manual overrides)
+  // OWNED OVERRIDES (manual overrides)
   // ═══════════════════════════════════════
-  function loadOwnedSet() {
+  function loadOwnedOverrides() {
     try {
-      const r = localStorage.getItem(STORAGE_KEY_OWNED);
-      if (!r) return new Set();
-      const a = JSON.parse(r);
-      return new Set(Array.isArray(a) ? a : []);
-    } catch { return new Set(); }
+      const raw = localStorage.getItem(STORAGE_KEY_OWNED);
+      if (raw) return normalizeOwnedOverrides(JSON.parse(raw));
+      const legacy = localStorage.getItem(STORAGE_KEY_OWNED_LEGACY);
+      if (legacy) return normalizeOwnedOverrides(JSON.parse(legacy));
+      return {};
+    } catch { return {}; }
   }
-  function saveOwnedSet(s) { safeStorageSet(STORAGE_KEY_OWNED, JSON.stringify([...s])); }
+  function saveOwnedOverrides(overrides) {
+    safeStorageSet(STORAGE_KEY_OWNED, JSON.stringify(normalizeOwnedOverrides(overrides)));
+  }
 
   // ═══════════════════════════════════════
   // DOM: TABLE DETECTION
@@ -1356,11 +1415,10 @@
   // ═══════════════════════════════════════
   // BUNDLE COST DETECTION
   // ═══════════════════════════════════════
-  function detectBundleCost(table) {
-    const scope = (table?.parentElement || document.body);
-    const probe = scope.textContent || '';
+  function parseBundleCostFromText(text, tiers = []) {
+    const probe = typeof text === 'string' ? text : '';
     const regexes = [
-      /(?:cost|price|pay|from|tier)\D{0,18}\$\s*(\d+(?:\.\d{1,2})?)/ig,
+      /(?:cost|price|pay|from|tier(?:\s*#?\d+)?)[^$\n]{0,18}\$\s*(\d+(?:\.\d{1,2})?)/ig,
       /\$\s*(\d+(?:\.\d{1,2})?)\s*(?:for|bundle|tier)/ig,
     ];
     const matches = [];
@@ -1371,8 +1429,23 @@
         if (Number.isFinite(n) && n > 0 && n < 500) matches.push(n);
       }
     }
-    if (!matches.length) return null;
-    return Math.min(...matches);
+    if (matches.length) return Math.min(...matches);
+    if (Array.isArray(tiers)) {
+      const tierPrices = [];
+      for (const t of tiers) {
+        const raw = typeof t === 'number' ? t : t?.price;
+        const n = typeof raw === 'number' ? raw : parseFloat(raw);
+        if (Number.isFinite(n) && n > 0 && n < 500) tierPrices.push(n);
+      }
+      if (tierPrices.length) return Math.min(...tierPrices);
+    }
+    return null;
+  }
+
+  function detectBundleCost(table, tiers = []) {
+    const scope = table?.parentElement || table || (typeof document !== 'undefined' ? document.body : null);
+    const probe = scope?.textContent || '';
+    return parseBundleCostFromText(probe, tiers);
   }
 
   // ═══════════════════════════════════════
@@ -1643,7 +1716,12 @@
 
   function hideOriginalPage() {
     for (const child of document.body.children) {
-      if (child.id === 'bvg-app' || child.id === 'bvg-view-fab') continue;
+      if (
+        child.id === 'bvg-app' ||
+        child.id === 'bvg-view-fab' ||
+        child.id === UPDATE_BANNER_ID ||
+        child.classList?.contains('bvg-modal-backdrop')
+      ) continue;
       if (child.tagName === 'SCRIPT' || child.tagName === 'STYLE' || child.tagName === 'LINK') continue;
       child.style.display = 'none';
       child.dataset.bvgHidden = '1';
@@ -1900,7 +1978,7 @@
         <div class="bvg-score-label">% Saved vs MSRP</div>
         <div><span class="bvg-score-num" style="color:#3fb950">${pctSaved.toFixed(0)}%</span></div>
         <div class="bvg-score-label">$${CURRENT_BUNDLE_COST.toFixed(2)} bundle</div>
-        <div class="bvg-score-bar" style="width:${Math.min(pctSaved, 100)}%;background:#3fb950"></div>
+        <div class="bvg-score-bar" style="width:${Math.max(0, Math.min(pctSaved, 100))}%;background:#3fb950"></div>
       </div>` : ''}
       ${!hiddenSet.has('picks') ? `<div class="bvg-picks-card" data-stat-card="picks">
         ${hideBtn('picks', 'Top Picks')}
@@ -2052,6 +2130,7 @@
     toolbar.querySelector('#bvg-currency-select')?.addEventListener('change', (e) => {
       st.currency = e.target.value;
       saveCurrencyPref(st.currency);
+      reRenderStats();
       reRenderContent();
     });
 
@@ -2434,10 +2513,9 @@
         const card = el.closest('.bvg-card');
         const title = card?.dataset.bvgTitle;
         if (!title) return;
-        const set = loadOwnedSet();
-        if (set.has(title)) set.delete(title);
-        else set.add(title);
-        saveOwnedSet(set);
+        const ownedDOM = scored.some(g => g.title === title && Boolean(g.ownedDOM));
+        const overrides = toggleOwnedOverride(loadOwnedOverrides(), title, ownedDOM);
+        saveOwnedOverrides(overrides);
         run();
       });
     });
@@ -2466,16 +2544,13 @@
     // Detect tiers BEFORE any DOM modifications
     const tiers = detectTiers(table);
     if (tiers.length) log(`Detected ${tiers.length} tier(s):`, tiers.map(t => t.name));
-    CURRENT_BUNDLE_COST = detectBundleCost(table);
+    CURRENT_BUNDLE_COST = detectBundleCost(table, tiers);
     log('Bundle cost detected:', CURRENT_BUNDLE_COST);
 
-    // Build owned set: merge DOM-detected + manually toggled
-    const manualOwned = loadOwnedSet();
+    // Build owned set: merge DOM-detected + manual overrides
+    const ownedOverrides = loadOwnedOverrides();
     const games = rows.map(tr => extractGame(tr));
-    const ownedSet = new Set(manualOwned);
-    for (const g of games) {
-      if (g.ownedDOM) ownedSet.add(g.title);
-    }
+    const ownedSet = resolveOwnedSet(games, ownedOverrides);
     const scored = games.map(g => {
       const { score, breakdown } = scoreGame(g);
       return { ...g, score, breakdown };
