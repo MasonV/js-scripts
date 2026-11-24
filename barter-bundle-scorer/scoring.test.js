@@ -17,20 +17,32 @@ function between(startMarker, endMarker) {
   return source.slice(start, end);
 }
 
+const statsViewLogic = between('  const STAT_CARD_DEFS =', '\n  // ═══════════════════════════════════════════════════════════════════\n  //  STATS VIEW PERSISTENCE');
 const pureLogic = between('// PURE FUNCTIONS — START', '// PURE FUNCTIONS — END');
 const classifyLogic = between('  const DLC_KEYWORDS =', '\n  function extractGame');
 const scoringLogic = between('  function scoreGame(g)', '\n  // ═══════════════════════════════════════\n  // BUNDLE COST DETECTION');
+const bundleCostLogic = between('  function parseBundleCostFromText(', '\n  // ═══════════════════════════════════════\n  // BUNDLE-LEVEL SCORES');
 const bundleLogic = between('  function computeBundleScores(scored, ownedSet)', '\n  // ═══════════════════════════════════════\n  // HISTOGRAM');
+const histogramLogic = between('  function buildHistogramHTML(scored)', '\n  // ═══════════════════════════════════════\n  // SETTINGS HTML');
 const currencyDefs = between('  const CURRENCY_DEFS =', '\n\n  function detectTiers');
 const currencyLogic = between('  function formatTierPrice(tier, currencyPref)', '\n  function collectAvailableCurrencies');
+const statsDashboardLogic = between('  function buildStatsDashboardHTML(', '\n  function reRenderStats()');
 
-const sandbox = { SETTINGS: {}, CURRENT_BUNDLE_COST: null };
+const sandbox = {
+  SETTINGS: {},
+  CURRENT_BUNDLE_COST: null,
+  _statsViewState: { collapsed: false, hiddenCards: [] },
+  _appRefs: { ownedSet: new Set() },
+  _gridState: { currency: 'USD' },
+};
 vm.createContext(sandbox);
-vm.runInContext(`${pureLogic}\n${classifyLogic}\n${scoringLogic}\n${bundleLogic}\n${currencyDefs}\n${currencyLogic}\nglobalThis.__scoring = { clamp01, confidenceFromReviews, wilsonLowerBound, parseReviewCellText, classifyItem, scoreGame, scoreColor, scoreBg, scoreTierLabel, ratingColor, formatBreakdown, formatTierPrice, computeBundleScores };`, sandbox);
+vm.runInContext(`${statsViewLogic}\n${pureLogic}\n${classifyLogic}\n${scoringLogic}\n${bundleCostLogic}\n${bundleLogic}\n${histogramLogic}\n${currencyDefs}\n${currencyLogic}\n${statsDashboardLogic}\nglobalThis.__scoring = { clamp01, confidenceFromReviews, wilsonLowerBound, parseReviewCellText, classifyItem, scoreGame, scoreColor, scoreBg, scoreTierLabel, ratingColor, formatBreakdown, formatTierPrice, parseBundleCostFromText, detectBundleCost, computeBundleScores, buildStatsDashboardHTML };`, sandbox);
 const {
   clamp01, confidenceFromReviews: confidenceFromProductionReviews, wilsonLowerBound, parseReviewCellText: parseProductionReviewCellText, classifyItem: classifyProductionItem,
   scoreGame: scoreProductionGame, scoreColor, scoreBg, scoreTierLabel, ratingColor,
-  formatBreakdown, formatTierPrice, computeBundleScores: computeProductionBundleScores,
+  formatBreakdown, formatTierPrice, parseBundleCostFromText, detectBundleCost,
+  computeBundleScores: computeProductionBundleScores,
+  buildStatsDashboardHTML: buildProductionStatsDashboardHTML,
 } = sandbox.__scoring;
 
 const DEFAULT_SETTINGS = {
@@ -63,6 +75,12 @@ function computeBundleScores(scored, ownedSet, settings = DEFAULT_SETTINGS, bund
   sandbox.SETTINGS = settings;
   sandbox.CURRENT_BUNDLE_COST = bundleCost;
   return computeProductionBundleScores(scored, ownedSet);
+}
+function buildStatsDashboardHTML(bundleScores, scored, tiers = [], { ownedSet = new Set(), settings = DEFAULT_SETTINGS, bundleCost = null, viewState = { collapsed: false, hiddenCards: [] } } = {}) {
+  sandbox.SETTINGS = settings;
+  sandbox.CURRENT_BUNDLE_COST = bundleCost;
+  sandbox._appRefs = { ownedSet };
+  return buildProductionStatsDashboardHTML(bundleScores, scored, tiers, viewState);
 }
 
 // ═══════════════════════════════════════
@@ -489,6 +507,98 @@ describe('parseReviewCellText', () => {
     assert.deepEqual(parseReviewCellText('N/A'), { ratingPct: null, reviews: null });
     assert.deepEqual(parseReviewCellText(null), { ratingPct: null, reviews: null });
     assert.deepEqual(parseReviewCellText(undefined), { ratingPct: null, reviews: null });
+  });
+});
+
+describe('parseBundleCostFromText and detectBundleCost', () => {
+  it('extracts bundle cost from numbered tier labels and picks the minimum tier price', () => {
+    assert.equal(parseBundleCostFromText('Tier 1: $4.99\nTier 2: $9.99'), 4.99);
+    assert.equal(parseBundleCostFromText('Tier 2 - $9.99 | Tier 1 - $4.99'), 4.99);
+    assert.equal(parseBundleCostFromText('Tier #1: $3.49'), 3.49);
+  });
+
+  it('extracts bundle cost when item counts or short descriptors precede the dollar amount', () => {
+    assert.equal(parseBundleCostFromText('From 3 items: $4.99\nFrom 5 items: $7.99'), 4.99);
+    assert.equal(parseBundleCostFromText('Pay at least $1.00 for 3 games'), 1);
+    assert.equal(parseBundleCostFromText('Bundle cost: $12.99'), 12.99);
+    assert.equal(parseBundleCostFromText('Price: $5'), 5);
+    assert.equal(parseBundleCostFromText('$6.99 for bundle'), 6.99);
+  });
+
+  it('falls back to the minimum positive tier price when no text match is found', () => {
+    const tiers = [
+      { name: 'Starter Pack', price: 9.99 },
+      { name: 'Base Pack', price: 4.99 },
+      { name: 'Bonus', price: null },
+    ];
+    assert.equal(parseBundleCostFromText('Starter Pack / Base Pack', tiers), 4.99);
+    assert.equal(parseBundleCostFromText('', [14.99, 6.49]), 6.49);
+  });
+
+  it('ignores non-positive, non-finite, or out-of-range (>= 500) prices in text and tier fallback', () => {
+    assert.equal(parseBundleCostFromText('Tier 1: $0.00\nTier 2: $500.00'), null);
+    assert.equal(
+      parseBundleCostFromText('No dollar prices here', [
+        { price: 0 },
+        { price: -5 },
+        { price: 500 },
+        { price: NaN },
+        { price: null },
+      ]),
+      null,
+    );
+    assert.equal(
+      parseBundleCostFromText('Tier 1: $0.00', [{ price: 0 }, { price: 500 }, { price: 7.49 }]),
+      7.49,
+    );
+  });
+
+  it('returns null when neither text nor tiers contain a valid cost', () => {
+    assert.equal(parseBundleCostFromText(''), null);
+    assert.equal(parseBundleCostFromText(null, null), null);
+    assert.equal(detectBundleCost({ parentElement: { textContent: 'Just game rows' } }, []), null);
+  });
+
+  it('detectBundleCost reads table.parentElement text and falls back to tiers', () => {
+    const numberedTable = {
+      parentElement: {
+        textContent: 'Tier 1: $4.99\nGame A $19.99\nTier 2: $9.99\nGame B $29.99',
+      },
+    };
+    assert.equal(detectBundleCost(numberedTable, [{ price: 4.99 }, { price: 9.99 }]), 4.99);
+
+    const euroOnlyTable = {
+      parentElement: {
+        textContent: 'Pick & Mix: 4.99 EUR\nGame A 19.99',
+      },
+    };
+    assert.equal(detectBundleCost(euroOnlyTable, [{ price: 4.99 }, { price: 8.99 }]), 4.99);
+  });
+});
+
+describe('buildStatsDashboardHTML pctSaved and dealQuality rendering', () => {
+  const sampleScored = [
+    { title: 'Game A', itemType: 'game', score: 85, msrp: 10, ratingPct: 90, wishlistedDOM: false },
+    { title: 'Game B', itemType: 'game', score: 75, msrp: 10, ratingPct: 80, wishlistedDOM: true },
+  ];
+
+  it('renders Deal quality and % Saved vs MSRP when bundle cost is detected', () => {
+    const bundleCost = 5;
+    const bundleScores = computeBundleScores(sampleScored, new Set(), DEFAULT_SETTINGS, bundleCost);
+    const html = buildStatsDashboardHTML(bundleScores, sampleScored, [], { bundleCost });
+    assert.match(html, /% Saved vs MSRP/);
+    assert.match(html, /75%/);
+    assert.match(html, /width:75%;background:#3fb950/);
+    assert.match(html, /Deal: 4\.0x/);
+  });
+
+  it('clamps pctSaved CSS bar width to [0, 100] when bundle cost exceeds total MSRP', () => {
+    const bundleCost = 30; // totalMsrp is 20 -> pctSaved is -50%
+    const bundleScores = computeBundleScores(sampleScored, new Set(), DEFAULT_SETTINGS, bundleCost);
+    const html = buildStatsDashboardHTML(bundleScores, sampleScored, [], { bundleCost });
+    assert.match(html, /-50%/);
+    assert.match(html, /width:0%;background:#3fb950/);
+    assert.doesNotMatch(html, /width:-/);
   });
 });
 

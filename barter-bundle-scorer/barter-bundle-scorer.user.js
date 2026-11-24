@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Barter.vg Bundle Scorer
 // @namespace    barter-bundle-scorer
-// @version      6.7.2
+// @version      6.7.3
 // @description  Full-page bundle evaluation dashboard with per-game scoring, card grid, stats dashboard, and settings for Barter.vg bundle pages.
 // @match        *://barter.vg/bundle/*
 // @match        *://*.barter.vg/bundle/*
@@ -1356,11 +1356,10 @@
   // ═══════════════════════════════════════
   // BUNDLE COST DETECTION
   // ═══════════════════════════════════════
-  function detectBundleCost(table) {
-    const scope = (table?.parentElement || document.body);
-    const probe = scope.textContent || '';
+  function parseBundleCostFromText(text, tiers = []) {
+    const probe = typeof text === 'string' ? text : '';
     const regexes = [
-      /(?:cost|price|pay|from|tier)\D{0,18}\$\s*(\d+(?:\.\d{1,2})?)/ig,
+      /(?:cost|price|pay|from|tier(?:\s*#?\d+)?)[^$\n]{0,18}\$\s*(\d+(?:\.\d{1,2})?)/ig,
       /\$\s*(\d+(?:\.\d{1,2})?)\s*(?:for|bundle|tier)/ig,
     ];
     const matches = [];
@@ -1371,8 +1370,23 @@
         if (Number.isFinite(n) && n > 0 && n < 500) matches.push(n);
       }
     }
-    if (!matches.length) return null;
-    return Math.min(...matches);
+    if (matches.length) return Math.min(...matches);
+    if (Array.isArray(tiers)) {
+      const tierPrices = [];
+      for (const t of tiers) {
+        const raw = typeof t === 'number' ? t : t?.price;
+        const n = typeof raw === 'number' ? raw : parseFloat(raw);
+        if (Number.isFinite(n) && n > 0 && n < 500) tierPrices.push(n);
+      }
+      if (tierPrices.length) return Math.min(...tierPrices);
+    }
+    return null;
+  }
+
+  function detectBundleCost(table, tiers = []) {
+    const scope = table?.parentElement || table || (typeof document !== 'undefined' ? document.body : null);
+    const probe = scope?.textContent || '';
+    return parseBundleCostFromText(probe, tiers);
   }
 
   // ═══════════════════════════════════════
@@ -1900,7 +1914,7 @@
         <div class="bvg-score-label">% Saved vs MSRP</div>
         <div><span class="bvg-score-num" style="color:#3fb950">${pctSaved.toFixed(0)}%</span></div>
         <div class="bvg-score-label">$${CURRENT_BUNDLE_COST.toFixed(2)} bundle</div>
-        <div class="bvg-score-bar" style="width:${Math.min(pctSaved, 100)}%;background:#3fb950"></div>
+        <div class="bvg-score-bar" style="width:${Math.max(0, Math.min(pctSaved, 100))}%;background:#3fb950"></div>
       </div>` : ''}
       ${!hiddenSet.has('picks') ? `<div class="bvg-picks-card" data-stat-card="picks">
         ${hideBtn('picks', 'Top Picks')}
@@ -2466,7 +2480,7 @@
     // Detect tiers BEFORE any DOM modifications
     const tiers = detectTiers(table);
     if (tiers.length) log(`Detected ${tiers.length} tier(s):`, tiers.map(t => t.name));
-    CURRENT_BUNDLE_COST = detectBundleCost(table);
+    CURRENT_BUNDLE_COST = detectBundleCost(table, tiers);
     log('Bundle cost detected:', CURRENT_BUNDLE_COST);
 
     // Build owned set: merge DOM-detected + manually toggled
