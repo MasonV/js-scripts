@@ -31,6 +31,9 @@ function loadPureLogic() {
       toggleHiddenStatCard,
       showAllStatCards,
       toggleStatsCollapsed,
+      normalizeOwnedOverrides,
+      resolveOwnedSet,
+      toggleOwnedOverride,
     };
   `);
   return factory();
@@ -42,6 +45,9 @@ const {
   toggleHiddenStatCard,
   showAllStatCards,
   toggleStatsCollapsed,
+  normalizeOwnedOverrides,
+  resolveOwnedSet,
+  toggleOwnedOverride,
 } = loadPureLogic();
 
 describe('normalizeStatsViewState', () => {
@@ -103,5 +109,66 @@ describe('showAllStatCards & toggleStatsCollapsed', () => {
     assert.deepEqual(s1, { collapsed: true, hiddenCards: ['msrp', 'avgReview'] });
     const s2 = toggleStatsCollapsed(s1);
     assert.deepEqual(s2, { collapsed: false, hiddenCards: ['msrp', 'avgReview'] });
+  });
+});
+
+describe('ownership overrides (normalizeOwnedOverrides, toggleOwnedOverride, resolveOwnedSet)', () => {
+  it('normalizes v3 boolean override maps, legacy v2 title arrays/Sets, and invalid inputs', () => {
+    assert.deepEqual(normalizeOwnedOverrides(null), {});
+    assert.deepEqual(normalizeOwnedOverrides(undefined), {});
+    assert.deepEqual(normalizeOwnedOverrides('bad'), {});
+    assert.deepEqual(
+      normalizeOwnedOverrides(['Game A', '', 42, 'Game B']),
+      { 'Game A': true, 'Game B': true },
+    );
+    assert.deepEqual(
+      normalizeOwnedOverrides(new Set(['Game A', 'Game C'])),
+      { 'Game A': true, 'Game C': true },
+    );
+    assert.deepEqual(
+      normalizeOwnedOverrides({ 'Game A': true, 'Game B': false, 'Game C': 'yes', '': true }),
+      { 'Game A': true, 'Game B': false },
+    );
+  });
+
+  it('toggles DOM-owned games off (recording false override) and back on (clearing override)', () => {
+    const s0 = {};
+    const s1 = toggleOwnedOverride(s0, 'DOM Owned Game', true);
+    assert.deepEqual(s1, { 'DOM Owned Game': false });
+
+    const s2 = toggleOwnedOverride(s1, 'DOM Owned Game', true);
+    assert.deepEqual(s2, {});
+  });
+
+  it('toggles non-DOM-owned games on (recording true override) and back off (clearing override)', () => {
+    const s0 = {};
+    const s1 = toggleOwnedOverride(s0, 'Unowned Game', false);
+    assert.deepEqual(s1, { 'Unowned Game': true });
+
+    const s2 = toggleOwnedOverride(s1, 'Unowned Game', false);
+    assert.deepEqual(s2, {});
+  });
+
+  it('resolves effective ownedSet merging DOM detection with manual overrides in both directions', () => {
+    const games = [
+      { title: 'DOM Owned Keep', ownedDOM: true },
+      { title: 'DOM Owned Unown', ownedDOM: true },
+      { title: 'DOM Unowned ManualOwn', ownedDOM: false },
+      { title: 'DOM Unowned Keep', ownedDOM: false },
+    ];
+    let overrides = {};
+    overrides = toggleOwnedOverride(overrides, 'DOM Owned Unown', true);
+    overrides = toggleOwnedOverride(overrides, 'DOM Unowned ManualOwn', false);
+
+    const ownedSet = resolveOwnedSet(games, overrides);
+    assert.equal(ownedSet.has('DOM Owned Keep'), true);
+    assert.equal(ownedSet.has('DOM Owned Unown'), false);
+    assert.equal(ownedSet.has('DOM Unowned ManualOwn'), true);
+    assert.equal(ownedSet.has('DOM Unowned Keep'), false);
+
+    // Clicking DOM Owned Unown again restores it to owned
+    overrides = toggleOwnedOverride(overrides, 'DOM Owned Unown', true);
+    const restoredSet = resolveOwnedSet(games, overrides);
+    assert.equal(restoredSet.has('DOM Owned Unown'), true);
   });
 });
