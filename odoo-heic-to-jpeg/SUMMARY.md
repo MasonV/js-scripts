@@ -14,7 +14,7 @@ Clients submit iPhone photos in HEIC format to Odoo SaaS. All major browsers exc
 
 A Tampermonkey userscript that transparently converts HEIC files to JPEG in the browser before Odoo processes them. Conversion happens at the browser API level — Odoo never sees HEIC data.
 
-## Architecture (v1.4.2)
+## Architecture (v1.4.3)
 
 The script operates in two JavaScript contexts:
 
@@ -33,7 +33,7 @@ All file-processing patches run in the page's native JS context to avoid Tamperm
 
 ### Re-Entrancy Guard
 
-`heic2any` internally uses `FileReader.readAsArrayBuffer()` to read the HEIC blob. Without protection, this triggers our FileReader patch recursively. An `activeConversions` counter is incremented at the start of `convertBlob()` and decremented on completion or failure so that ALL concurrent conversion paths (FileReader-initiated, XHR-initiated, fetch-initiated) remain guarded while any conversion is in flight (`activeConversions > 0`). When `activeConversions > 0`, FileReader calls pass through to the original method unmodified.
+`heic2any` internally uses `FileReader.readAsArrayBuffer()` to read the HEIC blob. Without protection, this triggers our FileReader patch recursively. Instead of a global lock across all files, `convertBlob()` tracks active conversions per blob reference via `convertingBlobs` (a reference-counted `WeakMap` with an array fallback), using `markConvertingBlob()`, `unmarkConvertingBlob()`, and `isConvertingBlob()`. When `isConvertingBlob(blob)` is true, `FileReader` calls for that specific blob pass through to the original method unmodified, while concurrent `FileReader` reads on other HEIC blobs are still intercepted and converted. Cleanup runs once on resolution, rejection, or synchronous error.
 
 ### Conversion Flow (Drag-and-Drop)
 
@@ -44,11 +44,12 @@ User drops .heic file(s) on Odoo chatter
   → FormData.append("ufile", originalFile)
   → xhr.send(formData)
   → [OUR XHR PATCH] snapshots FormData entries, finds HEIC file(s)
-  → convertBlob() increments activeConversions, calls heic2any
-  → heic2any internally calls FileReader.readAsArrayBuffer()
-  → [OUR FILEREADER PATCH] sees activeConversions > 0, passes through
+  → convertBlob(blob) marks blob in convertingBlobs, calls heic2any
+  → heic2any internally calls FileReader.readAsArrayBuffer(blob)
+  → [OUR FILEREADER PATCH] sees isConvertingBlob(blob) === true, passes through
+  → (any concurrent FileReader read on a different HEIC blob2 still converts)
   → heic2any returns JPEG blob
-  → convertBlob() decrements activeConversions
+  → convertBlob(blob) unmarks blob in convertingBlobs
   → Affected FormData keys are rebuilt in original order with converted JPEG Files
   → Toast reports actual conversion count (skipping already-readable / failed files)
   → original xhr.send() fires with clean JPEG payload
@@ -90,6 +91,7 @@ Odoo's `file_upload_service` appends the original `File` object directly to Form
 | 1.4.0 | Standardize `@version` / `SCRIPT_VERSION` and adopt unified `<update-check>` block |
 | 1.4.1 | Preserve all FormData entries in order during multi-file uploads |
 | 1.4.2 | Replace boolean `converting` with `activeConversions` counter and count only actual conversions in toast |
+| 1.4.3 | Replace global `activeConversions` FileReader lock with per-blob ref-counted re-entrancy guard |
 
 ## Future Considerations
 

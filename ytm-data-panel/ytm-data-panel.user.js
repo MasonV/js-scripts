@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YTM Data Panel
 // @namespace    ytm-data-panel
-// @version      1.1.1
+// @version      1.1.2
 // @description  Shows a data-rich floating panel on YouTube Music /watch pages — description, views, publish date, tags, and auto-detected chapters parsed from the YouTube video metadata
 // @match        *://music.youtube.com/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -243,17 +243,17 @@
 	/**
 	 * Extracts the bits of metadata we actually render from the player
 	 * response blob. Returns `null` if the response is missing the core
-	 * videoDetails object or the videoId doesn't match what's in the URL
-	 * (SPA nav staleness).
+	 * videoDetails object, lacks a videoId, or the videoId doesn't match
+	 * what's in the URL (SPA nav staleness).
 	 *
 	 * @returns {object|null}
 	 */
 	function extractTrackData(response, expectedVideoId) {
 		if (!response || !response.videoDetails) return null
 		const vd = response.videoDetails
-		if (expectedVideoId && vd.videoId && vd.videoId !== expectedVideoId) {
-			// The global is still pointing at the previous track — caller
-			// should retry or fall back.
+		if (!vd.videoId || (expectedVideoId && vd.videoId !== expectedVideoId)) {
+			// Unpopulated shell or global still pointing at the previous track —
+			// caller should retry or fall back.
 			return null
 		}
 
@@ -261,7 +261,7 @@
 		const description = vd.shortDescription || (mf && mf.description && mf.description.simpleText) || ''
 
 		return {
-			videoId: vd.videoId || expectedVideoId || null,
+			videoId: vd.videoId,
 			title: vd.title || '',
 			author: vd.author || (mf && mf.ownerChannelName) || '',
 			lengthSeconds: parseInt(vd.lengthSeconds, 10) || 0,
@@ -273,27 +273,55 @@
 		}
 	}
 
+	let cancelActiveFetch = null
+
 	/**
-	 * Retry loop that waits for `ytInitialPlayerResponse` to catch up with
+	 * Retry loop that waits for the player response to catch up with
 	 * the current URL after SPA navigation. Resolves with the extracted
-	 * data or `null` if it never synchronizes within the retry budget.
+	 * data or `null` if cancelled or it never synchronizes within the retry budget.
 	 *
+	 * @param {() => boolean} [isCancelled]
 	 * @returns {Promise<object|null>}
 	 */
-	function fetchTrackDataForCurrentUrl() {
+	function fetchTrackDataForCurrentUrl(isCancelled) {
+		cancelActiveFetch?.()
 		return new Promise((resolve) => {
 			const videoId = getVideoIdFromUrl()
-			if (!videoId) {
+			if (!videoId || isCancelled?.()) {
 				resolve(null)
 				return
 			}
 
 			let attempts = 0
+			let timerId = null
+			let settled = false
+
+			const finish = (result) => {
+				if (settled) return
+				settled = true
+				if (timerId !== null) {
+					clearTimeout(timerId)
+					timerId = null
+				}
+				if (cancelActiveFetch === cancel) {
+					cancelActiveFetch = null
+				}
+				resolve(result)
+			}
+
+			const cancel = () => finish(null)
+			cancelActiveFetch = cancel
+
 			const tick = () => {
+				timerId = null
+				if (settled || isCancelled?.()) {
+					finish(null)
+					return
+				}
 				const response = readPlayerResponse(videoId)
 				const data = extractTrackData(response, videoId)
 				if (data) {
-					resolve(data)
+					finish(data)
 					return
 				}
 				attempts += 1
@@ -301,10 +329,10 @@
 					warn(
 						`Gave up waiting for ytInitialPlayerResponse to sync with v=${videoId} after ${attempts} tries`
 					)
-					resolve(null)
+					finish(null)
 					return
 				}
-				setTimeout(tick, STALE_RETRY_DELAY_MS)
+				timerId = setTimeout(tick, STALE_RETRY_DELAY_MS)
 			}
 			tick()
 		})
@@ -848,30 +876,48 @@
 	//  ROUTE HANDLING
 	// ═══════════════════════════════════════════════════════════════════
 
-	let lastRenderedVideoId = null
+	let lastRenderedData = null
 	let routeSeq = 0
+
+	function isSameTrackData(a, b) {
+		return (
+			Boolean(a && b) &&
+			a.videoId === b.videoId &&
+			a.title === b.title &&
+			a.author === b.author &&
+			a.lengthSeconds === b.lengthSeconds &&
+			a.viewCount === b.viewCount &&
+			a.category === b.category &&
+			a.publishDate === b.publishDate &&
+			a.description === b.description &&
+			a.keywords.length === b.keywords.length &&
+			a.keywords.every((k, i) => k === b.keywords[i])
+		)
+	}
 
 	async function handleRoute() {
 		const mySeq = ++routeSeq
+		cancelActiveFetch?.()
 		if (window.location.pathname !== '/watch' || !getVideoIdFromUrl()) {
 			removePanel()
-			lastRenderedVideoId = null
+			lastRenderedData = null
 			return
 		}
 
-		const data = await fetchTrackDataForCurrentUrl()
+		const data = await fetchTrackDataForCurrentUrl(() => mySeq !== routeSeq)
 		if (mySeq !== routeSeq) return
 		if (!data) {
 			warn('No track data available — hiding panel')
 			removePanel()
-			lastRenderedVideoId = null
+			lastRenderedData = null
 			return
 		}
 
 		// Avoid re-rendering the same track repeatedly if yt-navigate-finish
-		// fires multiple times for one load.
-		if (data.videoId === lastRenderedVideoId) return
-		lastRenderedVideoId = data.videoId
+		// fires multiple times for one load, unless the panel was detached
+		// or metadata filled in since the previous render.
+		if (document.getElementById(PANEL_ID) && isSameTrackData(data, lastRenderedData)) return
+		lastRenderedData = data
 		mountPanel(data)
 	}
 

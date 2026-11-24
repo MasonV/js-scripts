@@ -26,9 +26,9 @@ export const BLOCKS = [
   { name: 'steam-redeem', template: 'tools/blocks/steam-redeem.template.js' },
 ]
 
-const SKIP_DIRS = new Set(['.git', '.claude', 'archive', 'node_modules', 'diagnostics'])
+export const SKIP_DIRS = new Set(['.git', '.claude', '.autodev', 'archive', 'node_modules', 'diagnostics'])
 
-function walk(root, dir = root) {
+export function walk(root, dir = root) {
   const entries = fs.readdirSync(dir, { withFileTypes: true })
   const files = []
 
