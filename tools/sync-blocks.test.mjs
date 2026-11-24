@@ -139,6 +139,206 @@ test('isNewerVersion falls back to inequality for pre-release or non-numeric str
   assert.equal(isNewerVersion('1.2.0-beta.1', '1.2.0-beta.1'), false)
 })
 
+function makeUpdateCheckHarness({
+  scriptVersion = '1.0.0',
+  now = 1_000_000_000_000,
+  storageThrows = false,
+} = {}) {
+  let currentNow = now
+  const localMap = new Map()
+  const sessionMap = new Map()
+  const xhrCalls = []
+  const openedUrls = []
+  const elementsById = new Map()
+  const prepended = []
+
+  const makeStorage = map => ({
+    getItem(k) {
+      if (storageThrows) throw new Error('storage disabled')
+      return map.has(k) ? map.get(k) : null
+    },
+    setItem(k, v) {
+      if (storageThrows) throw new Error('storage disabled')
+      map.set(k, String(v))
+    },
+    removeItem(k) {
+      if (storageThrows) throw new Error('storage disabled')
+      map.delete(k)
+    },
+  })
+
+  const fakeDoc = {
+    body: {
+      prepend(el) {
+        prepended.push(el)
+        if (el.id) elementsById.set(el.id, el)
+      },
+    },
+    getElementById(id) {
+      return elementsById.get(id) || null
+    },
+    createElement(tag) {
+      const listeners = {}
+      const children = []
+      const el = {
+        tag,
+        id: '',
+        type: '',
+        textContent: '',
+        style: {},
+        children,
+        listeners,
+        addEventListener(evt, fn) {
+          listeners[evt] = fn
+        },
+        append(...nodes) {
+          children.push(...nodes)
+        },
+        remove() {
+          if (this.id) elementsById.delete(this.id)
+          const idx = prepended.indexOf(this)
+          if (idx !== -1) prepended.splice(idx, 1)
+        },
+      }
+      return el
+    },
+  }
+
+  const fakeWindow = {
+    open(...args) {
+      openedUrls.push(args)
+    },
+  }
+
+  const fakeDate = {
+    now() {
+      return currentNow
+    },
+  }
+
+  const silentConsole = { log() {}, warn() {}, error() {} }
+
+  const exported = evalBlocks(
+    ['update-check'],
+    [
+      'checkForUpdate',
+      'showUpdateBanner',
+      'UPDATE_BANNER_ID',
+      'UPDATE_CHECKED_AT_KEY',
+      'UPDATE_REMOTE_VERSION_KEY',
+      'UPDATE_COOLDOWN_MS',
+      'DOWNLOAD_URL',
+    ],
+    {
+      SCRIPT_VERSION: scriptVersion,
+      LOG_PREFIX: '[Test Script]',
+      localStorage: makeStorage(localMap),
+      sessionStorage: makeStorage(sessionMap),
+      document: fakeDoc,
+      window: fakeWindow,
+      Date: fakeDate,
+      console: silentConsole,
+      GM_xmlhttpRequest(opts) {
+        xhrCalls.push(opts)
+      },
+    },
+  )
+
+  return {
+    ...exported,
+    localMap,
+    sessionMap,
+    xhrCalls,
+    openedUrls,
+    prepended,
+    elementsById,
+    advanceTime(ms) {
+      currentNow += ms
+    },
+  }
+}
+
+test('checkForUpdate fetches on first run, caches timestamp & remote version, and shows banner when newer', () => {
+  const h = makeUpdateCheckHarness({ scriptVersion: '1.0.0' })
+  h.checkForUpdate()
+  assert.equal(h.xhrCalls.length, 1)
+
+  h.xhrCalls[0].onload({ status: 200, responseText: '// @version 1.1.0\n' })
+  assert.equal(h.localMap.get('test_script_update_checked_at'), '1000000000000')
+  assert.equal(h.localMap.get('test_script_update_remote_version'), '1.1.0')
+  assert.equal(h.prepended.length, 1)
+
+  // Clicking message opens DOWNLOAD_URL with noopener,noreferrer
+  const banner = h.prepended[0]
+  const messageSpan = banner.children[0]
+  messageSpan.listeners.click()
+  assert.deepEqual(h.openedUrls, [[h.DOWNLOAD_URL, '_blank', 'noopener,noreferrer']])
+})
+
+test('checkForUpdate within cooldown skips network fetch and still shows banner for cached newer version', () => {
+  const h = makeUpdateCheckHarness({ scriptVersion: '1.0.0' })
+  h.checkForUpdate()
+  h.xhrCalls[0].onload({ status: 200, responseText: '// @version 1.2.0\n' })
+  assert.equal(h.xhrCalls.length, 1)
+  assert.equal(h.prepended.length, 1)
+
+  // Simulate navigating to a new page 1 hour later (clear banner DOM, keep storage)
+  h.prepended[0].remove()
+  assert.equal(h.prepended.length, 0)
+  h.advanceTime(60 * 60 * 1000)
+
+  h.checkForUpdate()
+  assert.equal(h.xhrCalls.length, 1) // no new XHR
+  assert.equal(h.prepended.length, 1) // banner re-shown from cache
+})
+
+test('checkForUpdate within cooldown stays silent when cached version is not newer or was dismissed', () => {
+  const h = makeUpdateCheckHarness({ scriptVersion: '1.2.0' })
+  h.checkForUpdate()
+  h.xhrCalls[0].onload({ status: 200, responseText: '// @version 1.2.0\n' })
+  assert.equal(h.xhrCalls.length, 1)
+  assert.equal(h.prepended.length, 0)
+
+  h.advanceTime(30 * 60 * 1000)
+  h.checkForUpdate()
+  assert.equal(h.xhrCalls.length, 1)
+  assert.equal(h.prepended.length, 0)
+
+  // Now simulate cached newer version that gets dismissed
+  const h2 = makeUpdateCheckHarness({ scriptVersion: '1.0.0' })
+  h2.checkForUpdate()
+  h2.xhrCalls[0].onload({ status: 200, responseText: '// @version 1.3.0\n' })
+  assert.equal(h2.prepended.length, 1)
+
+  const dismissBtn = h2.prepended[0].children[1]
+  dismissBtn.listeners.click()
+  assert.equal(h2.prepended.length, 0)
+
+  h2.advanceTime(10 * 60 * 1000)
+  h2.checkForUpdate()
+  assert.equal(h2.xhrCalls.length, 1)
+  assert.equal(h2.prepended.length, 0)
+})
+
+test('checkForUpdate fetches again after cooldown expires', () => {
+  const h = makeUpdateCheckHarness({ scriptVersion: '1.0.0' })
+  h.checkForUpdate()
+  h.xhrCalls[0].onload({ status: 200, responseText: '// @version 1.0.0\n' })
+  assert.equal(h.xhrCalls.length, 1)
+
+  h.advanceTime(h.UPDATE_COOLDOWN_MS + 1)
+  h.checkForUpdate()
+  assert.equal(h.xhrCalls.length, 2)
+})
+
+test('checkForUpdate fails open cleanly when storage throws', () => {
+  const h = makeUpdateCheckHarness({ scriptVersion: '1.0.0', storageThrows: true })
+  h.checkForUpdate()
+  assert.equal(h.xhrCalls.length, 1)
+  h.xhrCalls[0].onload({ status: 200, responseText: '// @version 1.1.0\n' })
+  assert.equal(h.prepended.length, 1)
+})
+
 let injectedCss = ''
 const fakeDocument = {
   createElement() {

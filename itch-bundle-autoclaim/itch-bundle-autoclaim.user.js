@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Itch Bundle Autoclaim
 // @namespace    itch-bundle-autoclaim
-// @version      1.3.1
+// @version      1.3.2
 // @description  Claims all unclaimed games on an itch.io bundle download page, with automatic pagination
 // @match        https://itch.io/bundle/download/*
 // @homepageURL  https://github.com/MasonV/js-scripts
@@ -189,11 +189,14 @@
     // ═══════════════════════════════════════════════════════════════════
     //  UPDATE CHECK
     //  Generated from tools/update-check.template.js — do not edit here.
-    //  Change the template, then run: node tools/sync-update-check.mjs
+    //  Change the template, then run: node tools/sync-blocks.mjs
     // ═══════════════════════════════════════════════════════════════════
 
     const UPDATE_BANNER_ID = 'itch-bundle-autoclaim-update-banner'
     const UPDATE_DISMISS_KEY = 'itch_bundle_autoclaim_update_dismissed_v'
+    const UPDATE_CHECKED_AT_KEY = 'itch_bundle_autoclaim_update_checked_at'
+    const UPDATE_REMOTE_VERSION_KEY = 'itch_bundle_autoclaim_update_remote_version'
+    const UPDATE_COOLDOWN_MS = 6 * 60 * 60 * 1000
 
     // Tampermonkey exposes the script's own metadata block, so these URLs
     // don't have to be hand-maintained in two places. Greasemonkey 4 does
@@ -239,6 +242,26 @@
         }
     }
 
+    function getCachedUpdateState() {
+        try {
+            const checkedAt = Number(localStorage.getItem(UPDATE_CHECKED_AT_KEY) || 0)
+            const remote = localStorage.getItem(UPDATE_REMOTE_VERSION_KEY) || ''
+            return { checkedAt, remote }
+        } catch {
+            return { checkedAt: 0, remote: '' }
+        }
+    }
+
+    function setCachedUpdateState(checkedAt, remote) {
+        try {
+            localStorage.setItem(UPDATE_CHECKED_AT_KEY, String(checkedAt))
+            if (remote) localStorage.setItem(UPDATE_REMOTE_VERSION_KEY, String(remote))
+            else localStorage.removeItem(UPDATE_REMOTE_VERSION_KEY)
+        } catch {
+            /* storage unavailable — fall back to uncached checks */
+        }
+    }
+
     function checkForUpdate() {
         // A dev install has no GM_info version to compare against, so every
         // remote version would look like an update.
@@ -246,15 +269,24 @@
             console.log(`${LOG_PREFIX} Dev build — skipping update check.`)
             return
         }
+        const now = Date.now()
+        const cached = getCachedUpdateState()
+        if (cached.checkedAt > 0 && now - cached.checkedAt < UPDATE_COOLDOWN_MS) {
+            if (cached.remote && isNewerVersion(cached.remote, SCRIPT_VERSION)) {
+                showUpdateBanner(cached.remote)
+            }
+            return
+        }
         try {
             GM_xmlhttpRequest({
                 method: 'GET',
-                url: META_URL + '?_=' + Date.now(),
+                url: META_URL + '?_=' + now,
                 onload(resp) {
                     if (resp.status !== 200) return
                     const match = resp.responseText.match(/@version\s+(\S+)/)
                     if (!match) return
                     const remote = match[1]
+                    setCachedUpdateState(Date.now(), remote)
                     if (isNewerVersion(remote, SCRIPT_VERSION)) {
                         console.log(`${LOG_PREFIX} Update available: v${SCRIPT_VERSION} → v${remote}`)
                         showUpdateBanner(remote)
@@ -307,7 +339,7 @@
             message.textContent = `⬆ ${name} v${remote} available (you have v${SCRIPT_VERSION}) — click to update`
             Object.assign(message.style, { cursor: 'pointer', textDecoration: 'underline' })
             message.addEventListener('click', () => {
-                window.open(DOWNLOAD_URL, '_blank')
+                window.open(DOWNLOAD_URL, '_blank', 'noopener,noreferrer')
             })
 
             const dismiss = document.createElement('button')
