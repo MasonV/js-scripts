@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YourTube
 // @namespace    yourtube
-// @version      1.2.2
+// @version      1.2.3
 // @description  YouTube without the garbage — duration filtering, and more features to come
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
@@ -380,6 +380,72 @@
 		return parts.join(' ')
 	}
 
+	/**
+	 * Parses and validates a single duration input string for the settings UI.
+	 * Returns { ok, value, status, message } where status is 'empty' | 'valid' | 'error'.
+	 */
+	function parseDurationField(rawInput) {
+		const raw = rawInput == null ? '' : String(rawInput).trim()
+		if (!raw) {
+			return {
+				ok: true,
+				value: null,
+				status: 'empty',
+				message: '(no bound — all durations allowed)',
+			}
+		}
+		const secs = parseDuration(raw)
+		if (secs == null || Number.isNaN(secs)) {
+			return {
+				ok: false,
+				value: null,
+				status: 'error',
+				message: "couldn't parse that",
+			}
+		}
+		return {
+			ok: true,
+			value: secs,
+			status: 'valid',
+			message: `= ${formatDuration(secs)}`,
+		}
+	}
+
+	/**
+	 * Validates the (shorterThan, longerThan) input pair, including the
+	 * cross-field range check (shorterThan must not exceed longerThan).
+	 */
+	function validateDurationPair(shorterRaw, longerRaw) {
+		const shorter = parseDurationField(shorterRaw)
+		const longer = parseDurationField(longerRaw)
+		const rangeError =
+			shorter.ok &&
+			longer.ok &&
+			shorter.value != null &&
+			longer.value != null &&
+			shorter.value > longer.value
+
+		if (rangeError) {
+			return {
+				ok: false,
+				rangeError: true,
+				shorter: { ...shorter, status: 'error' },
+				longer: {
+					...longer,
+					status: 'error',
+					message: 'must be \u2265 minimum duration',
+				},
+			}
+		}
+
+		return {
+			ok: shorter.ok && longer.ok,
+			rangeError: false,
+			shorter,
+			longer,
+		}
+	}
+
 	// ═══════════════════════════════════════════════════════════════════
 	//  FEATURE: DURATION FILTER (subscription feed)
 	//
@@ -472,16 +538,110 @@
 			return ''
 		}
 
+		// Candidate badge, overlay, and metadata containers inside a tile where
+		// state labels (LIVE, PREMIERE, UPCOMING, SHORTS) legitimately appear.
+		const STATE_BADGE_SELECTORS = [
+			'ytd-thumbnail-overlay-time-status-renderer',
+			'thumbnail-overlay-badge-view-model',
+			'yt-thumbnail-badge-view-model',
+			'yt-thumbnail-overlay-badge-view-model',
+			'ytd-badge-supported-renderer',
+			'yt-badge-view-model',
+			'badge-shape',
+			'.badge-shape-wiz',
+			'.badge-shape-wiz__text',
+			'.yt-badge-shape',
+			'.yt-badge-shape__text',
+			'.badge',
+			'[overlay-style]',
+			'#overlays',
+			'#time-status',
+			'#metadata-line',
+			'.inline-metadata-item',
+			'ytd-thumbnail',
+			'yt-thumbnail-view-model',
+			'[class*="badge"]',
+			'[class*="overlay"]',
+			'[class*="time-status"]',
+		].join(', ')
+
+		// Video title, heading, and channel/author selectors that must never be
+		// scanned for state keywords (prevents false positives on titles like
+		// "Adobe Premiere Pro Tutorial", "Live Concert", or "Summer Shorts").
+		const STATE_EXCLUDED_SELECTORS = [
+			'#video-title',
+			'#video-title-link',
+			'#channel-name',
+			'ytd-channel-name',
+			'#author-text',
+			'#avatar-link',
+			'.yt-lockup-metadata-view-model__title',
+			'.yt-lockup-metadata-view-model__heading-reset',
+			'h1',
+			'h2',
+			'h3',
+			'h4',
+			'[id*="title"]',
+			'[class*="title"]',
+			'[id*="channel"]',
+			'[class*="channel"]',
+			'[id*="author"]',
+			'[class*="author"]',
+		].join(', ')
+
 		/**
-		 * Detects live/premiere/shorts state by scanning tile text for the
-		 * canonical badge labels. Used as a fallback when the badge element
-		 * itself isn't found by selector.
+		 * Pure helper: classifies badge/overlay/metadata text into a tile state
+		 * ('live' | 'premiere' | 'short' | null).
 		 */
-		function detectStateFromText(tile) {
-			const text = (tile.textContent || '').toUpperCase()
-			if (/\bLIVE\b/.test(text)) return 'live'
+		function classifyStateText(rawText) {
+			if (!rawText) return null
+			const text = String(rawText).toUpperCase()
+			if (/\bLIVE\b/.test(text) && !/\bSTREAMED\s+LIVE\b/.test(text)) return 'live'
 			if (/\bPREMIERE/.test(text) || /\bUPCOMING\b/.test(text)) return 'premiere'
 			if (/\bSHORTS\b/.test(text)) return 'short'
+			return null
+		}
+
+		/**
+		 * Extracts text from a candidate badge/overlay/metadata node while
+		 * stripping any descendant title, heading, or channel-name elements.
+		 */
+		function readNonExcludedText(node) {
+			if (!node) return ''
+			if (typeof node.matches === 'function' && node.matches(STATE_EXCLUDED_SELECTORS)) {
+				return ''
+			}
+			if (typeof node.closest === 'function' && node.closest(STATE_EXCLUDED_SELECTORS)) {
+				return ''
+			}
+			if (
+				typeof node.cloneNode === 'function' &&
+				typeof node.querySelectorAll === 'function'
+			) {
+				const clone = node.cloneNode(true)
+				if (clone && typeof clone.querySelectorAll === 'function') {
+					clone
+						.querySelectorAll(STATE_EXCLUDED_SELECTORS)
+						.forEach((el) => el.remove?.())
+					return clone.textContent || ''
+				}
+			}
+			return node.textContent || ''
+		}
+
+		/**
+		 * Detects live/premiere/shorts state by scanning badge, overlay, and
+		 * metadata elements inside `tile` (excluding video title and channel
+		 * name nodes) for the canonical badge labels. Used as a fallback when
+		 * the primary time-status badge element isn't found by selector.
+		 */
+		function detectStateFromText(tile) {
+			if (!tile || typeof tile.querySelectorAll !== 'function') return null
+			const candidates = tile.querySelectorAll(STATE_BADGE_SELECTORS)
+			for (const node of candidates) {
+				const state = classifyStateText(readNonExcludedText(node))
+				if (state) return state
+			}
 			return null
 		}
 
@@ -1347,7 +1507,13 @@
 		}
 
 		function buildPanel() {
-			if (panelBuilt && document.getElementById(PANEL_ID)) return false
+			if (
+				panelBuilt &&
+				document.getElementById(PANEL_ID) &&
+				document.getElementById(OVERLAY_ID)
+			) {
+				return false
+			}
 			// Same reasoning as mountGear: mount to documentElement, not
 			// body. See SettingsUI.mountGear for context.
 			const root = document.documentElement
@@ -1355,6 +1521,9 @@
 				ulog.warn('buildPanel: document.documentElement not ready, deferring')
 				return false
 			}
+			// Remove any stale overlay or panel left behind after partial DOM pruning
+			// so rebuilding never leaves duplicate #yourtube-settings-overlay nodes.
+			document.querySelectorAll(`#${OVERLAY_ID}, #${PANEL_ID}`).forEach((el) => el.remove())
 			// Reset the flag if we're rebuilding after YouTube removed
 			// our panel from the DOM (SPA navigation, app shell swap).
 			panelBuilt = true
@@ -1490,28 +1659,42 @@
 
 		// ── Live preview ───────────────────────────────────────────────
 
-		function attachLivePreview(input, panel) {
-			const previewEl = panel.querySelector(
-				`.yourtube-preview[data-preview-for="${input.id}"]`,
-			)
-			const update = () => {
-				const raw = input.value.trim()
-				if (!raw) {
-					input.classList.remove('yourtube-error')
-					previewEl.className = 'yourtube-preview yourtube-preview-empty'
-					previewEl.textContent = '(no bound — all durations allowed)'
-					return
-				}
-				const secs = parseDuration(raw)
-				if (secs == null || Number.isNaN(secs)) {
-					input.classList.add('yourtube-error')
-					previewEl.className = 'yourtube-preview yourtube-preview-error'
-					previewEl.textContent = "couldn't parse that"
-					return
-				}
-				input.classList.remove('yourtube-error')
+		function applyFieldState(inputEl, previewEl, fieldState) {
+			if (!inputEl || !previewEl) return
+			inputEl.classList.toggle('yourtube-error', fieldState.status === 'error')
+			if (fieldState.status === 'empty') {
+				previewEl.className = 'yourtube-preview yourtube-preview-empty'
+			} else if (fieldState.status === 'error') {
+				previewEl.className = 'yourtube-preview yourtube-preview-error'
+			} else {
 				previewEl.className = 'yourtube-preview'
-				previewEl.textContent = `= ${formatDuration(secs)}`
+			}
+			previewEl.textContent = fieldState.message
+		}
+
+		function validateFormDurations(root = document) {
+			const shorterInput =
+				root?.querySelector?.(`#${FIELD_SHORTER}`) || document.getElementById(FIELD_SHORTER)
+			const longerInput =
+				root?.querySelector?.(`#${FIELD_LONGER}`) || document.getElementById(FIELD_LONGER)
+			const shorterPreview =
+				root?.querySelector?.(`.yourtube-preview[data-preview-for="${FIELD_SHORTER}"]`) ||
+				document.querySelector(`.yourtube-preview[data-preview-for="${FIELD_SHORTER}"]`)
+			const longerPreview =
+				root?.querySelector?.(`.yourtube-preview[data-preview-for="${FIELD_LONGER}"]`) ||
+				document.querySelector(`.yourtube-preview[data-preview-for="${FIELD_LONGER}"]`)
+			const result = validateDurationPair(
+				shorterInput ? shorterInput.value : '',
+				longerInput ? longerInput.value : '',
+			)
+			applyFieldState(shorterInput, shorterPreview, result.shorter)
+			applyFieldState(longerInput, longerPreview, result.longer)
+			return result
+		}
+
+		function attachLivePreview(input, panel) {
+			const update = () => {
+				validateFormDurations(panel)
 			}
 			input.addEventListener('input', update)
 			update()
@@ -1523,6 +1706,7 @@
 			const s = getSettings().duration
 			const shorterEl = document.getElementById(FIELD_SHORTER)
 			const longerEl = document.getElementById(FIELD_LONGER)
+			if (!shorterEl || !longerEl) return
 			shorterEl.value = s.shorterThan != null ? formatDuration(s.shorterThan) : ''
 			longerEl.value = s.longerThan != null ? formatDuration(s.longerThan) : ''
 			// Fire input events so the live-preview updates.
@@ -1546,45 +1730,23 @@
 			return el ? el.classList.contains('yourtube-on') : false
 		}
 
-		function readFormDuration(fieldId) {
-			const raw = document.getElementById(fieldId).value.trim()
-			if (!raw) return { ok: true, value: null }
-			const secs = parseDuration(raw)
-			if (secs == null || Number.isNaN(secs)) return { ok: false, value: null }
-			return { ok: true, value: secs }
-		}
-
 		// ── Button handlers ────────────────────────────────────────────
 
 		function onApply() {
-			const shorter = readFormDuration(FIELD_SHORTER)
-			const longer = readFormDuration(FIELD_LONGER)
-			if (!shorter.ok || !longer.ok) {
+			const validation = validateFormDurations(document)
+			if (!validation.shorter.ok || !validation.longer.ok) {
 				ulog.warn('Apply blocked — one or more fields cannot be parsed')
 				return
 			}
-			const shorterInput = document.getElementById(FIELD_SHORTER)
-			const longerInput = document.getElementById(FIELD_LONGER)
-			shorterInput?.classList.remove('yourtube-error')
-			longerInput?.classList.remove('yourtube-error')
-			if (shorter.value != null && longer.value != null && shorter.value > longer.value) {
-				shorterInput?.classList.add('yourtube-error')
-				longerInput?.classList.add('yourtube-error')
-				const longerPreview = document.querySelector(
-					`.yourtube-preview[data-preview-for="${FIELD_LONGER}"]`,
-				)
-				if (longerPreview) {
-					longerPreview.className = 'yourtube-preview yourtube-preview-error'
-					longerPreview.textContent = 'must be \u2265 minimum duration'
-				}
+			if (validation.rangeError) {
 				ulog.warn('Apply blocked — shorterThan exceeds longerThan')
 				return
 			}
 			const next = {
 				...getSettings(),
 				duration: {
-					shorterThan: shorter.value,
-					longerThan: longer.value,
+					shorterThan: validation.shorter.value,
+					longerThan: validation.longer.value,
 					hideShorts: getBreaker(BREAKER_SHORTS),
 					hideLive: getBreaker(BREAKER_LIVE),
 					hidePremieres: getBreaker(BREAKER_PREMIERES),
@@ -1618,13 +1780,23 @@
 		// ── Open / close ───────────────────────────────────────────────
 
 		function openPanel() {
-			if (panelOpen) return
+			ensureMounted()
+			const overlay = document.getElementById(OVERLAY_ID)
+			const panel = document.getElementById(PANEL_ID)
+			if (!overlay || !panel) {
+				ulog.warn('openPanel: panel not mounted')
+				return
+			}
+			if (panelOpen && panel.classList.contains('yourtube-open')) return
 			panelOpen = true
 			loadFormFromSettings()
-			document.getElementById(OVERLAY_ID).classList.add('yourtube-open')
-			document.getElementById(PANEL_ID).classList.add('yourtube-open')
+			overlay.classList.add('yourtube-open')
+			panel.classList.add('yourtube-open')
 			// ESC closes the panel. Bind once per open so we don't accumulate
 			// listeners; unbind on close.
+			if (escHandler) {
+				document.removeEventListener('keydown', escHandler)
+			}
 			escHandler = (e) => {
 				if (e.key === 'Escape') closePanel()
 			}
@@ -1661,7 +1833,7 @@
 			if (!document.getElementById(GEAR_ID)) {
 				if (mountGear()) changed = true
 			}
-			if (!document.getElementById(PANEL_ID)) {
+			if (!document.getElementById(PANEL_ID) || !document.getElementById(OVERLAY_ID)) {
 				// Reset flag so buildPanel rebuilds from scratch.
 				panelBuilt = false
 				if (buildPanel()) changed = true
