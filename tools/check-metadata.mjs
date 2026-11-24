@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
 
 const ROOT = process.cwd()
 const SKIP_DIRS = new Set([
@@ -12,7 +13,7 @@ const SKIP_DIRS = new Set([
   'diagnostics',
 ])
 
-const COMPARED_KEYS = [
+export const COMPARED_KEYS = [
   'name',
   'namespace',
   'version',
@@ -26,6 +27,7 @@ const COMPARED_KEYS = [
   'grant',
   'connect',
   'run-at',
+  'noframes',
 ]
 
 function walk(dir) {
@@ -51,8 +53,7 @@ function walk(dir) {
   return files
 }
 
-function parseUserscriptHeader(file) {
-  const text = fs.readFileSync(path.join(ROOT, file), 'utf8')
+export function parseUserscriptHeaderText(text) {
   const block = text.match(/\/\/ ==UserScript==([\s\S]*?)\/\/ ==\/UserScript==/)
   if (!block) {
     return { meta: {}, text, error: 'missing userscript metadata block' }
@@ -60,14 +61,18 @@ function parseUserscriptHeader(file) {
 
   const meta = {}
   for (const line of block[1].split(/\r?\n/)) {
-    const match = line.match(/^\s*\/\/\s+@(\S+)\s+(.*)$/)
+    const match = line.match(/^\s*\/\/\s+@(\S+)(?:\s+(.*))?$/)
     if (!match) continue
-    const [, key, value] = match
+    const [, key, value = ''] = match
     if (!meta[key]) meta[key] = []
     meta[key].push(value.trim())
   }
 
   return { meta, text, error: null }
+}
+
+function parseUserscriptHeader(file) {
+  return parseUserscriptHeaderText(fs.readFileSync(path.join(ROOT, file), 'utf8'))
 }
 
 function groupedScripts(files) {
@@ -89,7 +94,7 @@ function values(meta, key) {
   return meta[key] || []
 }
 
-function sameValues(left, right, key) {
+export function sameValues(left, right, key) {
   return JSON.stringify(values(left, key)) === JSON.stringify(values(right, key))
 }
 
@@ -121,96 +126,100 @@ function scriptBody(text) {
   return end === -1 ? text : text.slice(end)
 }
 
-let errors = 0
-let warnings = 0
+export function main() {
+  let errors = 0
+  let warnings = 0
 
-for (const [group, files] of groupedScripts(walk(ROOT))) {
-  const groupErrors = []
-  const groupWarnings = []
+  for (const [group, files] of groupedScripts(walk(ROOT))) {
+    const groupErrors = []
+    const groupWarnings = []
 
-  if (!files.user) groupErrors.push('missing .user.js')
-  if (!files.meta) groupErrors.push('missing .meta.js')
+    if (!files.user) groupErrors.push('missing .user.js')
+    if (!files.meta) groupErrors.push('missing .meta.js')
 
-  if (files.user && files.meta) {
-    const user = parseUserscriptHeader(files.user)
-    const meta = parseUserscriptHeader(files.meta)
+    if (files.user && files.meta) {
+      const user = parseUserscriptHeader(files.user)
+      const meta = parseUserscriptHeader(files.meta)
 
-    if (user.error) groupErrors.push(`${files.user}: ${user.error}`)
-    if (meta.error) groupErrors.push(`${files.meta}: ${meta.error}`)
+      if (user.error) groupErrors.push(`${files.user}: ${user.error}`)
+      if (meta.error) groupErrors.push(`${files.meta}: ${meta.error}`)
 
-    if (!user.error && !meta.error) {
-      for (const key of COMPARED_KEYS) {
-        if (!sameValues(user.meta, meta.meta, key)) {
-          groupErrors.push(`@${key} differs between .user.js and .meta.js`)
+      if (!user.error && !meta.error) {
+        for (const key of COMPARED_KEYS) {
+          if (!sameValues(user.meta, meta.meta, key)) {
+            groupErrors.push(`@${key} differs between .user.js and .meta.js`)
+          }
         }
-      }
 
-      if (literalScriptVersion(user.text)) {
-        groupErrors.push('SCRIPT_VERSION should read GM_info.script.version instead of a literal version')
-      }
-      if (!usesGmInfoVersion(user.text)) {
-        groupErrors.push('SCRIPT_VERSION should use GM_info.script.version')
-      }
+        if (literalScriptVersion(user.text)) {
+          groupErrors.push('SCRIPT_VERSION should read GM_info.script.version instead of a literal version')
+        }
+        if (!usesGmInfoVersion(user.text)) {
+          groupErrors.push('SCRIPT_VERSION should use GM_info.script.version')
+        }
 
-      const updateUrl = values(user.meta, 'updateURL')[0] || ''
-      const downloadUrl = values(user.meta, 'downloadURL')[0] || ''
-      const scriptDir = path.basename(path.dirname(files.user))
-      const rawBase = `https://raw.githubusercontent.com/MasonV/js-scripts/main/${scriptDir}/${scriptDir}`
-      const namespace = values(user.meta, 'namespace')[0] || ''
-      if (namespace !== scriptDir) groupErrors.push(`@namespace should equal directory name (${scriptDir})`)
-      if (updateUrl !== `${rawBase}.meta.js`) groupErrors.push(`@updateURL should be ${rawBase}.meta.js`)
-      if (downloadUrl !== `${rawBase}.user.js`) groupErrors.push(`@downloadURL should be ${rawBase}.user.js`)
+        const updateUrl = values(user.meta, 'updateURL')[0] || ''
+        const downloadUrl = values(user.meta, 'downloadURL')[0] || ''
+        const scriptDir = path.basename(path.dirname(files.user))
+        const rawBase = `https://raw.githubusercontent.com/MasonV/js-scripts/main/${scriptDir}/${scriptDir}`
+        const namespace = values(user.meta, 'namespace')[0] || ''
+        if (namespace !== scriptDir) groupErrors.push(`@namespace should equal directory name (${scriptDir})`)
+        if (updateUrl !== `${rawBase}.meta.js`) groupErrors.push(`@updateURL should be ${rawBase}.meta.js`)
+        if (downloadUrl !== `${rawBase}.user.js`) groupErrors.push(`@downloadURL should be ${rawBase}.user.js`)
 
-      if (!hasUpdateCheckMarkers(user.text)) {
-        groupErrors.push('missing // <update-check> … // </update-check> region (run: node tools/sync-blocks.mjs)')
-      }
-      if (!definesUpdateCheck(user.text)) groupErrors.push('no checkForUpdate() defined')
-      if (!callsUpdateCheck(user.text)) groupErrors.push('checkForUpdate() is defined but never called')
+        if (!hasUpdateCheckMarkers(user.text)) {
+          groupErrors.push('missing // <update-check> … // </update-check> region (run: node tools/sync-blocks.mjs)')
+        }
+        if (!definesUpdateCheck(user.text)) groupErrors.push('no checkForUpdate() defined')
+        if (!callsUpdateCheck(user.text)) groupErrors.push('checkForUpdate() is defined but never called')
 
-      const grants = values(user.meta, 'grant')
-      const body = scriptBody(user.text)
+        const grants = values(user.meta, 'grant')
+        const body = scriptBody(user.text)
 
-      if (grants.includes('GM_xmlhttpRequest') && !values(user.meta, 'connect').includes('raw.githubusercontent.com')) {
-        groupErrors.push('@grant GM_xmlhttpRequest requires @connect raw.githubusercontent.com')
-      }
+        if (grants.includes('GM_xmlhttpRequest') && !values(user.meta, 'connect').includes('raw.githubusercontent.com')) {
+          groupErrors.push('@grant GM_xmlhttpRequest requires @connect raw.githubusercontent.com')
+        }
 
-      // unsafeWindow is a scope switch, not a callable API, so it's exempt.
-      for (const grant of grants) {
-        if (grant === 'unsafeWindow' || grant === 'none') continue
-        if (!new RegExp(`\\b${grant}\\b`).test(body)) {
-          groupErrors.push(`@grant ${grant} is never used`)
+        // unsafeWindow is a scope switch, not a callable API, so it's exempt.
+        for (const grant of grants) {
+          if (grant === 'unsafeWindow' || grant === 'none') continue
+          if (!new RegExp(`\\b${grant}\\b`).test(body)) {
+            groupErrors.push(`@grant ${grant} is never used`)
+          }
         }
       }
     }
+
+    if (groupErrors.length || groupWarnings.length) {
+      console.log(`\n${group}`)
+      for (const message of groupErrors) console.log(`  error: ${message}`)
+      for (const message of groupWarnings) console.log(`  warn:  ${message}`)
+    }
+
+    errors += groupErrors.length
+    warnings += groupWarnings.length
   }
 
-  if (groupErrors.length || groupWarnings.length) {
-    console.log(`\n${group}`)
-    for (const message of groupErrors) console.log(`  error: ${message}`)
-    for (const message of groupWarnings) console.log(`  warn:  ${message}`)
+  // Generated regions (update-check and the opt-in shared blocks) are owned by
+  // sync-blocks.mjs, so ask it whether any file has drifted from its template.
+  const sync = spawnSync(process.execPath, [path.join('tools', 'sync-blocks.mjs'), '--check'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  })
+
+  if (sync.status !== 0) {
+    console.log(`\ngenerated blocks out of sync (run: node tools/sync-blocks.mjs):`)
+    console.log(sync.stdout.trimEnd())
+    errors++
   }
 
-  errors += groupErrors.length
-  warnings += groupWarnings.length
+  if (errors || warnings) {
+    console.log(`\nMetadata check: ${errors} error(s), ${warnings} warning(s)`)
+  } else {
+    console.log('Metadata check: ok')
+  }
+
+  if (errors) process.exit(1)
 }
 
-// Generated regions (update-check and the opt-in shared blocks) are owned by
-// sync-blocks.mjs, so ask it whether any file has drifted from its template.
-const sync = spawnSync(process.execPath, [path.join('tools', 'sync-blocks.mjs'), '--check'], {
-  cwd: ROOT,
-  encoding: 'utf8',
-})
-
-if (sync.status !== 0) {
-  console.log(`\ngenerated blocks out of sync (run: node tools/sync-blocks.mjs):`)
-  console.log(sync.stdout.trimEnd())
-  errors++
-}
-
-if (errors || warnings) {
-  console.log(`\nMetadata check: ${errors} error(s), ${warnings} warning(s)`)
-} else {
-  console.log('Metadata check: ok')
-}
-
-if (errors) process.exit(1)
+if (import.meta.url === pathToFileURL(process.argv[1]).href) main()
