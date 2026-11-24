@@ -36,6 +36,7 @@ function loadPureLogic() {
 		'computeRatingBackoffMs',
 		'pruneRatingTimestamps',
 		'computeRatingRateWaitMs',
+		'recordRatingFailure',
 	]
 	// eslint-disable-next-line no-new-func
 	return new Function(
@@ -227,4 +228,65 @@ test('pruneRatingTimestamps & computeRatingRateWaitMs enforce 60/min rate cap', 
 
 	const atCap = Array.from({ length: 60 }, (_, i) => 60_000 + i * 500)
 	assert.equal(L.computeRatingRateWaitMs(atCap, now, 60, 60_000), 20_000)
+})
+
+test('recordRatingFailure halts at threshold and ignores subsequent concurrent failures', () => {
+	const f1 = L.recordRatingFailure(0, null, new Error('HTTP 503'), 3, 100, 10000)
+	assert.deepEqual(f1, {
+		ignored: false,
+		consecutiveFailures: 1,
+		haltedReason: null,
+		justHalted: false,
+		delayMs: 200,
+	})
+
+	const f2 = L.recordRatingFailure(
+		f1.consecutiveFailures,
+		f1.haltedReason,
+		new Error('HTTP 503'),
+		3,
+		100,
+		10000
+	)
+	assert.deepEqual(f2, {
+		ignored: false,
+		consecutiveFailures: 2,
+		haltedReason: null,
+		justHalted: false,
+		delayMs: 400,
+	})
+
+	const f3 = L.recordRatingFailure(
+		f2.consecutiveFailures,
+		f2.haltedReason,
+		new Error('HTTP 503'),
+		3,
+		100,
+		10000
+	)
+	assert.deepEqual(f3, {
+		ignored: false,
+		consecutiveFailures: 3,
+		haltedReason: 'HTTP 503',
+		justHalted: true,
+		delayMs: 800,
+	})
+
+	// 4th concurrent in-flight failure after halt must be ignored: does not increment
+	// consecutiveFailures past 3, overwrite haltedReason, or re-trigger justHalted.
+	const f4 = L.recordRatingFailure(
+		f3.consecutiveFailures,
+		f3.haltedReason,
+		new Error('HTTP 500'),
+		3,
+		100,
+		10000
+	)
+	assert.deepEqual(f4, {
+		ignored: true,
+		consecutiveFailures: 3,
+		haltedReason: 'HTTP 503',
+		justHalted: false,
+		delayMs: 0,
+	})
 })

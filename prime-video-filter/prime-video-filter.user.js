@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Prime Video Filter
 // @namespace    prime-video-filter
-// @version      0.2.2
+// @version      0.2.3
 // @description  Hide Prime Video titles you can't watch with Prime, titles you've already watched, and titles below an IMDb rating you choose
 // @match        https://www.primevideo.com/*
 // @match        https://www.amazon.com/gp/video/*
@@ -298,6 +298,40 @@
 		return Math.max(0, oldestInWindow + windowMs - now)
 	}
 
+	function recordRatingFailure(
+		consecutiveFailures,
+		haltedReason,
+		error,
+		maxFailures = 3,
+		baseGapMs = 100,
+		maxBackoffMs = 10000
+	) {
+		if (haltedReason != null) {
+			return {
+				ignored: true,
+				consecutiveFailures,
+				haltedReason,
+				justHalted: false,
+				delayMs: 0,
+			}
+		}
+		const nextFailures = Math.max(0, Math.floor(Number(consecutiveFailures) || 0)) + 1
+		const retryAfterMs =
+			error && typeof error.retryAfterMs === 'number' ? error.retryAfterMs : 0
+		const delayMs = computeRatingBackoffMs(baseGapMs, nextFailures, retryAfterMs, maxBackoffMs)
+		const justHalted = nextFailures >= maxFailures
+		const nextHaltedReason = justHalted
+			? (error && error.message) || 'request failed'
+			: null
+		return {
+			ignored: false,
+			consecutiveFailures: nextFailures,
+			haltedReason: nextHaltedReason,
+			justHalted,
+			delayMs,
+		}
+	}
+
 	// ═══════════════════════════════════════════════════════════════════
 	//  SETTINGS
 	// ═══════════════════════════════════════════════════════════════════
@@ -528,21 +562,26 @@
 				})
 				.catch((e) => {
 					failedRatingKeys.add(job.key)
-					consecutiveRatingFailures++
-					const retryAfterMs = e && typeof e.retryAfterMs === 'number' ? e.retryAfterMs : 0
-					const delayMs = computeRatingBackoffMs(
-						RATING_FETCH_GAP_MS,
+					const outcome = recordRatingFailure(
 						consecutiveRatingFailures,
-						retryAfterMs,
+						ratingHaltedReason,
+						e,
+						RATING_MAX_CONSECUTIVE_FAILURES,
+						RATING_FETCH_GAP_MS,
 						RATING_MAX_BACKOFF_MS
 					)
-					ratingBackoffUntil = Math.max(ratingBackoffUntil, Date.now() + delayMs)
+					if (outcome.ignored) {
+						scheduleApply()
+						return
+					}
+					consecutiveRatingFailures = outcome.consecutiveFailures
+					ratingBackoffUntil = Math.max(ratingBackoffUntil, Date.now() + outcome.delayMs)
 					warn(
 						`Rating lookup failed for ${job.key} (${consecutiveRatingFailures}/${RATING_MAX_CONSECUTIVE_FAILURES}):`,
 						e
 					)
-					if (consecutiveRatingFailures >= RATING_MAX_CONSECUTIVE_FAILURES) {
-						ratingHaltedReason = (e && e.message) || 'request failed'
+					if (outcome.justHalted) {
+						ratingHaltedReason = outcome.haltedReason
 						ratingQueue.length = 0
 						if (ratingPumpTimer) {
 							clearTimeout(ratingPumpTimer)
@@ -751,7 +790,21 @@
 	}
 
 	function startWatching() {
+		let lastHref = location.href
+		const checkUrlChange = () => {
+			if (location.href !== lastHref) {
+				lastHref = location.href
+				scheduleApply()
+				return true
+			}
+			return false
+		}
+		window.addEventListener('popstate', checkUrlChange)
+		if (typeof navigation !== 'undefined' && typeof navigation.addEventListener === 'function') {
+			navigation.addEventListener('navigatesuccess', checkUrlChange)
+		}
 		new MutationObserver((mutations) => {
+			if (checkUrlChange()) return
 			for (const m of mutations) {
 				if (isOwnUi(m.target)) continue
 				for (const node of m.addedNodes) {
@@ -800,6 +853,7 @@
 	let launcherEl = null
 	let panelEl = null
 	let resetArmed = false
+	let resetTimer = null
 
 	function buildLauncher() {
 		if (document.getElementById(LAUNCHER_ID)) return
@@ -916,7 +970,8 @@
 				resetArmed = true
 				reset.textContent = '↺ Click again to reset'
 				reset.classList.add('pvf-armed')
-				setTimeout(disarmReset, 4000)
+				if (resetTimer) clearTimeout(resetTimer)
+				resetTimer = setTimeout(disarmReset, 4000)
 				return
 			}
 			disarmReset()
@@ -941,6 +996,10 @@
 	}
 
 	function disarmReset() {
+		if (resetTimer) {
+			clearTimeout(resetTimer)
+			resetTimer = null
+		}
 		resetArmed = false
 		const reset = panelEl?.querySelector('#pvf-reset')
 		if (!reset) return
