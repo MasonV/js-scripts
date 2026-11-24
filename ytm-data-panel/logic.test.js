@@ -145,12 +145,164 @@ describe('extractTrackData', () => {
 		})
 	})
 
-	test('rejects missing responses or mismatched videoIds', () => {
+	test('rejects missing responses, missing videoIds, or mismatched videoIds', () => {
 		assert.equal(extractTrackData(null, 'abc123'), null)
 		assert.equal(extractTrackData({}, 'abc123'), null)
+		assert.equal(extractTrackData({ videoDetails: {} }, 'abc123'), null)
+		assert.equal(extractTrackData({ videoDetails: { videoId: '' } }, 'abc123'), null)
+		assert.equal(extractTrackData({ videoDetails: {} }), null)
+		assert.equal(extractTrackData({ videoDetails: { videoId: '' } }), null)
 		assert.equal(
 			extractTrackData({ videoDetails: { videoId: 'old_id', title: 'Old' } }, 'new_id'),
 			null,
 		)
+	})
+
+	test('extracts metadata when videoId is present and expectedVideoId is omitted', () => {
+		const data = extractTrackData({
+			videoDetails: { videoId: 'abc123', title: 'Direct Track' },
+		})
+		assert.equal(data.videoId, 'abc123')
+		assert.equal(data.title, 'Direct Track')
+	})
+})
+
+function loadRouteHarness(env) {
+	const src = fs.readFileSync(path.join(__dirname, 'ytm-data-panel.user.js'), 'utf8')
+
+	const extractStart = src.indexOf('function extractTrackData(')
+	const chaptersHeader = src.indexOf('//  CHAPTER PARSING')
+	const chaptersSectionStart = src.lastIndexOf('// ════', chaptersHeader)
+	assert.ok(extractStart !== -1 && chaptersSectionStart !== -1, 'data extraction slice not found')
+	const dataSlice = src.slice(extractStart, chaptersSectionStart)
+
+	const routeHeader = src.indexOf('//  ROUTE HANDLING')
+	const routeStart = src.indexOf('═\n', routeHeader) + 2
+	const initHeader = src.indexOf('//  INIT', routeStart)
+	const initSectionStart = src.lastIndexOf('// ════', initHeader)
+	assert.ok(routeHeader !== -1 && initSectionStart !== -1, 'route handling slice not found')
+	const routeSlice = src.slice(routeStart, initSectionStart)
+
+	const factory = new Function(
+		'env',
+		`
+		"use strict";
+		const PANEL_ID = 'ytmdp-panel';
+		const STALE_RETRY_LIMIT = env.STALE_RETRY_LIMIT ?? 15;
+		const STALE_RETRY_DELAY_MS = env.STALE_RETRY_DELAY_MS ?? 100;
+		const warn = (...args) => env.warnings.push(args.join(' '));
+		const getVideoIdFromUrl = () => env.getVideoIdFromUrl();
+		const readPlayerResponse = (id) => env.readPlayerResponse(id);
+		const mountPanel = (data) => env.mountPanel(data);
+		const removePanel = () => env.removePanel();
+		const window = env.window;
+		const document = env.document;
+		const setTimeout = env.setTimeout;
+		const clearTimeout = env.clearTimeout;
+		${dataSlice}
+		${routeSlice}
+		return { handleRoute, fetchTrackDataForCurrentUrl };
+		`,
+	)
+	return factory(env)
+}
+
+describe('handleRoute & retry cancellation', () => {
+	test('cancels superseded retry timers without extra polling or timeout warnings', async () => {
+		let nextTimerId = 1
+		const timers = new Map()
+		const cleared = []
+		const mounted = []
+		const warnings = []
+		let panelMounted = false
+		let currentVideoId = 'v1'
+		let playerResponse = { videoDetails: {} }
+
+		const harness = loadRouteHarness({
+			STALE_RETRY_LIMIT: 3,
+			STALE_RETRY_DELAY_MS: 100,
+			warnings,
+			window: { location: { pathname: '/watch' } },
+			document: {
+				getElementById: () => (panelMounted ? {} : null),
+			},
+			getVideoIdFromUrl: () => currentVideoId,
+			readPlayerResponse: () => playerResponse,
+			mountPanel: (data) => {
+				panelMounted = true
+				mounted.push(data)
+			},
+			removePanel: () => {
+				panelMounted = false
+			},
+			setTimeout: (fn) => {
+				const id = nextTimerId++
+				timers.set(id, fn)
+				return id
+			},
+			clearTimeout: (id) => {
+				cleared.push(id)
+				timers.delete(id)
+			},
+		})
+
+		const firstRoute = harness.handleRoute()
+		assert.equal(timers.size, 1, 'should schedule first retry timer for empty shell')
+
+		// Supersede with a new route that has populated track metadata.
+		currentVideoId = 'v2'
+		playerResponse = { videoDetails: { videoId: 'v2', title: 'Second Track' } }
+		const secondRoute = harness.handleRoute()
+
+		await Promise.all([firstRoute, secondRoute])
+		assert.equal(cleared.length, 1, 'superseded retry timer should be cleared')
+		assert.equal(timers.size, 0, 'no dangling timers should remain')
+		assert.equal(warnings.length, 0, 'should not log stale timeout warning')
+		assert.equal(mounted.length, 1)
+		assert.equal(mounted[0].videoId, 'v2')
+		assert.equal(mounted[0].title, 'Second Track')
+	})
+
+	test('re-renders when panel is detached or metadata becomes populated, and skips identical re-renders', async () => {
+		let panelMounted = false
+		const mounted = []
+		let playerResponse = { videoDetails: { videoId: 'abc123', title: '' } }
+
+		const harness = loadRouteHarness({
+			warnings: [],
+			window: { location: { pathname: '/watch' } },
+			document: {
+				getElementById: () => (panelMounted ? {} : null),
+			},
+			getVideoIdFromUrl: () => 'abc123',
+			readPlayerResponse: () => playerResponse,
+			mountPanel: (data) => {
+				panelMounted = true
+				mounted.push(data)
+			},
+			removePanel: () => {
+				panelMounted = false
+			},
+			setTimeout: globalThis.setTimeout,
+			clearTimeout: globalThis.clearTimeout,
+		})
+
+		await harness.handleRoute()
+		assert.equal(mounted.length, 1)
+
+		// Identical track data while panel is still mounted should be skipped.
+		await harness.handleRoute()
+		assert.equal(mounted.length, 1)
+
+		// Metadata populated for the same videoId should trigger a re-render.
+		playerResponse = { videoDetails: { videoId: 'abc123', title: 'Populated Title' } }
+		await harness.handleRoute()
+		assert.equal(mounted.length, 2)
+		assert.equal(mounted[1].title, 'Populated Title')
+
+		// Detached panel should re-render even with identical track data.
+		panelMounted = false
+		await harness.handleRoute()
+		assert.equal(mounted.length, 3)
 	})
 })
